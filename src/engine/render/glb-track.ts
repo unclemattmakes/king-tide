@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { ExportedKind, resolveNodeKind } from '@/engine/asset-kinds'
 import { playerSettings } from '@/engine/player-settings'
 import { clearBrushTargets } from '@/engine/render/brush-tuning-service'
+import { type CollisionCorridor, clipTrianglesToCorridor } from '@/engine/render/collision-corridor'
 import { applyDecalsToScene } from '@/engine/render/decal-system'
 import { applyFoliageSwayToMesh } from '@/engine/render/foliage-sway'
 import { applyLavaRiverMaterialToScene } from '@/engine/render/lava-river-material'
@@ -195,6 +196,15 @@ export async function loadGlbTrackVisuals(
  * (Pre-2026-05 the rule was opt-IN via `kind = "track"`; we flipped it
  * because decorative-only meshes are the rare case.)
  *
+ * When `corridor` is supplied (the track has a racing line), each mesh is
+ * clipped to the playable corridor first: triangles entirely outside the
+ * out-of-bounds hard-leash + margin are dropped, and a mesh with nothing in
+ * the corridor gets no collider at all. The bike dies past the hard leash, so
+ * this only removes collision the player can never legally touch — e.g. the
+ * far seabed/hills of a 1 km island that are all out of bounds. See
+ * collision-corridor.ts for the safety argument. `corridor = null/undefined`
+ * collides everything (legacy; procedural tracks + lineless tracks).
+ *
  * The track group should already be added to the scene (or its world
  * matrix manually updated) before calling.
  */
@@ -243,9 +253,17 @@ export async function loadColliderProxy(url: string): Promise<THREE.Object3D | n
   }
 }
 
-export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld): number {
+export function attachTrackColliders(
+  group: THREE.Object3D,
+  phys: PhysicsWorld,
+  corridor?: CollisionCorridor | null,
+): number {
   group.updateMatrixWorld(true)
   let attached = 0
+  // Corridor-clip tallies (only meaningful when `corridor` is set).
+  let trisDropped = 0
+  let meshesSkipped = 0
+  let meshesFellBack = 0
   group.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return
     // Resolve `kind` through the parent chain: three.js splits a
@@ -308,33 +326,53 @@ export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld):
       worldVerts[i * 3 + 2] = v.z
     }
 
-    // Double-sided index list (each triangle emitted both windings).
-    // Rapier trimeshes are one-sided; if Blender's normals point the wrong
-    // way relative to the bike's approach, the raycast misses. Doubling
-    // the triangles is orientation-independent and cheap for static terrain.
+    // Full triangle list into worldVerts (the GLB index, or a synthesized
+    // 0..n run for non-indexed geometry).
     let baseIndices: ArrayLike<number>
-    let baseLen: number
     const index = geom.index
     if (index) {
       baseIndices = index.array
-      baseLen = index.array.length
     } else {
       const synth = new Uint32Array(posAttr.count)
       for (let i = 0; i < posAttr.count; i++) synth[i] = i
       baseIndices = synth
-      baseLen = synth.length
     }
-    const indices = new Uint32Array(baseLen * 2)
-    for (let i = 0; i < baseLen; i += 3) {
-      const a = baseIndices[i] as number
-      const b = baseIndices[i + 1] as number
-      const c = baseIndices[i + 2] as number
+
+    // Corridor clip — collide only triangles within reach of the racing line.
+    // A mesh entirely out of bounds gets no collider; one that somehow keeps
+    // nothing yet overlaps the corridor (a frame surprise) is collided whole.
+    let keepIndices: ArrayLike<number> = baseIndices
+    if (corridor) {
+      const res = clipTrianglesToCorridor(worldVerts, baseIndices, corridor)
+      if (res.kept.length === 0) {
+        if (res.overlapsCorridor) {
+          meshesFellBack += 1
+        } else {
+          meshesSkipped += 1
+          return
+        }
+      } else {
+        keepIndices = res.kept
+        trisDropped += res.total - res.kept.length / 3
+      }
+    }
+    const keepLen = keepIndices.length
+
+    // Double-sided index list (each triangle emitted both windings).
+    // Rapier trimeshes are one-sided; if Blender's normals point the wrong
+    // way relative to the bike's approach, the raycast misses. Doubling
+    // the triangles is orientation-independent and cheap for static terrain.
+    const indices = new Uint32Array(keepLen * 2)
+    for (let i = 0; i < keepLen; i += 3) {
+      const a = keepIndices[i] as number
+      const b = keepIndices[i + 1] as number
+      const c = keepIndices[i + 2] as number
       indices[i] = a
       indices[i + 1] = b
       indices[i + 2] = c
-      indices[baseLen + i] = a
-      indices[baseLen + i + 1] = c
-      indices[baseLen + i + 2] = b
+      indices[keepLen + i] = a
+      indices[keepLen + i + 1] = c
+      indices[keepLen + i + 2] = b
     }
 
     const rbDesc = phys.rapier.RigidBodyDesc.fixed()
@@ -364,5 +402,13 @@ export function attachTrackColliders(group: THREE.Object3D, phys: PhysicsWorld):
     if (surface) phys.surfaces.tag(created.handle, surface)
     attached += 1
   })
+  if (corridor && (trisDropped > 0 || meshesSkipped > 0 || meshesFellBack > 0)) {
+    // eslint-disable-next-line no-console
+    console.info(
+      `[collision-corridor] dropped ${trisDropped} out-of-bounds triangles, skipped ${meshesSkipped} far meshes` +
+        (meshesFellBack > 0 ? `, ${meshesFellBack} kept whole (corridor fallback)` : '') +
+        ` (cutoff ${Math.round(corridor.cutoffM)} m)`,
+    )
+  }
   return attached
 }

@@ -22,6 +22,7 @@ import * as THREE from 'three'
 import { assetUrl } from '@/engine/asset-url'
 import { createIslandMesh } from '@/engine/render/arena-mesh'
 import { createCliffsideMesh } from '@/engine/render/cliffside-mesh'
+import { type CollisionCorridor, makeCollisionCorridor } from '@/engine/render/collision-corridor'
 import {
   attachTrackColliders,
   loadColliderProxy,
@@ -35,12 +36,29 @@ import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { createLagoonIsland, createSafetyFloor } from '@/game/entities/arena'
 import { createCliffsideTerrain } from '@/game/entities/cliffside-terrain'
 import { createRamp } from '@/game/entities/ramp'
+import { leashFor } from '@/game/systems/out-of-bounds'
 import { createCliffside } from '@/game/tracks/cliffside'
 import { loadTrackFromGlb } from '@/game/tracks/glb-loader'
 import { buildTrackFromJson } from '@/game/tracks/json-loader'
 import { createLagoonLoop } from '@/game/tracks/lagoon-loop'
 import type { Track } from '@/game/tracks/types'
 import { emptyDraftTrack } from './utils'
+
+/**
+ * Corridor used to clip out-of-bounds geometry from the static collision
+ * (collision-corridor.ts). Built from the track's racing line + the
+ * out-of-bounds hard-leash, so collision is only dropped where the bike would
+ * already be dead. Null when the track has no usable line (collide everything)
+ * or when disabled via `?clipcollision=0`.
+ */
+function collisionCorridorFor(track: Track): CollisionCorridor | null {
+  if (typeof window !== 'undefined') {
+    if (new URLSearchParams(window.location.search).get('clipcollision') === '0') return null
+  }
+  const leash = leashFor(track)
+  if (!leash) return null
+  return makeCollisionCorridor(leash.points, leash.hard)
+}
 
 export type LoadedTrack = {
   track: Track
@@ -183,11 +201,12 @@ export async function loadTrackForBoot(opts: {
       // over a fraction of the render mesh's triangles — the bulk of the
       // `track+env` boot cost. Falls back to colliding the render geometry when
       // no proxy is shipped. The heightmap below still bakes from the high-poly
-      // mesh, so water shoaling + the intro raycast are unchanged.
+      // mesh, so water shoaling + the intro raycast are unchanged. The corridor
+      // then clips whichever mesh we collide down to the playable band.
       const colliderProxy = await loadColliderProxy(
         assetUrl(track.environmentGlb.replace(/\.glb$/i, '-collider.glb')),
       )
-      attachTrackColliders(colliderProxy ?? env.scene, phys)
+      attachTrackColliders(colliderProxy ?? env.scene, phys, collisionCorridorFor(track))
       terrainRoots.push(env.scene)
       horizonGeometry = env.horizonGeometry
       environmentGlbRoot = env.scene
@@ -229,9 +248,10 @@ export async function loadTrackForBoot(opts: {
         terrainShader: { waterLevel: track.water?.height ?? 0 },
       })
       scene.add(env.scene)
-      // Same decimated-collision-proxy preference as the JSON-track path above.
+      // Same decimated-collision-proxy preference as the JSON-track path above,
+      // with the corridor clip applied to whichever mesh we collide.
       const colliderProxy = await loadColliderProxy(glbUrl.replace(/\.glb$/i, '-collider.glb'))
-      attachTrackColliders(colliderProxy ?? env.scene, phys)
+      attachTrackColliders(colliderProxy ?? env.scene, phys, collisionCorridorFor(track))
       terrainRoots.push(env.scene)
       horizonGeometry = env.horizonGeometry
       environmentGlbRoot = env.scene

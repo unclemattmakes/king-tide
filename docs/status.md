@@ -32,6 +32,39 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
+> **Last updated: 2026-06-21** — **Levels: static collision is now clipped to
+> the playable corridor (stop colliding out-of-bounds terrain).** Most of a
+> dressed map's terrain is out of bounds — the OOB system leashes the bike to
+> the racing line and kills it past 2.5× the corridor half-width, yet
+> `attachTrackColliders` was building a Rapier trimesh for the WHOLE island
+> (seabed + far hills the bike dies before touching), paying collider build +
+> memory + the both-windings double for all of it. The loader now derives a
+> corridor from the racing line + the OOB **hard-leash** and passes it to
+> `attachTrackColliders`: per mesh, triangles whose nearest point is beyond
+> `hard-leash + 60 m` (floored at 150 m) from the line are dropped, and a mesh
+> entirely out of bounds gets **no collider**. Safe by construction — the
+> cutoff is always strictly past the lethal wall, and the keep test is
+> conservative by each triangle's longest edge, so it can never drop a triangle
+> with any point inside the cutoff (proven headlessly: a Rapier ray cast down
+> from every point within the hard leash still hits ground; far-OOB casts
+> correctly miss). Visuals + the water heightmap are untouched (they read the
+> render meshes, not the collider). New pure module
+> [collision-corridor.ts](../src/engine/render/collision-corridor.ts) +
+> [tests/unit/collision-corridor.test.ts](../tests/unit/collision-corridor.test.ts);
+> `?clipcollision=0` restores collide-everything. Procedural tracks (lagoon,
+> cliffside) and any lineless track are unaffected. Gates green
+> (typecheck/test/lint/build); the load-time/memory **magnitude** wants a
+> headed run on pulled assets to quantify (the safety property is the part
+> proven here). Branch `claude/level-design-perf-ifx6t6`.
+>
+> _Investigated but **not** done, with reasons: a shadow "corridor" gate is
+> redundant — the sun shadow is a ±90 m orthographic follow-box on the player
+> ([scene.ts](../src/engine/render/scene.ts)), so three already frustum-culls
+> far casters; the lap-1 compile-stream levers already shipped (async warm +
+> `sizePerObject` vinyl sharing); props are already instanced entities, not
+> level geo; and camera-based section streaming isn't justified by the measured
+> profile (CPU/shadow-caster-bound, not draw-bound — see perf-baseline)._
+
 > **Last updated: 2026-06-17** — **Water perf: the three retired overlays
 > DELETED (not just defaulted off).** Follow-up to the look pass below: the
 > `contourBreakup`, `langmuir` and `riseStroke` layers shipped at 0 but TSL

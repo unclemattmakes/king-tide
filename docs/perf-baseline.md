@@ -127,7 +127,8 @@ pnpm build && node tools/bench-prod.mjs # production-build rows
 
 `frame-ablation.mjs` is the water kit's sibling for the REST of the frame:
 one boot per structural axis (`?shadows=0`, `?shadowmap=512`, `?post=0`,
-`?aa=off`, `?reflect=0`, `?ai=5`) plus a live scenery-hidden row
+`?aa=off`, `?reflect=0`, `?ai=5`, `?clipcollision=0` = collide all OOB
+terrain) plus a live scenery-hidden row
 (`__hover.scenery()`), each with the `?gpuprofile=1` GPU-pass average so
 CPU and GPU attribution land in the same table. `bench-prod.mjs` drives the
 production-safe `?bench=1` director against a `pnpm preview` of `dist/`
