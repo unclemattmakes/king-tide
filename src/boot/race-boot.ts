@@ -163,6 +163,33 @@ import { deriveFallbackTheme, getTrackTheme } from '@/game/tracks/theme-catalog'
  * Pure helpers (downloadReplay, emptyDraftTrack, ordinal, formatTime)
  * live in `src/boot/utils.ts`.
  */
+
+/** Failsafe ceiling on how long the loading screen stays up waiting for the
+ *  deferred scenery warm before the single-player cinematic intro starts. The
+ *  point of the hold is that the fly-through plays over a fully-dressed scene
+ *  instead of sweeping the map while buildings pop in and shaders compile (what
+ *  the player saw when the intro started the instant the loader dropped). The
+ *  warm is run under the loader at high concurrency (WARM_CONCURRENCY_INTRO) so
+ *  it finishes well inside this ceiling on real hardware — the heaviest shipped
+ *  track (Mexico City, ~140 deferred meshes) lands around ~13–15 s. This is only
+ *  the never-hang backstop: if `progWarm.onDone` never fires (compile rejects,
+ *  pathological GPU) the loader drops anyway and the in-loop post-intro hold
+ *  (game-loop.ts → SCENERY_WARM_HOLD_CAP_MS) catches whatever tail remains.
+ *  Only ever waited on when a cinematic actually plays — `introMode === 'off'`
+ *  (multiplayer, `?skipintro=1`, bench, the user's opt-out) drops the loader
+ *  immediately, so the e2e suite (which boots `?skipintro=1`) is unaffected. */
+const INTRO_WARM_LOADER_CAP_MS = 20_000
+
+/** Pipeline-groups compiled concurrently while warming the deferred scenery
+ *  UNDER the loading screen for the intro path. Higher = a shorter loader (the
+ *  serial reveal is ~26 s on Mexico City; ~15 s at 8, ~13 s at 16), but more
+ *  in-flight GPU pipeline compiles at once. 8 captures the bulk of the speedup
+ *  while keeping the parallel-compile pressure modest for low-end targets
+ *  (Steam Deck / integrated GPUs). The background reveal that streams in during
+ *  live racing (no-intro modes) stays at concurrency 1 so it never bursts
+ *  compiles into a racing frame. */
+const WARM_CONCURRENCY_INTRO = 8
+
 /**
  * The full live-race boot (phases 2–8 above). Loaded on demand by the thin
  * `src/main.ts` entry shell ONLY when the URL dispatch falls through to a
@@ -1866,8 +1893,18 @@ export async function bootRace(appEl: HTMLElement) {
   // best-effort: progressive-warm falls back to the visibility-only reveal
   // without one, and reveals a mesh anyway if its compile rejects.
   let sceneryWarmComplete = true
+  // Resolves the moment the deferred scenery warm has compiled + revealed every
+  // mesh (or immediately when nothing was deferred). The single-player intro
+  // path awaits this — see the loader hold below — so the cinematic never sweeps
+  // the map while buildings are still popping in. Defaulted to a no-op so the
+  // `else` (no progWarm) path still settles the promise.
+  let markSceneryWarmDone: () => void = () => {}
+  const sceneryWarmDone = new Promise<void>((resolve) => {
+    markSceneryWarmDone = resolve
+  })
   if (progWarm) {
     sceneryWarmComplete = progWarm.count === 0
+    if (sceneryWarmComplete) markSceneryWarmDone()
     const warmPipeline = getActivePostPipeline()
     const warmRenderer = renderer as unknown as {
       compileAsync?: (scene: unknown, camera: unknown, targetScene?: unknown) => Promise<void>
@@ -1878,12 +1915,21 @@ export async function bootRace(appEl: HTMLElement) {
         : typeof warmRenderer.compileAsync === 'function'
           ? (o) => warmRenderer.compileAsync?.(o, camera, scene) ?? Promise.resolve()
           : undefined,
+      // Intro path: the reveal runs under the loading screen (the hold below
+      // awaits it), with no live gameplay to protect — so compile groups in
+      // parallel to keep that loader as short as the GPU allows. No-intro modes
+      // stream the reveal in DURING racing, where one-group-per-frame (1) keeps
+      // each compile off the hot frame.
+      concurrency: introMode !== 'off' ? WARM_CONCURRENCY_INTRO : 1,
       onDone: () => {
         sceneryWarmComplete = true
+        markSceneryWarmDone()
         bootMark('scenery')
         bootReport()
       },
     })
+  } else {
+    markSceneryWarmDone()
   }
 
   // Phase 8 — game loop. Replay playback gets a separate frame that
@@ -1920,6 +1966,27 @@ export async function bootRace(appEl: HTMLElement) {
       },
     })
     return
+  }
+
+  // Loader hold — keep the loading screen up until the deferred scenery has
+  // compiled + revealed, so the single-player cinematic intro plays over a
+  // fully-dressed scene rather than starting the instant the loader drops and
+  // sweeping the map while buildings pop in + shaders compile. The reveal runs
+  // on its own rAF (progressive-warm.ts) and completes whether or not the game
+  // loop is running, so awaiting it here just defers the loader drop + intro
+  // start. Capped (INTRO_WARM_LOADER_CAP_MS) so a stalled/slow warm can never
+  // hang boot; the in-loop post-intro hold catches any remaining tail. No-op
+  // for every no-intro mode (`introMode === 'off'`) and for tracks with no
+  // deferred scenery (procedural / `?progwarm=0`), where the promise is already
+  // settled — so today's immediate behaviour is preserved everywhere else.
+  if (introMode !== 'off' && !sceneryWarmComplete) {
+    setLoadingMessage('Dressing the track…')
+    await Promise.race([
+      sceneryWarmDone,
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, INTRO_WARM_LOADER_CAP_MS)
+      }),
+    ])
   }
 
   bootStat('vinylMaterials', vinylMaterialsBuilt())

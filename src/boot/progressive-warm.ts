@@ -40,10 +40,20 @@ export type SubtreeCompiler = (object: THREE.Object3D) => Promise<void>
 
 export type RevealOptions = {
   /** Meshes made visible per rAF step on the legacy (no-compile) path.
-   *  Default 2. The compiled path paces itself: one pipeline-group per frame. */
+   *  Default 2. The compiled path paces itself: one pipeline-group per frame
+   *  (or `concurrency` groups per frame). */
   perFrame?: number
   /** Async pre-compiler; when present each mesh is warmed before reveal. */
   compile?: SubtreeCompiler | undefined
+  /** How many pipeline-groups to compile concurrently on the compiled path.
+   *  Default 1 — one group per frame, the gentle background pace used while the
+   *  game loop is live (so a reveal never bursts compiles into a racing frame).
+   *  Bump it well above 1 ONLY when revealing under the loading screen (no
+   *  gameplay to protect): on a heavy track the serial reveal is ~26 s, and
+   *  compiling groups in parallel collapses that to ~15 s at 8 / ~13 s at 16
+   *  (measured, Mexico City — diminishing returns past ~8 as the GPU pipeline
+   *  queue saturates). Clamped to ≥1. */
+  concurrency?: number
   /** Called once every mesh is back. */
   onDone?: () => void
 }
@@ -74,7 +84,7 @@ export function deferSceneryWarm(meshes: THREE.Mesh[]): ProgressiveWarm {
   return {
     count: meshes.length,
     reveal(opts: RevealOptions = {}) {
-      const { perFrame = 2, compile, onDone } = opts
+      const { perFrame = 2, compile, concurrency = 1, onDone } = opts
       const raf: Raf | null =
         typeof requestAnimationFrame === 'function' ? requestAnimationFrame : null
       if (!raf) {
@@ -83,7 +93,7 @@ export function deferSceneryWarm(meshes: THREE.Mesh[]): ProgressiveWarm {
         return
       }
       if (compile) {
-        void revealCompiled(meshes, compile, raf, onDone)
+        void revealCompiled(meshes, compile, raf, onDone, concurrency)
         return
       }
       let i = 0
@@ -154,49 +164,62 @@ function groupForWarm(meshes: THREE.Mesh[]): THREE.Mesh[][] {
 }
 
 /**
- * Warm-then-reveal, one pipeline-group at a time. For the group's lead mesh
- * the synchronous window around `compile()` flips `visible` on (and
- * `frustumCulled` off — the compile-path frustum is stale, and a culled mesh
- * would silently compile nothing, deferring the real compile to whenever the
- * racing camera first swings past it): `renderer.compileAsync`'s synchronous
- * prologue is what snapshots the render list, so the flags can be restored
- * before awaiting and no rAF frame ever renders the mesh uncompiled. Once the
- * lead's pipelines (and the shared material's textures) are resident, the
- * whole group reveals together. If a compile fails, the group is revealed
- * anyway — first sight then pays its own compile cost, exactly the
- * pre-warm-less behavior, correctness over smoothness.
+ * Warm-then-reveal, `concurrency` pipeline-groups per frame (default 1). For
+ * each group's lead mesh the synchronous window around `compile()` flips
+ * `visible` on (and `frustumCulled` off — the compile-path frustum is stale, and
+ * a culled mesh would silently compile nothing, deferring the real compile to
+ * whenever the racing camera first swings past it): `renderer.compileAsync`'s
+ * synchronous prologue is what snapshots the render list, so the flags can be
+ * restored before awaiting and no rAF frame ever renders the mesh uncompiled —
+ * and because the snapshot is taken per lead while only that lead is visible,
+ * several leads can be kicked off in one frame and awaited together without
+ * cross-contaminating each other's render list. Once a group's lead pipelines
+ * (and the shared material's textures) are resident, the whole group reveals
+ * together. If a compile fails, the group is revealed anyway — first sight then
+ * pays its own compile cost, exactly the pre-warm-less behavior, correctness
+ * over smoothness.
  */
 async function revealCompiled(
   meshes: THREE.Mesh[],
   compile: SubtreeCompiler,
   raf: Raf,
   onDone?: () => void,
+  concurrency = 1,
 ): Promise<void> {
   const nextFrame = (): Promise<void> => new Promise((resolve) => raf(() => resolve()))
-  for (const group of groupForWarm(meshes)) {
-    const lead = group[0]
-    if (!lead) continue
-    let compiled: Promise<void> | null = null
-    const cull = lead.frustumCulled
-    lead.visible = true
-    lead.frustumCulled = false
-    try {
-      compiled = compile(lead)
-    } catch {
-      compiled = null
-    } finally {
-      lead.visible = false
-      lead.frustumCulled = cull
-    }
-    if (compiled) {
+  const CONC = Math.max(1, Math.floor(concurrency))
+  const groups = groupForWarm(meshes)
+  for (let i = 0; i < groups.length; i += CONC) {
+    const batch = groups.slice(i, i + CONC)
+    const pending: Array<{ group: THREE.Mesh[]; compiled: Promise<void> | null }> = []
+    for (const group of batch) {
+      const lead = group[0]
+      if (!lead) continue
+      let compiled: Promise<void> | null = null
+      const cull = lead.frustumCulled
+      lead.visible = true
+      lead.frustumCulled = false
       try {
-        await compiled
+        compiled = compile(lead)
       } catch {
-        /* best-effort — reveal below; first sight pays its own compile */
+        compiled = null
+      } finally {
+        lead.visible = false
+        lead.frustumCulled = cull
       }
+      pending.push({ group, compiled })
     }
-    for (const m of group) m.visible = true
-    // One group per frame: spreads the members' first-sight bind-group +
+    for (const { group, compiled } of pending) {
+      if (compiled) {
+        try {
+          await compiled
+        } catch {
+          /* best-effort — reveal below; first sight pays its own compile */
+        }
+      }
+      for (const m of group) m.visible = true
+    }
+    // One batch per frame: spreads the members' first-sight bind-group +
     // geometry-upload work instead of bursting every group into one frame.
     await nextFrame()
   }
