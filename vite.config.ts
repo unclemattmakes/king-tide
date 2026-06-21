@@ -227,8 +227,34 @@ function makingOfInputs(): Record<string, string> {
   return inputs
 }
 
+/**
+ * First-run heads-up in the terminal. On a cold dep cache Vite pre-bundles the
+ * (large) three.js graph before it can serve, and that work holds the first
+ * request — so the browser sits BLANK (not even the inline loading screen) until
+ * it finishes. Nothing in the page can paint during that window, so the honest
+ * "it's working, hang on" signal has to live in the terminal: tell the dev to
+ * wait for `ready` before opening the browser. Fires only when the deps cache is
+ * absent (the genuine first run, or after `--force` / a dependency bump nukes
+ * it) so warm restarts stay quiet. Serve-only — never runs for `vite build`.
+ */
+function coldStartHintPlugin(): Plugin {
+  return {
+    name: 'hoverbike:cold-start-hint',
+    apply: 'serve',
+    config() {
+      const depsCache = path.resolve(REPO_ROOT, 'node_modules', '.vite', 'deps', '_metadata.json')
+      if (!fs.existsSync(depsCache)) {
+        console.log(
+          '\n  \x1b[36m[hoverbike]\x1b[0m First run — pre-bundling the three.js dependency graph (~10–20s).' +
+            '\n  The page stays blank until you see \x1b[1mready\x1b[0m below; open the browser then.\n',
+        )
+      }
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [trackEditorSavePlugin(), assetPipelineWatchPlugin()],
+  plugins: [coldStartHintPlugin(), trackEditorSavePlugin(), assetPipelineWatchPlugin()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -242,6 +268,17 @@ export default defineConfig({
     // smoke test still hits the running preview.
     strictPort: false,
     fs: { allow: [REPO_ROOT] },
+    // Pre-transform the entry + the two heavy boot graphs (race + cold-boot
+    // menu/attract) at server start, so the first navigation isn't paying their
+    // transform on the critical path. Pairs with the optimizeDeps tuning below.
+    warmup: {
+      clientFiles: [
+        './src/main.ts',
+        './src/boot/race-boot.ts',
+        './src/boot/attract-mode.ts',
+        './src/engine/menus/menu-flow.ts',
+      ],
+    },
   },
   build: {
     target: 'es2022',
@@ -254,6 +291,43 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
+    // Rapier ships hand-written WASM glue the dep pre-bundler can't follow —
+    // let Vite serve it untouched.
     exclude: ['@dimforge/rapier3d-compat'],
+    // ── Cold-start fix: the "blank page before KING TIDE on the first
+    // `pnpm dev` visit". ──────────────────────────────────────────────────
+    // On a cold dep cache Vite esbuild-SCANS the whole source graph to
+    // discover deps before it serves anything. On this Three.js-heavy graph
+    // that crawl runs ~40 s+ and holds the very first request — the HTML
+    // document included — so the browser sits BLANK (not even the inline
+    // loading screen) the whole time. `noDiscovery` skips that scan and
+    // pre-bundles only the modules listed here, at server startup
+    // ("bundling dependencies… → ready" in the terminal). A browser opened
+    // after "ready" then gets the HTML immediately and paints the loading
+    // screen instantly. Dev-only — `optimizeDeps` has no effect on the
+    // production build (the deployed site already paints KING TIDE in ~0.6 s).
+    //
+    // Trade-off: with discovery off, EVERY bare browser import under src/ must
+    // be listed here. Add a new npm dependency the game imports? Add it below.
+    // A missing CJS-only dep fails loudly at dev start (clear Vite error); a
+    // missing ESM dep just serves unbundled (slower, still works). This list
+    // mirrors the bare specifiers found under src/ — regenerate with:
+    //   grep -rhoE "from '[^.@/][^']*'|import\('[^.@/][^']*'\)" src | sed -E "s/.*'(.*)'.*/\1/" | sort -u
+    include: [
+      'three',
+      'three/webgpu',
+      'three/tsl',
+      'three/addons/controls/OrbitControls.js',
+      'three/addons/controls/TransformControls.js',
+      'three/addons/loaders/GLTFLoader.js',
+      'three/addons/tsl/display/BloomNode.js',
+      'three/addons/tsl/display/MotionBlur.js',
+      'three/addons/tsl/display/SobelOperatorNode.js',
+      'three/addons/utils/BufferGeometryUtils.js',
+      'three/addons/utils/SkeletonUtils.js',
+      'bitecs',
+      'partysocket',
+    ],
+    noDiscovery: true,
   },
 })

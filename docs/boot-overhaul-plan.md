@@ -156,3 +156,74 @@ reload over a live race page (teardown contention — see below):
   mexico-city steady-state p50 16.7 ms (see status.md + perf-baseline.md).
   Mexico City's remaining frame cost is its own draw count + the lap-1
   scenery stream — the vinyl-structural-sharing / content-diet items above.
+
+## 2026-06-21 — race-load re-profile + collision proxies + dev cold-start
+
+Re-profiled the race load on this machine (WebGPU, headed, warm dev server,
+median of 3 via a per-phase `window.__bootTrace` reader). Dressed-track totals
+land ~3.8–4.6 s. The category split is the headline — **the load is no longer
+prewarm-dominated**; it's spread, and one big cost was hiding inside a phase
+label:
+
+| Cost (sandbar) | ms | notes |
+|---|---|---|
+| Shader pre-warm (`warmEarly`+`warmFinal`) | ~1.9 s | still #1; mostly FIXED pipelines (water is the single biggest), not per-track — the vinyl-sharing follow-up above is still the lever |
+| **Rapier collider build** | **~0.6–0.9 s** | was hidden in the `track+env` phase; trimesh BVH over the full render geometry (sandbar 522k verts, doubled for raycast safety) |
+| Water mesh build | ~0.65 s | fixed tax every load (TSL graph + 512² plane); already cut 768²→512² |
+| Renderer + Rapier WASM init | ~0.4 s | fixed |
+| GLB parse | ~0.23 s | the part meshopt would help |
+| Heightmap bake | ~0.2 s | small |
+
+**The `track+env` phase is collider-dominated, not parse-dominated** (sandbar:
+collider 879 ms vs GLB parse 234 ms vs heightmap 200 ms). So shrinking the GLB
+(meshopt) is the *deployed-download* win, not the local-dev lever it looks like.
+
+What we ruled out: **Rapier-compat exposes no heightfield collider** (would have
+near-eliminated the terrain BVH), and the heightmap is 512² (~1.9 m cells) — too
+coarse to ride anyway. **Overlap** has ~no room: the post-pipeline warm is a
+blocking eager render (see "What we learned" above) and Rapier runs on the main
+thread, so nothing concurrent fills the gap.
+
+### Collision proxies (the collider lever)
+
+[`tools/blender/build_track_collider.py`](../tools/blender/build_track_collider.py)
+generates `<track>-collider.glb` — a **collapse-decimated, collide-only** copy of
+the collidable meshes, so Rapier's BVH builds over a fraction of the triangles.
+Collapse (quadric-error) not planar dissolve: dissolve makes n-gons the glTF
+exporter re-triangulates into duplicated verts (16 MB), collapse emits clean
+shared-index tris (4.4 MB at ratio 0.5) and drops normals/materials a collider
+never reads. **Keep `ratio` conservative — the hover ray rides the collider, so
+ramp lips / jump takeoffs are feel-critical; playtest before going lower.**
+
+Runtime ([`loadColliderProxy`](../src/engine/render/glb-track.ts) +
+[track-loader.ts](../src/boot/track-loader.ts)) is **backward-compatible**: if a
+track ships `<glb>-collider.glb` it colliders that; absent (legacy tracks) it
+colliders the render geometry exactly as before. The HEAD content-type guard
+sidesteps Vite's dev SPA fallback (missing static file → 200 + index.html).
+Heightmap + water shoaling still read the high-poly mesh.
+
+Sandbar pilot (ratio 0.5): `track+env` **1528 → 1170 ms (~358 ms)**, hover
+settled within **6 cm** of the render-mesh baseline (5.34 vs 5.28 m), 0 errors.
+Modest at the safe ratio — the proxy's own load eats some of the BVH saving.
+
+Open / remaining for a full roll-out:
+- **Tune `ratio` per track** (feel playtest) — 0.3–0.2 ~doubles the win.
+- **meshopt the proxy** so prod download doesn't regress (+4.4 MB/track now).
+- **Prefetch** the proxy load to overlap the env-GLB load.
+- Generate one per dressed track + `pnpm assets:push` (R2). Only `sandbar` has
+  one so far; every other track silently runs the legacy path.
+
+### Dev cold-start (the "blank page before KING TIDE on first `pnpm dev`")
+
+Separate from the in-app load: on a cold `node_modules/.vite` cache, Vite
+esbuild-**scans** the whole Three-heavy source graph (~40 s+) before serving
+anything, holding the first request — the browser sits blank (not even the
+inline loading screen) the whole time. Fixed in
+[vite.config.ts](../vite.config.ts): `optimizeDeps.noDiscovery` + an explicit
+`include` of every bare browser import skips the scan and pre-bundles at server
+startup (terminal-visible), `server.warmup` pre-transforms the entry/boot
+graphs, and `coldStartHintPlugin` prints a heads-up when the deps cache is
+absent. Deployed/warm loads were already fine (KING TIDE in ~0.2–0.6 s) — this
+is dev-only. **Maintenance: with discovery off, every NEW bare browser import
+must be added to `optimizeDeps.include`** (a missing CJS dep fails loudly at dev
+start; a missing ESM one just serves unbundled).
