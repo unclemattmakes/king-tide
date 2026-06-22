@@ -294,6 +294,35 @@ it's a per-track/per-tier call, not a global default.) This is the
 measure-don't-assume rule earning its keep: the skinned-rider hypothesis was
 plausible and wrong.
 
+**2026-06-22 — the per-track shadow-caster THRESHOLD is not a lever; the PASS
+is (re-confirmed).** A project-eval pass floated making the shadow-caster size
+gate per-track tier-aware (raise the 6 m threshold on dressed tracks). A fresh
+frame-ablation on this box (mexico-city, 8 bikes, 720p, `&progwarm=0`) closes
+that idea: with the decoration merge in the build, the gate has almost nothing
+left to cull, so a higher per-track threshold would buy ~nothing while costing
+building shadows.
+
+| mexico-city config | FPS | p50 ms | Draw calls |
+|---|---|---|---|
+| baseline (6 m gate) | 63.1 | 16.6 | 263 |
+| `?shadowcast=0` (gate off, cull nothing) | 61.6 | 16.6 | 270 |
+| `?shadows=0` (whole depth pass off) | 74.4 | 11.2 | 175 |
+
+The gate moves only **7 draws** (270→263) post-merge — i.e. the merge already
+consolidated the small casters, exactly as the 2026-06-13 note predicted, so
+there's no 6–12 m band left to gate. The depth **pass** is still the big lever
+(~5.4 ms / +11 fps). So:
+
+- **Do NOT build a per-track caster-threshold knob** — it would be dead infra.
+  The existing global 6 m gate stays as the many-small-casters guard rail.
+- The real shadow lever for dressed tracks is **shedding the pass**, i.e.
+  wiring `shadows: false` into the **Medium** tier for dressed tracks (today
+  only Low drops it — see Quality presets below). That's a look trade (no cast
+  shadows) and wants a headed visual sign-off, not a blind default flip.
+- Caveat: this box already sits at ~63 fps here; the prod 50 fps figure does
+  not reproduce on this dev GPU, so the *pass-off* trade should be measured
+  against a prod build, not tuned locally.
+
 ## Quality presets (the "various devices" ladder)
 
 The per-knob levers above are composed into three tiers + an `auto` in
