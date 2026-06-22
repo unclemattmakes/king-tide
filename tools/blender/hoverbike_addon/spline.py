@@ -1229,17 +1229,51 @@ _CLASSES: tuple[type, ...] = (
 )
 
 
+def _schedule_start_rebuilds(kinds: tuple[str, ...]) -> None:
+    """Queue the given debounced preview rebuilds. Scheduling (rather
+    than calling bpy.ops here) keeps us out of the mid-property-write
+    re-entrancy trap — the operators run on the next ~0.2 s timer tick."""
+    try:
+        from . import handlers as _handlers
+        for k in kinds:
+            _handlers._schedule_rebuild(k)
+    except Exception:
+        pass
+
+
 def _on_start_t_changed(self, context):
-    """Live re-snap when the start is bound. Calling snap directly here
-    would fire mid-property-write (Blender re-enters update callbacks);
-    instead we ask the handler module to schedule its debounced rebuild
-    so the actual operator runs on the next timer tick."""
+    """Live-move the start gate when the ``Start at t`` slider changes.
+
+    Touching the slider is treated as intent to anchor the start to the
+    racing line, so we AUTO-BIND (no separate *Bind to Spline* click
+    needed — an unbound start ignoring the slider was the #1 reason the
+    control felt broken). Then we schedule a single debounced batch that
+    re-derives, from the same ``t``:
+
+      * ``starts`` — re-snap start_00/01 (the player grid),
+      * ``gates``  — gate 0 / the START-FINISH line + its banner / stripe
+        / arrow / "START" text (previously left frozen on a t-drag, so the
+        grid and finish line visually decoupled — see previews.py:527),
+      * ``racer``  — the 2×4 bike-silhouette grid preview, in the SAME
+        tick instead of waiting for a second depsgraph hop.
+
+    Auto-bind writes ``hoverbike_start_bound_to_spline`` (a plain
+    BoolProperty with no ``update=`` of its own → no recursion). Authors
+    who never touch this slider keep free placement; *Unbind* still
+    releases it."""
+    if not bool(getattr(self, "hoverbike_start_bound_to_spline", False)):
+        self.hoverbike_start_bound_to_spline = True
+    _schedule_start_rebuilds(("starts", "gates", "racer"))
+
+
+def _on_start_grid_changed(self, context):
+    """Spacing / back-off live re-snap — only when the start is ALREADY
+    bound. These knobs are meaningless for a free-placed grid, and (unlike
+    the t-slider) tuning them shouldn't silently anchor a start the author
+    is hand-posing, so there's no auto-bind here. Gate 0's position is
+    driven by ``t``, not spacing, so we rebuild only the grid, not gates."""
     if bool(getattr(self, "hoverbike_start_bound_to_spline", False)):
-        try:
-            from . import handlers as _handlers
-            _handlers._schedule_rebuild("starts")
-        except Exception:
-            pass
+        _schedule_start_rebuilds(("starts", "racer"))
 
 
 def register() -> None:
@@ -1262,7 +1296,7 @@ def register() -> None:
         name="Start spacing (m)",
         description="Lateral distance between start_00 and start_01 when snapped to the racing line.",
         default=4.0, min=0.5, max=20.0, precision=1,
-        update=_on_start_t_changed,
+        update=_on_start_grid_changed,
     )
     bpy.types.Scene.hoverbike_start_backoff_m = FloatProperty(
         name="Start back-off (m)",
@@ -1273,7 +1307,7 @@ def register() -> None:
             "grid. 0 = on the line; 8 m clears it cleanly for typical gate widths"
         ),
         default=8.0, min=0.0, max=50.0, precision=1, subtype="DISTANCE",
-        update=_on_start_t_changed,
+        update=_on_start_grid_changed,
     )
     bpy.types.Scene.hoverbike_start_t = FloatProperty(
         name="Start t",

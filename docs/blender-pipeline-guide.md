@@ -256,8 +256,9 @@ Two complementary surfaces:
   operator.
 
 - **N-panel sidebar (Hoverbike tab).** Press **N**, switch to the
-  *Hoverbike* tab. The header is always visible (track id, Export, lap
-  stats, missing-essentials scaffold). The per-tool sub-panels below
+  *Hoverbike* tab. The header is always visible (track id, lap stats,
+  missing-essentials scaffold, the **Start / Finish gate** `t`-slider,
+  and Export). The per-tool sub-panels below
   are **selection-driven** — Road tool appears when `road_curve_main`
   is active, Spline tools when `ai_spline_main` is active, Water when
   the volume or preview is active, etc. A small "Active: …" hint at
@@ -1795,21 +1796,32 @@ child's position.
 5. **Export** via the addon's *Export Track to Game* — identical
    pipeline to every other track.
 
-### Starting line — sampled from the spline
+### Starting line — the "Start at t" slider
 
-`start_00` / `start_01` are placed by sampling `ai_spline_main` at
-arc-length parameter `START_T` ∈ [0, 1] (default 0.0 = first anchor).
-The two starts spawn perpendicular to the spline tangent, 4 m apart
-(`START_GRID_SPACING_M`), both facing along the racing line.
+The fastest way to set or move the start/finish is the **Start / Finish
+gate** box in the always-on panel header (no selection needed): drag
+**Start at t** (`hoverbike_start_t` ∈ [0, 1], 0 = first anchor) and the
+player grid **and** gate 0 / the finish line both slide along the racing
+line live. Touching the slider **auto-binds** the start to the spline
+(no separate *Bind to Spline* click first), so editing `ai_spline_main`
+afterwards keeps the grid glued to the line. *Start gap* and *Back-off*
+(scene props `hoverbike_start_grid_spacing` / `hoverbike_start_backoff_m`,
+default 4 m apart / 8 m behind the line) shape the grid without moving it
+along the loop.
 
-To shift the starting line further down the loop, edit `START_T` near
-the top of `tools/blender/seed_template_island.py` and re-seed. Each
-start carries its `start_t` value as a custom property so you can read
-it back from the .blend.
+Under the hood this re-runs **Snap Starts to Spline**: `start_00` /
+`start_01` spawn perpendicular to the spline tangent, pushed back along
+the negative tangent so the grid sits *behind* the line, both facing
+forward. Each start carries its `start_t` as a custom property; the
+runtime spawns the player **and** the whole AI grid from it, so moving
+the slider relocates the in-game race start, not just the Blender
+preview.
 
-To pin the starts at hand-authored positions instead, just move them
-in the viewport after the seed runs — they're plain `ARROWS` empties
-once placed.
+Seed scripts still set an initial `START_T` (default 0.0) near the top of
+`tools/blender/seed_template_island.py` — the slider is the live
+override. To pin the starts at hand-authored positions instead, *Unbind
+from Spline* (Start-gate sub-panel) and move them in the viewport;
+they're plain `ARROWS` empties.
 
 ### Re-seeding the template from scratch
 
