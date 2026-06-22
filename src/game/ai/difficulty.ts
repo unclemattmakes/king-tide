@@ -70,6 +70,12 @@ export type DifficultyTuning = Readonly<{
    *  lookahead). */
   steerKp: number
   steerKd: number
+  /** Speed taper `k` for the proportional steering gain: effective
+   *  Kp = steerKp / (1 + speedHoriz·k). 0 = legacy speed-independent gain;
+   *  higher bleeds more steering authority off at top speed so the AI stops
+   *  sawing the wheel at 28 m/s while staying responsive at 8 (review §7).
+   *  Starting values — tune with headed playtest. */
+  steerSpeedTaper: number
   lineBlend: number
 }>
 
@@ -92,6 +98,8 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     driftMaxHoldS: 0,
     steerKp: 0.85,
     steerKd: 0.45,
+    // Casual: smoothest — most authority bled off at speed.
+    steerSpeedTaper: 0.024,
     lineBlend: 0.55,
   }),
   standard: Object.freeze({
@@ -112,6 +120,7 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     driftMaxHoldS: 1.6,
     steerKp: 0.85,
     steerKd: 0.45,
+    steerSpeedTaper: 0.02,
     lineBlend: 0.55,
   }),
   hard: Object.freeze({
@@ -132,6 +141,8 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     driftMaxHoldS: 2.5,
     steerKp: 0.85,
     steerKd: 0.45,
+    // Hard: least taper — keeps the most steering authority at speed.
+    steerSpeedTaper: 0.016,
     lineBlend: 0.55,
   }),
 })
