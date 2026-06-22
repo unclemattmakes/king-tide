@@ -170,6 +170,27 @@ class HOVERBIKE_PT_panel(Panel):
                 elif lap_s > 180:
                     stat_box.label(text="Long — over 3 min", icon="ERROR")
 
+        # ── Start / Finish placement — always-on. The t-slider lives
+        # here (not buried in a selection-driven sub-panel that only
+        # shows in bound mode) so the author never has to select
+        # start_00 and hunt for it. Dragging it auto-binds the start to
+        # the racing line and live-moves the player grid AND the gate-0 /
+        # finish line together (see _on_start_t_changed in spline.py).
+        # Only shown once the grid + spline exist; the scaffold alert
+        # above covers the missing-essentials case.
+        if have_sp and have_s0 and have_s1:
+            sbox = layout.box()
+            sbox.label(text="Start / Finish gate", icon="EMPTY_ARROWS")
+            row = sbox.row(align=True)
+            row.scale_y = 1.3
+            row.prop(scene, "hoverbike_start_t", text="Start at t", slider=True)
+            cap = sbox.row()
+            cap.scale_y = 0.8
+            if bool(getattr(scene, "hoverbike_start_bound_to_spline", False)):
+                cap.label(text="Grid + finish line follow t", icon="LOCKED")
+            else:
+                cap.label(text="Drag to place on the racing line", icon="UNLOCKED")
+
         # ── Primary action: Export. Auto-open checkbox sits right
         # under it so the relationship is obvious — toggle once and
         # every subsequent Export pops the browser.
