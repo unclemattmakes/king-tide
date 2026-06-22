@@ -1817,6 +1817,14 @@ runtime spawns the player **and** the whole AI grid from it, so moving
 the slider relocates the in-game race start, not just the Blender
 preview.
 
+**Spline-driven only.** Gate 0 / the finish line follows `start_t` in the
+default **spline-driven** gate mode — the exporter samples gate 0 at
+`start_t` and the runtime treats it as the lap line (verified by
+`tools/blender/_smoke_export_startgate.py`). If you've *materialised*
+gates as `cp_NN` empties, gate 0 is the baked `cp_00` position and won't
+move with the slider; re-run **Materialise Gates to cp_NN** after moving
+the start to re-stamp them.
+
 Seed scripts still set an initial `START_T` (default 0.0) near the top of
 `tools/blender/seed_template_island.py` — the slider is the live
 override. To pin the starts at hand-authored positions instead, *Unbind

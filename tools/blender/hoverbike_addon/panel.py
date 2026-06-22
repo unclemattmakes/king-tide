@@ -696,7 +696,7 @@ class HOVERBIKE_PT_track_spline(_SelectionDrivenPanel, Panel):
         layout.separator()
         layout.label(text="Place along the curve", icon="PIVOT_CURSOR")
         row = layout.row(align=True)
-        row.prop(scene, "hoverbike_placement_t", text="t")
+        row.prop(scene, "hoverbike_placement_t", text="Place at t")
         row.operator("hoverbike.cursor_snap_to_spline", text="Cursor", icon="PIVOT_CURSOR")
         row = layout.row(align=True)
         row.prop(scene, "hoverbike_start_grid_spacing", text="Start gap")
@@ -753,7 +753,7 @@ class HOVERBIKE_PT_track_start(_SelectionDrivenPanel, Panel):
             # handlers module's debounced timer. Spacing + back-off
             # edits do the same.
             row = layout.row(align=True)
-            row.prop(scene, "hoverbike_start_t", text="t", slider=True)
+            row.prop(scene, "hoverbike_start_t", text="Start at t", slider=True)
             row = layout.row(align=True)
             row.prop(scene, "hoverbike_start_grid_spacing", text="Spacing")
             row.prop(scene, "hoverbike_snap_hover_height", text="Hover")
@@ -1039,7 +1039,7 @@ class HOVERBIKE_PT_track_placement(_SelectionDrivenPanel, Panel):
         scene = context.scene
         helper = bpy.data.objects.get(PLACEMENT_HELPER_NAME)
         row = layout.row(align=True)
-        row.prop(scene, "hoverbike_helper_t", text="t")
+        row.prop(scene, "hoverbike_helper_t", text="Helper t")
         row.prop(scene, "hoverbike_helper_offset", text="Offset")
         row = layout.row(align=True)
         if helper is None:
