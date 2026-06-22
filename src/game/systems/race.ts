@@ -13,8 +13,10 @@ import type { Track } from '@/game/tracks/types'
  *
  * Each tick: for every Racer, find the next checkpoint they need to cross,
  * compute the racer's offset from the gate plane, and check if they've
- * crossed it (signed distance flipped from + to -, AND landed inside the
- * gate's lateral extent).
+ * crossed it (signed distance flipped sign as they move in the gate's
+ * +forward direction, AND the prev→cur path pierced the plane inside the
+ * gate's lateral/vertical extent — tested at the pierce point, not the
+ * post-crossing sample, so an edge/airborne crossing isn't lost to drift).
  *
  * Track progress + lap counting ride on top of crossings.
  */
@@ -76,7 +78,18 @@ export function createRaceSystem(track: Track, events: RaceEvents = {}) {
       // snapshot corrections; also covers OOB respawns).
       const lp = prevPos.get(eid)
       let teleported = false
+      // Previous-tick position, captured before `lp` is overwritten below. The
+      // gate test reconstructs the exact plane-pierce point from the prev→cur
+      // segment (see the crossing block). On the first sighting there is no
+      // previous point, so default to the current one — no crossing can score
+      // that tick anyway (prevSigned is still undefined).
+      let prevX = t.x
+      let prevY = t.y
+      let prevZ = t.z
       if (lp) {
+        prevX = lp.x
+        prevY = lp.y
+        prevZ = lp.z
         const jx = t.x - lp.x
         const jy = t.y - lp.y
         const jz = t.z - lp.z
@@ -94,11 +107,8 @@ export function createRaceSystem(track: Track, events: RaceEvents = {}) {
 
       // Gate's "forward" axis (the direction you cross in). Local +Z rotated by gate quat.
       const fwd = quatRotate(cp.rotation, { x: 0, y: 0, z: 1 })
-      const right = quatRotate(cp.rotation, { x: 1, y: 0, z: 0 })
 
       const signed = dx * fwd.x + dy * fwd.y + dz * fwd.z
-      const lateral = dx * right.x + dy * right.y + dz * right.z
-      const vertical = dy // approximate — gate is upright
 
       const prev = prevSigned.get(eid)
       prevSigned.set(eid, signed)
@@ -107,27 +117,56 @@ export function createRaceSystem(track: Track, events: RaceEvents = {}) {
       // moving in +fwd direction). A teleport re-seeds `prevSigned` (the
       // set() above) without testing the flip.
       const crossed = !teleported && prev !== undefined && prev < 0 && signed >= 0
-      const insideLaterally = Math.abs(lateral) < cp.halfWidth
-      // Trigger extends 2× further below the gate origin than its original
-      // tight box, so a bike skimming the water or briefly dipping below
-      // the gate's base still registers the crossing. Slipping under was
-      // a common bug — the player would pass between the pillars but at a
-      // y the trigger rejected.
-      let lowerBound = -3
-      let upperBound = cp.height + 2
-      if (gateFloatsOnWaves(track, cp)) {
-        // The gate VISUAL bobs on the swell while this trigger plane stays
-        // put, so widen the vertical window enough to catch a crossing at
-        // any wave phase. Constant 4 m covers the wave envelope at every
-        // shipped sea state (peak ambient crest ≈ 2 m at Beaufort 5 plus
-        // zone multipliers); it used to scale off the per-track
-        // `water.waveHeight`, a dead knob the wave field never read
-        // (range 2.5–4 m across shipped tracks), now removed.
-        const amp = 4
-        lowerBound -= amp
-        upperBound += amp
+
+      // Test the lateral/vertical window at the point where the prev→cur path
+      // actually pierced the gate plane, NOT at this tick's sample. The sample
+      // sits a whole tick *past* the plane (≈0.5–0.8 m under power, up to the
+      // 5 m teleport ceiling on a frame hitch), and a bike crossing at an angle
+      // — leaning through on a drift, or arcing through mid wave-launch — slides
+      // sideways and vertically across that gap. Sampling the post-crossing
+      // point therefore rejected clean pass-throughs ("rode through the gate,
+      // got no credit"). The pierce point is exactly the segment∩plane
+      // intersection, so an edge or airborne crossing scores iff the path truly
+      // threaded the posts. Only computed on the crossing tick; false otherwise.
+      let insideLaterally = false
+      let insideVertically = false
+      if (crossed) {
+        // `crossed` implies prev is defined and < 0; narrow it for TS.
+        const signedPrev = prev as number
+        // Fraction along prev→cur where signed hits 0. signedPrev < 0 ≤ signed
+        // ⇒ (signedPrev − signed) < 0, never zero, so f ∈ [0,1] is well-defined.
+        const f = signedPrev / (signedPrev - signed)
+        const px = prevX + (t.x - prevX) * f
+        const py = prevY + (t.y - prevY) * f
+        const pz = prevZ + (t.z - prevZ) * f
+        const right = quatRotate(cp.rotation, { x: 1, y: 0, z: 0 })
+        const lateral =
+          (px - cp.position.x) * right.x +
+          (py - cp.position.y) * right.y +
+          (pz - cp.position.z) * right.z
+        const vertical = py - cp.position.y // approximate — gate is upright
+
+        insideLaterally = Math.abs(lateral) < cp.halfWidth
+        // Trigger extends further below the gate origin than its tight box, so
+        // a bike skimming the water or briefly dipping below the gate's base
+        // still registers. Slipping under was a common bug — the player would
+        // pass between the pillars but at a y the trigger rejected.
+        let lowerBound = -3
+        let upperBound = cp.height + 2
+        if (gateFloatsOnWaves(track, cp)) {
+          // The gate VISUAL bobs on the swell while this trigger plane stays
+          // put, so widen the vertical window enough to catch a crossing at
+          // any wave phase. Constant 4 m covers the wave envelope at every
+          // shipped sea state (peak ambient crest ≈ 2 m at Beaufort 5 plus
+          // zone multipliers); it used to scale off the per-track
+          // `water.waveHeight`, a dead knob the wave field never read
+          // (range 2.5–4 m across shipped tracks), now removed.
+          const amp = 4
+          lowerBound -= amp
+          upperBound += amp
+        }
+        insideVertically = vertical > lowerBound && vertical < upperBound
       }
-      const insideVertically = vertical > lowerBound && vertical < upperBound
 
       if (crossed && insideLaterally && insideVertically) {
         const wasFirstCrossing = racer.checkpointsCrossed === 0
