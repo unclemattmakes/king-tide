@@ -178,7 +178,7 @@ function runOneTick(opts: {
   if (opts.startFactor !== undefined) ctrl.topSpeedFactor = opts.startFactor
   AIControllerStore.set(chaser, ctrl)
 
-  rubberBandSystem(sim, trackStub(8))
+  rubberBandSystem(sim, trackStub(8), playerSettings.rubberBandAssist)
   return AIControllerStore.must(chaser).topSpeedFactor
 }
 
@@ -236,7 +236,7 @@ describe('rubberBandSystem — assist on', () => {
     const ctrl = defaultAIController('main', { difficulty: 'standard' })
     ctrl.topSpeedFactor = baseline * 1.2 // boosted
     AIControllerStore.set(ai, ctrl)
-    rubberBandSystem(sim, trackStub(8))
+    rubberBandSystem(sim, trackStub(8), playerSettings.rubberBandAssist)
     expect(AIControllerStore.must(ai).topSpeedFactor).toBeLessThan(baseline * 1.2)
   })
 

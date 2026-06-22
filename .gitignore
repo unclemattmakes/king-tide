@@ -13,7 +13,13 @@ Thumbs.db
 # fetches them from VITE_ASSET_BASE_URL in prod (see src/engine/asset-url.ts).
 # Hydrate a fresh clone for offline dev with `pnpm assets:pull`; push new
 # exports with `pnpm assets:push`. See docs/asset-storage.md.
-/public/assets/
+#
+# Exception: the asset manifest (the canonical track/bike roster) is tiny, text,
+# and load-bearing for the build — so it stays VERSIONED. We ignore the dir's
+# *contents* (`/*`) rather than the dir itself so git can still descend into it
+# to track the one re-included file below. Every asset BYTE stays ignored.
+/public/assets/*
+!/public/assets/manifest.json
 /public/audio/
 
 # Brush-stroke stamps harvested from the Blender Brushstroke Tools add-on — build

@@ -16,6 +16,9 @@
     "assets:pull": "rclone copy r2-hoverbike:hoverbike-content/assets public/assets --transfers 16 --checkers 16 && rclone copy r2-hoverbike:hoverbike-content/audio public/audio --transfers 16 --checkers 16",
     "assets:push": "rclone copy public/assets r2-hoverbike:hoverbike-content/assets --transfers 16 --checkers 16 --s3-no-check-bucket && rclone copy public/audio r2-hoverbike:hoverbike-content/audio --transfers 16 --checkers 16 --s3-no-check-bucket",
     "typecheck": "tsc --noEmit",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test",
+    "validate:tracks": "node tools/validate-track-assets.mjs",
+    "preflight:steam": "pnpm verify && pnpm build && node tools/check-assets-present.mjs && node tools/validate-track-assets.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -85,7 +88,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
     "@playwright/test": "^1.60.0",
-    "@types/node": "^25.9.1",
+    "@types/node": "^20",
     "@types/three": "^0.184.1",
     "@vitest/coverage-v8": "^4.1.7",
     "ajv": "^8.17.1",

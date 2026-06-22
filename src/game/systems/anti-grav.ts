@@ -1,4 +1,9 @@
 /**
+ * ⚠ PARKED — feature cut from races (parked for a possible future DLC).
+ * No shipped track places anti-grav zones or flags `antiGrav` splines, so this
+ * resolver is intentionally dormant at runtime. Kept for the DLC revival; do not
+ * delete. See CLAUDE.md ("Anti-grav is cut") for the v2 reality.
+ *
  * Anti-gravity resolver.
  *
  * Two source kinds, combined by max-weight per bike per tick:

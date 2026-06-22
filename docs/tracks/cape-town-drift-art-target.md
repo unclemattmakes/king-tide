@@ -89,8 +89,11 @@ through. **Build actions:**
 The calm-water skill check: a narrow racing lane on **near-glassy mirror water**
 walled by oxidised-red container stacks, a tipped ferry mid-lane, perfect
 reflections. **Build actions:**
-- Sell **Beaufort-1 slack water** — flat, mirror reflections of the containers
-  (this is what makes pumping *not* pay here; the calm read is the whole point).
+- Sell **slack, near-glassy water** — flat, mirror reflections of the containers
+  (this is what makes pumping *not* pay here; the calm read is the whole point). The
+  actual sea-state number (`seaStateBeaufort`) is authoritative in
+  [`public/tracks/cape-town-drift.json`](../../public/tracks/cape-town-drift.json)
+  under `sky` — read it there rather than from this doc.
 - Half-sunk container stacks (~6 meshes, mixed orientations) + the tipped ferry
   as the slalom gates; keep the racing line readable between them.
 - Waterline trio + `emitter_container_rust` wet-decay on the containers.

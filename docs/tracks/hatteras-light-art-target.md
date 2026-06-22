@@ -55,10 +55,14 @@ frame. Lonely, cold, and *defiant*, never mournful.
 | Blooming | `#5E8C61` | kelp skirt at the base, gull-perch crags, sea-life |
 | Emissive | **warm `#FFC24D`** | **the lamp — the single warm emissive**; nothing else glows |
 
-Sky preset: the track reuses **`cape_town_blue`** but graded **greyer / overcast**
-(`seaStateBeaufort=5`, the highest in Reef — the "you're ready for Open Sea" stress
-test). The lamp is the privileged warm light; let it read against the grey, and
-**brighten it across laps** (per the per-lap note — visual climax build).
+Sky-grade **target**: reuse **`cape_town_blue`** but graded **greyer / overcast**
+with a heavy swell (the "you're ready for Open Sea" stress test). The lamp is the
+privileged warm light; let it read against the grey, and **brighten it across laps**
+(per the per-lap note — visual climax build). **Heads-up:** the shipped
+[`public/tracks/hatteras-light.json`](../../public/tracks/hatteras-light.json) is
+still a greybox route-stub on a `neutral` grade — the `sky` block there (including
+the real `seaStateBeaufort`) is canonical for what is *currently* shipped; this
+paragraph is the art-pass target, not the live state.
 
 ## Material-state ratio: 30 built / 35 broken / 35 blooming
 

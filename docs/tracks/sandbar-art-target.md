@@ -49,8 +49,11 @@ band and one half-sunk piling — no more.
 | Blooming | `#3DA35D` | cove palms, reef/kelp under the shallows, dune-crest coral |
 | Emissive | `#6CFFC8` (+ warm `#FFC24D` work-lights) | shack signage, the work-light string — **only** powered things glow |
 
-Colour grade: track JSON ships `venice_warm` (tint `#ffe0c8`, bloom 0.6,
-sunIntensity 1.1, low cloud). The plates match that; keep it.
+Colour grade: track JSON ships the `venice_warm` preset — warm rose-peach tint,
+gentle bloom, low cloud. **The numeric knobs (tint / bloom / sunIntensity / cloud)
+are authoritative in [`public/tracks/sandbar.json`](../../public/tracks/sandbar.json)
+under `sky`** — read them there rather than from this doc (hand-copied values drift).
+The plates match that grade; keep the warm-pastel intent.
 
 ## Material-state ratio: 45 built / 15 broken / 40 blooming
 
@@ -176,8 +179,9 @@ extra fragment-noise taps:
 The cloud upgrade (cool-base self-shadow + elevation lift) is a strict
 improvement for **every** track; the drama is opt-in via the two knobs.
 
-**Mayday Bay values:** `cloudiness 0.5`, `cloudTowering 0.75`, `sunSize 1.7` —
-big soft cumulus + a warm low sun, kept friendly for the calm classroom.
+**Mayday Bay values** (`cloudiness` / `cloudTowering` / `sunSize` — read the live
+numbers from [`public/tracks/sandbar.json`](../../public/tracks/sandbar.json) under
+`sky`): big soft cumulus + a warm low sun, kept friendly for the calm classroom.
 Perf: ~2 FBM + 2 value-noise taps per sky pixel (dome only); held 70+ fps on
 the dev GPU. If the M1/Ryzen floor ever struggles, the second (self-shadow) FBM
 tap is the lever to cheapen first.
@@ -186,8 +190,9 @@ tap is the lever to cheapen first.
 
 What landed in-engine this pass (all verified live on WebGPU unless noted):
 
-- **Sky/grade/fog** tuned in `sandbar.json`; **cloudTowering 0.75 + sunSize 1.7**
-  (big lit cumulus + warm sun). **Waterline trio** on (`terrainShader.waterline 1.0`).
+- **Sky/grade/fog** tuned in `sandbar.json` — big lit cumulus + warm sun (the
+  `cloudTowering` / `sunSize` and the rest of the `sky` knobs are canonical in the
+  JSON; don't trust copies here). **Waterline trio** on (`terrainShader.waterline 1.0`).
 - **Marina hero set-piece — built + placed (first pass):**
   - `pilot_shack` ran the **full AI pipeline** (ComfyUI concept → boxier re-roll →
     Hunyuan mesh → Blender condition → integrate). Compiled GLB committed:

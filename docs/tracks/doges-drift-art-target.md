@@ -48,8 +48,12 @@ the Murano kilns. Venice was already half-flooded; the rest just took longer.
 | Furnace glow | `#FF8A2A` | the Murano kilns + rising embers — warm human persistence |
 | Blooming | `#5E7C3E` | moss, ivy on facades, Adriatic sea-life |
 
-Sky preset: **`venice_warm`** (tint `#ffe0c8`); warm daylight. This track *lives at
-its waterline* — the mossy-green band is the identity.
+Sky-grade **target**: a warm `venice_warm`-style daylight. This track *lives at its
+waterline* — the mossy-green band is the identity. **Heads-up:** the shipped
+[`public/tracks/doges-drift.json`](../../public/tracks/doges-drift.json) is still a
+greybox route-stub on a `neutral` grade — the `sky` block there is canonical for
+whatever is *currently* shipped; this paragraph is the art-pass target, not the
+live state.
 
 ## Material-state ratio: 35 built / 35 broken / 30 blooming
 

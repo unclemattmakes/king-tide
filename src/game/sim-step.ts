@@ -135,6 +135,14 @@ export type StepInputs = {
    *  and-suspenders against future non-tag dependencies, and saves the
    *  no-op query traversal each tick. */
   runAI?: boolean
+  /** Mario-Kart rubber-band assist toggle, snapshotted out of the mutable
+   *  `playerSettings` singleton so it can't leak into the deterministic step
+   *  (ADR 0002 / sim-purity guard). Single-player reads the live
+   *  `playerSettings.rubberBandAssist` OUTSIDE the step; multiplayer/lockstep
+   *  passes a frozen default so peers agree — mirroring how `runAI` /
+   *  `tuning` already distinguish SP vs MP. Defaults to `true` (the shipped
+   *  `DEFAULT_PLAYER_SETTINGS.rubberBandAssist`) when a caller omits it. */
+  rubberBandAssist?: boolean
   /** Optional wave-rider system. Tracks with no wave-rider props omit
    *  it; passing `undefined` is a no-op. Stepped right after the wave
    *  field advances so kinematic bodies track the new surface within
@@ -244,5 +252,5 @@ export function simulateStep(
   boostTickSystem(sim, phys.fixedDt)
   shieldTickSystem(sim, phys.fixedDt)
   stunTickSystem(sim, phys.fixedDt)
-  if (runAI) rubberBandSystem(sim, track)
+  if (runAI) rubberBandSystem(sim, track, inputs.rubberBandAssist ?? true)
 }

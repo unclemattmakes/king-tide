@@ -51,9 +51,12 @@ structure. Big Sur / Cabo-arch monumentality.
 | Blooming | `#C98A3C` gold rock + `#3E7E72` kelp | the dominant — gold weathered arches, kelp, foam, the living sea |
 | Foam / spray | `#F2F4F3` | white foam crests, arch-crown spray, McWay mist |
 
-Sky preset: the track design calls for **`big_sur_golden`** sky
-(`seaStateBeaufort=5`). Light golden-hour so the foam and wet rock pop; silhouette
-the arches hard against the bright sky.
+Sky preset: the track design calls for the **`big_sur_golden`** grade with a heavy
+open-sea swell. Light golden-hour so the foam and wet rock pop; silhouette the
+arches hard against the bright sky. **The numeric knobs (grade / bloom / sun /
+`seaStateBeaufort`) are authoritative in
+[`public/tracks/the-maw.json`](../../public/tracks/the-maw.json) under `sky`** —
+read them there, not from this doc.
 
 ## Material-state ratio: 5 built / 30 broken / 65 blooming
 
