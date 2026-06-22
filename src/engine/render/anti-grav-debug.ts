@@ -1,4 +1,9 @@
 /**
+ * ⚠ PARKED — feature cut from races (parked for a possible future DLC).
+ * No shipped track places anti-grav zones or flags `antiGrav` splines, so this
+ * debug overlay is intentionally dormant. Kept for the DLC revival; do not delete.
+ * See CLAUDE.md ("Anti-grav is cut") for the v2 reality.
+ *
  * Visualization of every anti-gravity source on the track — the dense
  * spline polyline plus "up" arrows at regular intervals so the curve's
  * authored banking is legible while driving. Also outlines volume zones

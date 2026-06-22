@@ -69,6 +69,11 @@ test.describe('M10.2 determinism', () => {
     expect(a.start).toBe(b.start)
   })
 
+  // Bit-identical across two cold boots on the SAME machine. This is the
+  // intra-machine half of the determinism guarantee; the cross-PR / cross-branch
+  // half is golden-compared in determinism-snapshot.spec.ts (the lagoon golden),
+  // which the CI `determinism` job runs. Keep this assertion exact equality —
+  // any tolerance here would mask the non-determinism this gate exists to catch.
   test('simulateStep is bit-identical for the same seed + same inputs', async ({ browser }) => {
     const a = await probe(browser)
     const b = await probe(browser)

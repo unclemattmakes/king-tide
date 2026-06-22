@@ -17,6 +17,7 @@ one that supersedes it.
 | 0002 | Sim layer must not import Three.js          | Accepted |
 | 0003 | Renderer — Three.js, WebGPU-first           | Accepted |
 | 0004 | Physics — Rapier3D-compat (deterministic)   | Accepted |
+| 0005 | Drift — Mario-Kart-style mini-turbo, sim-side | Accepted |
 
 ## Format
 

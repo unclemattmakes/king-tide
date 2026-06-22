@@ -62,7 +62,10 @@ re-surfacing Aztec city. The lake came back and the city threw a party on it.
 
 Sky preset: **`mexico_city_rosa`** (added with this track) — rosa-mexicano lift,
 punchy saturation. Grade to late-afternoon. Keep saturation *up* — this is the
-brightest, friendliest grade in the Reef cup alongside Mayday Bay.
+brightest, friendliest grade in the Reef cup alongside Mayday Bay. **The numeric
+grade knobs (tint / bloom / sun / `seaStateBeaufort`) are authoritative in
+[`public/tracks/mexico-city.json`](../../public/tracks/mexico-city.json) under
+`sky`** — read them there, not from this doc.
 
 ## Material-state ratio: 50 built / 20 broken / 30 blooming
 

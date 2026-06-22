@@ -36,21 +36,27 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 
 ## What's playable
 
-- **v1 menu cathedral** — title → mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial) → track / cup / lobby → bike-select → race. Full Settings overlay across Audio / Video / Controls / Gameplay / Accessibility / Network tabs.
-- **Ship tracks across four cups** — tutorial Sandbar plus the **Reef → Harbor → Continental → Drowned** cups. The **Harbor Cup** (drowned harbor cities — Needle Sound / Golden Gate Drowned / Opera Drowned) replaces the open-water Open Sea Cup per the no-open-water pass; its Seattle + Sydney legs are greybox-pending, and the pure-open-water tracks (The Maw, Hatteras Light) are parked to the B-list. See [`docs/track-themes.md`](docs/track-themes.md) for the content bible.
-- **Five bike variants** — Cruiser / Racer / Stunt / Scout / Sparrow with distinct stat tradeoffs (`?bike=<id>`). Sparrow + Stunt are inside-drift archetypes (sport-bike feel — tighter initial cut, wider tail); the others are outside-drift (default stable arc).
+> The list below is the live **v2** state. A track's `status: 'ship'` means it is
+> **wired + playable**, *not* art-complete — only **Mayday Bay** (the tutorial
+> lagoon, slug `sandbar`) and **The Maw** are art-dressed; the rest are greybox
+> route-stubs awaiting the v2 art pass.
+
+- **Menu flow** — title → mode-select (Race / Time Trial / Cup / Multiplayer / Tutorial) → track / cup / lobby → bike-select → race. Full Settings overlay across Audio / Video / Controls / Gameplay / Accessibility / Network tabs.
+- **Reef Cup — the v2 proof-of-thesis** — the current focus is shipping the three Reef Cup maps end to end: **Mayday Bay → Mexico City → Cape Town Drift** (slugs `sandbar`, `mexico-city`, `cape-town-drift`). Mayday Bay + The Maw are dressed; the rest are greybox route-stubs. Verify against this lineup with headed Playwright, not the in-app preview. See [`docs/track-themes.md`](docs/track-themes.md) for the content bible and [`docs/tracks/`](docs/tracks/README.md) for per-track design docs.
+- **Multiple cups planned** — the eventual structure groups the city maps into cups; treat any "Reef → Harbor → Continental → Drowned" framing in older docs as **aspirational / future scope**, not the shipped set.
+- **Five bike variants** — Cruiser / Racer / Stunt / Scout / Sparrow, one balanced class with distinct stat tradeoffs (`?bike=<id>`). Sparrow + Stunt are inside-drift archetypes (sport-bike feel — tighter initial cut, wider tail); the others are outside-drift (default stable arc).
 - **Four pickups** — boost, shield, mine, homing missile (random pool)
-- **4 AI opponents** with Casual / Standard / Hard difficulty + rubber-band toggle. AI hits the wave-pump where the wave zones tell it to (Standard at vy ≥ 1.5, Hard at vy ≥ 0.6) and drifts the sharp corners (Standard caps at SMT, Hard reaches UMT).
-- **3-lap races + Cup mode** — championship across the four ship cups with MK8-style points + cup-results screen
+- **AI opponents** with Casual / Standard / Hard difficulty + rubber-band toggle. AI hits the wave-pump where the wave zones tell it to (Standard at vy ≥ 1.5, Hard at vy ≥ 0.6) and drifts the sharp corners (Standard caps at SMT, Hard reaches UMT).
+- **3-lap races + Cup mode** — championship with MK8-style points + cup-results screen
 - **Time Trial mode** with self-overwriting best-lap ghost per (track, bike); **global leaderboard** via PartyKit Party with HMAC-signed submissions + per-track top-25 + moderation CLI
-- **Wave-mastery loop** — wave-pump signal (post-launch reward) + wave-line shimmer (forward-looking guidance) bracket the player's pump decision
+- **Wave-mastery loop** — the signature mechanic: a motocross *master-the-jump* model (pitch the takeoff/landing over the wave), **not** a press-forward-on-crest pump. Wave-pump signal (post-launch reward) + wave-line shimmer (forward-looking guidance) bracket the player's decision.
 - **Drift mini-turbo** — Mario-Kart-style 3-tier mini-turbo: hold Z (or LB) + steer left, or hold C (or RB) + steer right; release fires the tier 1/2/3 boost (blue MT / orange SMT / purple UMT). Surface-type registry (ice / sand / metal / default) layers grip variation. **Drift Practice Range** dev track (`?track=drift-test`) walks every tier. Full design + tuning in [`docs/drift-deep-dive.md`](docs/drift-deep-dive.md).
 - **Tricks** — geometric pop-based window that arms off lips / ramp crests / sandbars / ledges / embankments via per-end hover contact flags. 200 ms pre-press buffer holds a button mashed mid-climb.
 - **Tuck sweet-spot** — snowboarder's nose-down sweet spot folded into the existing pitch-down gesture (no dedicated button); `#hud-tuck` accuracy meter + cyan slipstream VFX scale with sweet-spot proximity.
 - **Multiplayer** — `?room=<id>` lobby with smash-bros pick + ready states + sticky raceStarted bit for late joiners; host-elected AI sync, 20 Hz transform snapshots, live RTT readout, in-race HUD chip with peer slot + ping
 - **Best-lap save state** per (track, bike) in localStorage + ghost replay
-- **Tutorial framework** — track-agnostic 7-beat director (THROTTLE → CRUISE → LOOK → WAVE PUMP → DRIFT → ANTI-GRAV → READY; `?tutorial=1`)
-- **Procedural audio** — four-bus mixer (master / music / sfx / ambient) + sidechain duck on pump/explosion + drift skid loop + per-tier release whoosh + procedural music pad bed (licensed drops still pending)
+- **Tutorial framework** — track-agnostic beat director (THROTTLE → CRUISE → LOOK → WAVE PUMP → DRIFT → READY; `?tutorial=1`). *(Anti-grav is cut from races — parked for a possible future DLC — so there is no anti-grav tutorial beat.)*
+- **Procedural audio** — four-bus mixer (master / music / sfx / ambient) + sidechain duck on pump/explosion + drift skid loop + per-tier release whoosh + procedural music pad bed (CC0 placeholder soundtrack; licensing still open)
 - **Accessibility** — colorblind palettes (deuteranopia / protanopia / tritanopia), reduced flash, large text, high contrast, motion-sickness reduction, screen-shake intensity, subtitles always on
 - **Rider editor** — `?rideredit=1` opens a turntable where each rider bone can be reshaped (primitives + colours + seated pose). Load / Save / Export.
 - **In-app track editor** — `?edit=1` opens a TransformControls editor over the JSON track snapshot; gates / pickups / boost pads / spline points placeable + drag-manipulable; Save writes back via a dev-only Vite middleware
@@ -76,7 +82,7 @@ pnpm docs:dev     # http://localhost:5173 — VitePress dev/modder docs site
 pnpm docs:build   # → docs-site/.vitepress/dist
 ```
 
-Try `pnpm dev` then open http://localhost:5191/?track=cliffside&bike=stunt for the most fun config.
+Try `pnpm dev` then open http://localhost:5191/?track=sandbar&bike=stunt for a quick spin on Mayday Bay (the tutorial lagoon).
 
 ### Multiplayer dev
 
@@ -164,7 +170,7 @@ See [`docs/adr/`](docs/adr/README.md) for the full set of architecture decisions
 
 ## Known issues
 
-- **Cliffside AI** — the AI racers occasionally fall off the mesa on the descending corner and can't recover. Tracked as a level-design fix (widen the mesa / add a side ramp). Affects entertainment value of AI-only playback on Cliffside; player-only races and human multiplayer are unaffected.
+- **AI on vertical/elevated terrain** — AI racers can jam where the race line climbs sharply or hugs raised terrain (gates floating above the surface, crosswise gate facing). Fixes are per-track level-design work; the full 8-bike field is now guarded for the Reef Cup tracks by `tests/e2e/field-completion.spec.ts` (runs by default). Player-only races and human multiplayer are unaffected.
 - **Multiplayer e2e coverage** — M10.11 transform-snapshot sync is covered by unit tests + manual playtest; a two-tab Playwright probe is not yet automated. Bugs that only manifest cross-tab need to be reproduced manually.
 
 ## Contributing

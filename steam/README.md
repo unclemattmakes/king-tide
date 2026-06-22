@@ -33,6 +33,71 @@ The upload is **Windows-only** — the Deck runs the Windows build via Proton,
 so there's no native Linux depot (see
 [`docs/desktop-builds.md`](../docs/desktop-builds.md)).
 
+## Asset hydration secret — desktop/Steam builds must NOT ship empty
+
+> **Hard rule: a desktop/Steam build is only ever cut with assets hydrated.**
+> Never bundle from a bare checkout.
+
+The compiled runtime assets (track/bike/prop GLBs, atlas PNGs, `.opus` audio)
+are **gitignored** and served from Cloudflare R2 — they are *not* in the git
+tree (see [`docs/asset-storage.md`](../docs/asset-storage.md)). A web build is
+fine without them (the browser fetches from `VITE_ASSET_BASE_URL` at runtime),
+but a **desktop bundle is self-contained** and must carry the bytes. So the
+[`build-desktop.yml`](../.github/workflows/build-desktop.yml) workflow hydrates
+`public/assets` + `public/audio` from R2 **before** building, and aborts the
+job loudly if it can't — an empty/asset-less bundle must never be produced
+silently.
+
+| Secret | What | How to bake |
+|---|---|---|
+| `RCLONE_CONF_BASE64` | A base64-encoded `rclone.conf` whose `[r2-hoverbike]` S3 remote points at the R2 bucket. The workflow base64-decodes it to a temp file and runs `pnpm assets:pull` with `RCLONE_CONFIG` pointed at it. | See below. |
+
+**Bake the secret** from a working rclone config (the same `[r2-hoverbike]`
+remote `pnpm assets:pull` uses locally — see
+[`docs/asset-storage.md`](../docs/asset-storage.md) for its shape; a
+**read-only** R2 token is enough for pulls):
+
+```sh
+# Linux/macOS (or Git Bash on Windows). -w0 = no line wrapping.
+base64 -w0 ~/.config/rclone/rclone.conf > /tmp/rclone.b64
+#   Windows %APPDATA%\rclone\rclone.conf instead, if that's where yours lives.
+```
+
+```powershell
+# PowerShell equivalent
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:APPDATA\rclone\rclone.conf")) `
+  | Out-File -NoNewline /tmp/rclone.b64 -Encoding ascii
+```
+
+Then add it under **Settings → Secrets and variables → Actions**:
+
+- `RCLONE_CONF_BASE64` ← contents of `/tmp/rclone.b64`
+
+Wipe the `/tmp/rclone.b64` file when done.
+
+**Failure behavior is intentional:**
+
+- `build-desktop.yml` — if `RCLONE_CONF_BASE64` is **absent**, the hydration
+  step exits non-zero with a clear `::error::` and the build never runs. (Then
+  a post-hydrate and a post-build `node tools/check-assets-present.mjs` guard
+  re-verify the floor: ≥ 20 GLBs + `bikes/racer.glb` + `manifest.json`.)
+- `ci.yml` `determinism` job — same secret hydrates assets for the determinism
+  gate. Absent on a forked PR (no secrets), it no-ops with a warning rather
+  than red-failing on a missing bucket; it runs for real on any branch/PR that
+  has the secret, where a golden mismatch fails the build.
+- `ci.yml` `e2e` job — also hydrates from the same secret when present (skips
+  the pull otherwise); it stays `continue-on-error`, so the hard asset/determinism
+  gate is the `determinism` job, not this one.
+
+## Bump the version every release
+
+Bump `version` in [`package.json`](../package.json) for each Steam build so the
+Steam `BUILD_DESCRIPTION` is legible in the Steamworks "Builds" tab (the build
+script picks the version up — that lane is owned by the Steam build/preflight
+scripts: `pnpm preflight:steam`). A stale version means two distinct builds
+show the same description and you can't tell them apart when picking one to set
+live.
+
 Plus one of:
 
 - `STEAM_PASSWORD` + Steam Guard prompt (interactive only) — for local

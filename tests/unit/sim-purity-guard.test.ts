@@ -58,6 +58,14 @@ const BANS: { label: string; re: RegExp }[] = [
     label: "import from '@/engine/dev-settings'",
     re: /\bfrom\s+['"](?:@\/engine\/dev-settings|(?:\.\.?\/)+(?:[^'"]*\/)?dev-settings)['"]/,
   },
+  // Same treatment for the player-facing settings singleton — its
+  // sim-affecting knob (`rubberBandAssist`) now flows through
+  // `StepInputs.rubberBandAssist` instead of being read mid-tick, so a
+  // per-peer toggle can't silently desync the sim.
+  {
+    label: "import from '@/engine/player-settings'",
+    re: /\bfrom\s+['"](?:@\/engine\/player-settings|(?:\.\.?\/)+(?:[^'"]*\/)?player-settings)['"]/,
+  },
 ]
 
 describe('sim-purity guard', () => {

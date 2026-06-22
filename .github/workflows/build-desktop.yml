@@ -46,6 +46,37 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # ---- Hydrate compiled assets from Cloudflare R2 ---------------------
+      # The compiled runtime assets (GLBs/audio/atlases) are gitignored and
+      # served from R2 (see docs/asset-storage.md) — a bare checkout has an
+      # EMPTY public/assets. Without this, electron-builder happily bundles a
+      # broken, asset-less game. We MUST hydrate before the build, and FAIL
+      # LOUDLY if the secret that lets us reach R2 is absent — an empty bundle
+      # must never be produced silently. (Secret: RCLONE_CONF_BASE64, a
+      # base64-encoded rclone.conf with an `r2-hoverbike` S3 remote. See
+      # steam/README.md → "Asset hydration secret".)
+      - name: Install rclone
+        uses: AnimMouse/setup-rclone@v1
+
+      - name: Hydrate assets from R2
+        shell: bash
+        env:
+          RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
+        run: |
+          if [ -z "$RCLONE_CONF_BASE64" ]; then
+            echo "::error::RCLONE_CONF_BASE64 secret is not set. Desktop/Steam builds must hydrate public/assets from R2 — refusing to build an empty bundle. Add the secret (base64 of an rclone.conf with the r2-hoverbike remote); see steam/README.md."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/rclone"
+          echo "$RCLONE_CONF_BASE64" | base64 -d > "$RUNNER_TEMP/rclone/rclone.conf"
+          export RCLONE_CONFIG="$RUNNER_TEMP/rclone/rclone.conf"
+          pnpm assets:pull
+
+      # Belt-and-braces: prove the tree actually hydrated before we spend time
+      # building. Fails the job if assets are missing / below the GLB floor.
+      - name: Verify assets present
+        run: node tools/check-assets-present.mjs
+
       - name: Generate placeholder icons
         run: pnpm gen:icons
 
@@ -53,6 +84,15 @@ jobs:
       - name: Build Linux tree
         if: runner.os == 'Linux'
         run: pnpm build:deck
+
+      # Re-run the floor check against the STAGED tree (Vite copies public/assets
+      # → dist/assets) so a packaging slip that drops the assets is caught before
+      # we tar + attach to a Release.
+      - name: Verify staged assets (Linux)
+        if: runner.os == 'Linux'
+        env:
+          ASSET_DIR: dist/assets
+        run: node tools/check-assets-present.mjs
 
       # tar preserves the executable bit on the `hoverbike` binary — a plain
       # artifact upload (zip) would strip it and Steam would ship a tree that
@@ -74,6 +114,13 @@ jobs:
       - name: Build Windows installer + tree
         if: runner.os == 'Windows'
         run: pnpm build:windows
+
+      # Same staged-tree floor check as the Linux leg (see above).
+      - name: Verify staged assets (Windows)
+        if: runner.os == 'Windows'
+        env:
+          ASSET_DIR: dist/assets
+        run: node tools/check-assets-present.mjs
 
       - name: Upload Windows installer artifact
         if: runner.os == 'Windows'

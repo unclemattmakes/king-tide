@@ -47,22 +47,50 @@ export type ConsoleErrorCollector = {
    *  cold-load shader compile warnings. */
   reset(): void
   /** Throws via expect() if any non-allowlisted error has been recorded.
-   *  Call this at the end of the spec (or any checkpoint mid-spec). */
+   *  Call this at the end of the spec (or any checkpoint mid-spec).
+   *  NB: the project default now runs this automatically after every test
+   *  (see the auto fixture below), so most specs no longer need to call it
+   *  by hand — importing this `test` is enough. */
   assertNone(): void
+  /** Opt OUT of the automatic post-test assertion for specs that
+   *  legitimately exercise an error path (renderer-init failure probes, a
+   *  spec that asserts on the error itself, …). The fixture still records
+   *  everything, so the spec can make its own targeted assertions. Returns
+   *  the collector for chaining. */
+  expectErrors(): ConsoleErrorCollector
   /** Returns a snapshot of currently-recorded records for log attachment. */
   snapshot(): ConsoleErrorRecord[]
 }
 
 /**
  * Extended Playwright `test` with a `consoleErrors` fixture. Drop-in
- * replacement for the bare `test` import — every spec under tests/e2e/
- * can adopt it incrementally.
+ * replacement for the bare `test` import.
+ *
+ * PROJECT DEFAULT: any spec that imports this `test` now fails on an
+ * unexpected `console.error` / `pageerror` automatically — the
+ * `_consoleErrorAutoAssert` auto-fixture below runs `assertNone()` after
+ * the test body without the spec having to call it. A spec that
+ * legitimately drives an error path opts out with
+ * `consoleErrors.expectErrors()` (and/or narrows with `.allow(/…/)`).
+ *
+ * Playwright resolves `test` per import, so this can't be wired purely
+ * from `playwright.config.ts` — adopting the default is a one-line import
+ * swap (`from '@playwright/test'` → `from './helpers/console-errors'`),
+ * no per-test assertion call. Specs still on the bare import are tracked
+ * for migration; see playwright.config.ts and the workstream followups.
  */
-export const test = base.extend<{ consoleErrors: ConsoleErrorCollector }>({
+export const test = base.extend<{
+  consoleErrors: ConsoleErrorCollector
+  /** Auto-fixture: enforces "no console errors" after every test that uses
+   *  this `test`, unless the spec called `consoleErrors.expectErrors()`.
+   *  Never referenced by name in specs — `auto: true` runs it regardless. */
+  _consoleErrorAutoAssert: undefined
+}>({
   consoleErrors: async ({ page }, use) => {
     const t0 = Date.now()
     const records: ConsoleErrorRecord[] = []
     const allowlist: RegExp[] = []
+    let optedOut = false
 
     const onPageError = (err: Error): void => {
       records.push({
@@ -82,7 +110,7 @@ export const test = base.extend<{ consoleErrors: ConsoleErrorCollector }>({
     page.on('pageerror', onPageError)
     page.on('console', onConsole)
 
-    const collector: ConsoleErrorCollector = {
+    const collector: ConsoleErrorCollector & { __optedOut(): boolean } = {
       records,
       allow(pattern: RegExp) {
         allowlist.push(pattern)
@@ -90,6 +118,10 @@ export const test = base.extend<{ consoleErrors: ConsoleErrorCollector }>({
       },
       reset() {
         records.length = 0
+      },
+      expectErrors() {
+        optedOut = true
+        return collector
       },
       assertNone() {
         const offending = records.filter((r) => !allowlist.some((re) => re.test(formatRecord(r))))
@@ -103,6 +135,7 @@ export const test = base.extend<{ consoleErrors: ConsoleErrorCollector }>({
         ).toEqual([])
       },
       snapshot: () => records.slice(),
+      __optedOut: () => optedOut,
     }
 
     await use(collector)
@@ -110,6 +143,19 @@ export const test = base.extend<{ consoleErrors: ConsoleErrorCollector }>({
     page.off('pageerror', onPageError)
     page.off('console', onConsole)
   },
+
+  // Runs for EVERY test using this `test` (auto: true). After the body
+  // finishes, fail on any unexpected console error unless the spec opted
+  // out via `consoleErrors.expectErrors()`. Depends on `consoleErrors` so
+  // the listener is installed first and torn down after this runs.
+  _consoleErrorAutoAssert: [
+    async ({ consoleErrors }, use) => {
+      await use(undefined)
+      const c = consoleErrors as ConsoleErrorCollector & { __optedOut(): boolean }
+      if (!c.__optedOut()) consoleErrors.assertNone()
+    },
+    { auto: true },
+  ],
 })
 
 export { expect } from '@playwright/test'

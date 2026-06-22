@@ -45,6 +45,7 @@ import {
 import { createPerfRecorder, type PerfStats } from '@/engine/perf-recorder'
 import {
   ANTI_GRAV_CAMERA_SCALAR,
+  DEFAULT_PLAYER_SETTINGS,
   markTutorialCompleted,
   playerSettings,
 } from '@/engine/player-settings'
@@ -760,11 +761,25 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // loop above. The trailing WAKE itself doesn't ride this: the water mesh
   // reads the sim's `waveField.trails` directly (the same points buoyancy
   // samples), so the drawn wake and the felt wake can't diverge.
+  // Returned view (truncated each frame) plus a persistent index-pool of
+  // mutable impact objects, mutated by index so the population path is
+  // allocation-free once the pool is warm — same pattern as `hudBikePool`.
   const bikeImpacts: BikeImpact[] = []
+  const bikeImpactPool: BikeImpact[] = []
   function gatherBikeImpacts(): readonly BikeImpact[] {
     bikeImpacts.length = 0
     for (const w of waveField.wakes) {
-      bikeImpacts.push({ x: w.x, z: w.z, vx: w.vx, vz: w.vz, weight: w.weight })
+      let impact = bikeImpactPool[bikeImpacts.length]
+      if (!impact) {
+        impact = { x: 0, z: 0, vx: 0, vz: 0, weight: 0 }
+        bikeImpactPool.push(impact)
+      }
+      impact.x = w.x
+      impact.z = w.z
+      impact.vx = w.vx
+      impact.vz = w.vz
+      impact.weight = w.weight
+      bikeImpacts.push(impact)
     }
     return bikeImpacts
   }
@@ -1072,6 +1087,13 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // frame's raw player intent (the touch-to-resume hand-back signal).
     reconcileOobAutopilot()
     const oobCfg = oobConfigNow()
+    // Sample the mutable `playerSettings.rubberBandAssist` ONCE per frame,
+    // OUTSIDE the fixed-step accumulator, so the deterministic step never
+    // reads the singleton mid-tick (ADR 0002 / sim-purity guard). SP feeds
+    // the live toggle; MP pins the frozen default so peers agree — mirrors
+    // the `tuning` SP/MP split below.
+    const rubberBandAssistNow =
+      roomId === null ? playerSettings.rubberBandAssist : DEFAULT_PLAYER_SETTINGS.rubberBandAssist
 
     physAccum += dt
     // Pause menu gates the sim in single-player. Reset the accumulator
@@ -1142,6 +1164,9 @@ export function startGameLoop(opts: GameLoopOpts): void {
           // defaults so peers step identically — mirrors waveTimeScale /
           // runAI pinning above (docs/systems-review.md §1.2).
           tuning: roomId === null ? simTuningFromDevSettings() : defaultSimTuning(),
+          // Sampled once per frame outside the accumulator (see above) so
+          // the deterministic step never reads `playerSettings` mid-tick.
+          rubberBandAssist: rubberBandAssistNow,
           ...(waveRiderSys ? { waveRiders: waveRiderSys } : {}),
         })
         // M10.11 — broadcast at 20 Hz. The send is gated on `net.ready &&

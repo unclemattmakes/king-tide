@@ -1,4 +1,9 @@
 /**
+ * ⚠ PARKED — feature cut from races (parked for a possible future DLC).
+ * No shipped track places anti-grav zones or flags `antiGrav` splines, so this HUD
+ * widget never fades in during a shipped race. Kept for the DLC revival; do not
+ * delete. See CLAUDE.md ("Anti-grav is cut") for the v2 reality.
+ *
  * Anti-grav HUD widget — visual half of the anti-grav entry indicator.
  *
  * Hangs off the `#hud-anti-grav` slot reserved in the Step 0 HUD

@@ -1,0 +1,372 @@
+{
+  "schemaVersion": 1,
+  "bikes": [
+    {
+      "id": "calibration",
+      "displayName": "Calibration Bike",
+      "url": "/assets/bikes/calibration.glb",
+      "specPath": "specs/bikes/calibration.json",
+      "physics": {
+        "massKg": 120,
+        "topSpeedMps": 28,
+        "hoverHeight": 1.2
+      },
+      "appearance": {
+        "liveryColor": "#888888",
+        "metalColor": "#444444",
+        "glowColor": "#ffffff",
+        "glowIntensity": 1
+      }
+    },
+    {
+      "id": "cruiser",
+      "displayName": "Cruiser",
+      "url": "/assets/bikes/cruiser.glb",
+      "specPath": "specs/bikes/cruiser.json",
+      "physics": {
+        "massKg": 160,
+        "topSpeedMps": 32,
+        "hoverHeight": 1.2
+      },
+      "appearance": {
+        "liveryColor": "#335599",
+        "metalColor": "#1a1c20",
+        "glowColor": "#55aaff",
+        "glowIntensity": 1.2
+      }
+    },
+    {
+      "id": "racer",
+      "displayName": "Racer",
+      "url": "/assets/bikes/racer.glb",
+      "specPath": "specs/bikes/racer.json",
+      "physics": {
+        "massKg": 120,
+        "topSpeedMps": 28,
+        "hoverHeight": 1.2
+      },
+      "appearance": {
+        "liveryColor": "#ff7733",
+        "metalColor": "#222428",
+        "glowColor": "#ffaa55",
+        "glowIntensity": 1.4
+      }
+    },
+    {
+      "id": "scout",
+      "displayName": "Scout",
+      "url": "/assets/bikes/scout.glb",
+      "specPath": "specs/bikes/scout.json",
+      "physics": {
+        "massKg": 220,
+        "topSpeedMps": 32,
+        "hoverHeight": 0.8
+      },
+      "appearance": {
+        "liveryColor": "#ff6633",
+        "metalColor": "#222428",
+        "glowColor": "#5cf2ff",
+        "glowIntensity": 1.4
+      }
+    },
+    {
+      "id": "sparrow",
+      "displayName": "Sparrow",
+      "url": "/assets/bikes/sparrow.glb",
+      "specPath": "specs/bikes/sparrow.json",
+      "physics": {
+        "massKg": 80,
+        "topSpeedMps": 26,
+        "hoverHeight": 1.4
+      },
+      "appearance": {
+        "liveryColor": "#ddbb44",
+        "metalColor": "#1c1f1e",
+        "glowColor": "#fff088",
+        "glowIntensity": 1.5
+      }
+    },
+    {
+      "id": "stunt",
+      "displayName": "Stunt",
+      "url": "/assets/bikes/stunt.glb",
+      "specPath": "specs/bikes/stunt.json",
+      "physics": {
+        "massKg": 90,
+        "topSpeedMps": 25,
+        "hoverHeight": 1.2
+      },
+      "appearance": {
+        "liveryColor": "#33aa66",
+        "metalColor": "#1c2620",
+        "glowColor": "#66ff99",
+        "glowIntensity": 1.6
+      }
+    }
+  ],
+  "props": [
+    {
+      "id": "barrier_low",
+      "displayName": "Low Barrier",
+      "url": "/assets/props/barrier_low.glb",
+      "specPath": "specs/props/barrier_low.json",
+      "category": "barrier"
+    },
+    {
+      "id": "barrier_tall",
+      "displayName": "Tall Barrier",
+      "url": "/assets/props/barrier_tall.glb",
+      "specPath": "specs/props/barrier_tall.json",
+      "category": "barrier"
+    },
+    {
+      "id": "buoy",
+      "displayName": "Marker Buoy",
+      "url": "/assets/props/buoy.glb",
+      "specPath": "specs/props/buoy.json",
+      "category": "buoy",
+      "waveRider": "buoy"
+    },
+    {
+      "id": "crate_small",
+      "displayName": "Small Crate",
+      "url": "/assets/props/crate_small.glb",
+      "specPath": "specs/props/crate_small.json",
+      "category": "crate"
+    },
+    {
+      "id": "lamppost_tall",
+      "displayName": "Tall Lamppost",
+      "url": "/assets/props/lamppost_tall.glb",
+      "specPath": "specs/props/lamppost_tall.json",
+      "category": "lamppost"
+    },
+    {
+      "id": "log",
+      "displayName": "Drift Log",
+      "url": "/assets/props/log.glb",
+      "specPath": "specs/props/log.json",
+      "category": "log",
+      "waveRider": "log"
+    },
+    {
+      "id": "pylon_orange",
+      "displayName": "Orange Pylon",
+      "url": "/assets/props/pylon_orange.glb",
+      "specPath": "specs/props/pylon_orange.json",
+      "category": "pylon"
+    }
+  ],
+  "riders": [],
+  "tracks": [
+    {
+      "id": "alpine-sprint",
+      "displayName": "Alpine Sprint",
+      "url": "/assets/tracks/alpine-sprint.glb",
+      "specPath": "public/tracks/alpine-sprint.json"
+    },
+    {
+      "id": "angkor-drowned",
+      "displayName": "Angkor Drowned",
+      "url": "/assets/tracks/angkor-drowned.glb",
+      "specPath": "public/tracks/angkor-drowned.json",
+      "heroUrl": "/assets/tracks/angkor-drowned-hero.jpg",
+      "thumbUrl": "/assets/tracks/angkor-drowned-thumb.jpg"
+    },
+    {
+      "id": "aqualand",
+      "displayName": "Aqualand",
+      "url": "/assets/tracks/aqualand.glb",
+      "specPath": "public/tracks/aqualand.json",
+      "heroUrl": "/assets/tracks/aqualand-hero.jpg",
+      "thumbUrl": "/assets/tracks/aqualand-thumb.jpg"
+    },
+    {
+      "id": "big-bay",
+      "displayName": "Big Bay",
+      "url": "/assets/tracks/big-bay.glb",
+      "specPath": "public/tracks/big-bay.json"
+    },
+    {
+      "id": "bike-validation",
+      "displayName": "Bike Validation",
+      "url": "/assets/tracks/bike-validation.glb",
+      "specPath": "public/tracks/bike-validation.json"
+    },
+    {
+      "id": "calibration",
+      "displayName": "Calibration",
+      "url": "/assets/tracks/calibration.glb",
+      "specPath": "specs/tracks/calibration.json"
+    },
+    {
+      "id": "canyon-run",
+      "displayName": "Canyon Run",
+      "url": "/assets/tracks/canyon-run.glb",
+      "specPath": "public/tracks/canyon-run.json"
+    },
+    {
+      "id": "cape-town-drift",
+      "displayName": "Cape Town Drift",
+      "url": "/assets/tracks/cape-town-drift.glb",
+      "specPath": "public/tracks/cape-town-drift.json",
+      "heroUrl": "/assets/tracks/cape-town-drift-hero.jpg",
+      "thumbUrl": "/assets/tracks/cape-town-drift-thumb.jpg"
+    },
+    {
+      "id": "doges-drift",
+      "displayName": "Doges Drift",
+      "url": "/assets/tracks/doges-drift.glb",
+      "specPath": "public/tracks/doges-drift.json",
+      "heroUrl": "/assets/tracks/doges-drift-hero.jpg",
+      "thumbUrl": "/assets/tracks/doges-drift-thumb.jpg"
+    },
+    {
+      "id": "drift-test",
+      "displayName": "Drift Practice Range",
+      "url": "/assets/tracks/drift-test.glb",
+      "specPath": "public/tracks/drift-test.json"
+    },
+    {
+      "id": "dune-rally",
+      "displayName": "Dune Rally",
+      "url": "/assets/tracks/dune-rally.glb",
+      "specPath": "public/tracks/dune-rally.json"
+    },
+    {
+      "id": "figure-eight",
+      "displayName": "Figure Eight",
+      "url": "/assets/tracks/figure-eight.glb",
+      "specPath": "public/tracks/figure-eight.json"
+    },
+    {
+      "id": "golden-gate-drowned",
+      "displayName": "Golden Gate Drowned",
+      "url": "/assets/tracks/golden-gate-drowned.glb",
+      "specPath": "public/tracks/golden-gate-drowned.json"
+    },
+    {
+      "id": "hatteras-light",
+      "displayName": "Hatteras Light",
+      "url": "/assets/tracks/hatteras-light.glb",
+      "specPath": "public/tracks/hatteras-light.json",
+      "heroUrl": "/assets/tracks/hatteras-light-hero.jpg",
+      "thumbUrl": "/assets/tracks/hatteras-light-thumb.jpg"
+    },
+    {
+      "id": "kilauea-crown",
+      "displayName": "Kilauea Crown",
+      "url": "/assets/tracks/kilauea-crown.glb",
+      "specPath": "public/tracks/kilauea-crown.json",
+      "heroUrl": "/assets/tracks/kilauea-crown-hero.jpg",
+      "thumbUrl": "/assets/tracks/kilauea-crown-thumb.jpg"
+    },
+    {
+      "id": "liberty-drowned",
+      "displayName": "Liberty Drowned",
+      "url": "/assets/tracks/liberty-drowned.glb",
+      "specPath": "public/tracks/liberty-drowned.json",
+      "heroUrl": "/assets/tracks/liberty-drowned-hero.jpg",
+      "thumbUrl": "/assets/tracks/liberty-drowned-thumb.jpg"
+    },
+    {
+      "id": "marina-bay-7",
+      "displayName": "Marina Bay 7",
+      "url": "/assets/tracks/marina-bay-7.glb",
+      "specPath": "public/tracks/marina-bay-7.json",
+      "heroUrl": "/assets/tracks/marina-bay-7-hero.jpg",
+      "thumbUrl": "/assets/tracks/marina-bay-7-thumb.jpg"
+    },
+    {
+      "id": "mexico-city",
+      "displayName": "Mexico City",
+      "url": "/assets/tracks/mexico-city.glb",
+      "specPath": "public/tracks/mexico-city.json",
+      "heroUrl": "/assets/tracks/mexico-city-hero.jpg",
+      "thumbUrl": "/assets/tracks/mexico-city-thumb.jpg"
+    },
+    {
+      "id": "oval-loop",
+      "displayName": "Oval Loop",
+      "url": "/assets/tracks/oval-loop.glb",
+      "specPath": "public/tracks/oval-loop.json"
+    },
+    {
+      "id": "prop-showcase",
+      "displayName": "Prop Showcase",
+      "url": "/assets/tracks/prop-showcase.glb",
+      "specPath": "public/tracks/prop-showcase.json",
+      "heroUrl": "/assets/tracks/prop-showcase-hero.jpg",
+      "thumbUrl": "/assets/tracks/prop-showcase-thumb.jpg"
+    },
+    {
+      "id": "sandbar",
+      "displayName": "Mayday Bay",
+      "url": "/assets/tracks/sandbar.glb",
+      "specPath": "public/tracks/sandbar.json",
+      "heroUrl": "/assets/tracks/sandbar-hero.jpg",
+      "thumbUrl": "/assets/tracks/sandbar-thumb.jpg"
+    },
+    {
+      "id": "seattle",
+      "displayName": "Seattle",
+      "url": "/assets/tracks/seattle.glb",
+      "specPath": "public/tracks/seattle.json"
+    },
+    {
+      "id": "seattle-sprint",
+      "displayName": "Seattle Sprint",
+      "url": "/assets/tracks/seattle-sprint.glb",
+      "specPath": "public/tracks/seattle-sprint.json"
+    },
+    {
+      "id": "shibuya-submerged",
+      "displayName": "Shibuya Submerged",
+      "url": "/assets/tracks/shibuya-submerged.glb",
+      "specPath": "public/tracks/shibuya-submerged.json",
+      "heroUrl": "/assets/tracks/shibuya-submerged-hero.jpg",
+      "thumbUrl": "/assets/tracks/shibuya-submerged-thumb.jpg"
+    },
+    {
+      "id": "south-beach-sunken",
+      "displayName": "South Beach Sunken",
+      "url": "/assets/tracks/south-beach-sunken.glb",
+      "specPath": "public/tracks/south-beach-sunken.json",
+      "heroUrl": "/assets/tracks/south-beach-sunken-hero.jpg",
+      "thumbUrl": "/assets/tracks/south-beach-sunken-thumb.jpg"
+    },
+    {
+      "id": "template-tunnel-island",
+      "displayName": "Template Tunnel Island",
+      "url": "/assets/tracks/template-tunnel-island.glb",
+      "specPath": "public/tracks/template-tunnel-island.json"
+    },
+    {
+      "id": "template-tunnels",
+      "displayName": "Template Tunnels",
+      "url": "/assets/tracks/template-tunnels.glb",
+      "specPath": "public/tracks/template-tunnels.json"
+    },
+    {
+      "id": "test-ring",
+      "displayName": "Test Ring",
+      "url": "/assets/tracks/test-ring.glb",
+      "specPath": "specs/tracks/test-ring.json"
+    },
+    {
+      "id": "test-track",
+      "displayName": "Test Track",
+      "url": "/assets/tracks/test-track.glb",
+      "specPath": "public/tracks/test-track.json"
+    },
+    {
+      "id": "the-maw",
+      "displayName": "The Maw",
+      "url": "/assets/tracks/the-maw.glb",
+      "specPath": "public/tracks/the-maw.json",
+      "heroUrl": "/assets/tracks/the-maw-hero.jpg",
+      "thumbUrl": "/assets/tracks/the-maw-thumb.jpg"
+    }
+  ],
+  "generatedAt": "2026-06-06T20:46:54.895Z"
+}

@@ -18,12 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Compiled GLB/JPG/PNG/opus assets are NOT in git (no longer LFS) — they
+      # live on Cloudflare R2 and are gitignored (see docs/asset-storage.md).
+      # This job typechecks/lints/unit-tests/builds without runtime asset bytes
+      # (the bundle's missing assets are fetched at runtime via
+      # VITE_ASSET_BASE_URL); asset-dependent checks run in the `e2e` /
+      # `determinism` jobs, which hydrate from R2.
       - uses: actions/checkout@v6
-        # Compiled GLB/JPG/PNG assets live in Git LFS (see docs/asset-storage.md).
-        # Without this they check out as pointer text and asset-contract tests
-        # (e.g. bike-loader) + the bundled build get the stub, not real bytes.
-        with:
-          lfs: true
 
       - uses: pnpm/action-setup@v6
         with:
@@ -72,11 +73,11 @@ jobs:
     continue-on-error: true
     env:
       E2E_HEADLESS: '1'
+      # Mapped from the secret so step `if:` can test it — the `secrets`
+      # context is NOT available in `if` conditions, but `env` is.
+      RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
     steps:
       - uses: actions/checkout@v6
-        # E2E drives the real app, which fetches the LFS-backed GLB assets.
-        with:
-          lfs: true
       - uses: pnpm/action-setup@v6
         with:
           version: 10
@@ -85,6 +86,24 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # E2E drives the real app, which fetches the compiled GLB/audio assets.
+      # Those are gitignored + served from R2 (docs/asset-storage.md), so we
+      # hydrate them first. Gated on RCLONE_CONF_BASE64: if it's absent (e.g. a
+      # forked PR with no secrets) we skip the pull and let the run proceed —
+      # this job is informational (continue-on-error) so a missing-asset failure
+      # here doesn't gate the build. The hard asset gate is the `determinism` job.
+      - name: Install rclone
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        uses: AnimMouse/setup-rclone@v1
+      - name: Hydrate assets from R2
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        env:
+          RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rclone"
+          echo "$RCLONE_CONF_BASE64" | base64 -d > "$RUNNER_TEMP/rclone/rclone.conf"
+          export RCLONE_CONFIG="$RUNNER_TEMP/rclone/rclone.conf"
+          pnpm assets:pull
       - name: Install Playwright Chromium
         run: pnpm e2e:install
       - name: Run e2e
@@ -94,6 +113,65 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # Determinism GATE — unlike the broad `e2e` job above, this one is NOT
+  # continue-on-error, so a determinism regression (sim divergence or a golden
+  # mismatch) can actually fail the build. It runs ONLY the two determinism
+  # specs against hydrated assets.
+  #
+  # Asset/secret gating: the specs need the compiled GLBs from R2. If
+  # RCLONE_CONF_BASE64 is present we hydrate and run the gate for real (a golden
+  # mismatch fails the job). If it's absent (forked PR, no secrets), we can't
+  # hydrate, so we no-op with a warning rather than red-failing on a missing
+  # bucket — the gate still fails for real on any push/PR that has the secret.
+  determinism:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      E2E_HEADLESS: '1'
+      # See the e2e job: secret mapped to env so step `if:` can read it.
+      RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install rclone
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        uses: AnimMouse/setup-rclone@v1
+      - name: Hydrate assets from R2
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        env:
+          RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rclone"
+          echo "$RCLONE_CONF_BASE64" | base64 -d > "$RUNNER_TEMP/rclone/rclone.conf"
+          export RCLONE_CONFIG="$RUNNER_TEMP/rclone/rclone.conf"
+          pnpm assets:pull
+      - name: Verify assets present
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        run: node tools/check-assets-present.mjs
+      - name: Install Playwright Chromium
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        run: pnpm e2e:install
+      - name: Run determinism gate
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        run: pnpm e2e tests/e2e/m10-determinism.spec.ts tests/e2e/determinism-snapshot.spec.ts
+      - name: Skip notice (no asset secret)
+        if: ${{ env.RCLONE_CONF_BASE64 == '' }}
+        run: echo "::warning::RCLONE_CONF_BASE64 not set — skipping the determinism gate (cannot hydrate assets from R2). It runs for real on branches/PRs with the secret."
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-determinism
           path: playwright-report/
           retention-days: 7
 

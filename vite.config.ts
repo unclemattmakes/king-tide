@@ -282,7 +282,12 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    // 'hidden' still emits .map files (so a crash reporter / source-map
+    // upload can symbolicate stacks) but omits the `//# sourceMappingURL`
+    // comment from the served bundles — so we don't publish browsable source
+    // on the deployed site. Set SOURCEMAP=1 for a local build with maps
+    // wired up for DevTools.
+    sourcemap: process.env.SOURCEMAP === '1' ? true : 'hidden',
     rollupOptions: {
       input: {
         main: path.resolve(REPO_ROOT, 'index.html'),

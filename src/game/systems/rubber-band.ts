@@ -1,5 +1,4 @@
 import { query } from 'bitecs'
-import { playerSettings } from '@/engine/player-settings'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import { AIController, AIControllerStore, AITag } from '@/game/components/ai'
 import { Racer, RacerStore } from '@/game/components/race'
@@ -13,12 +12,18 @@ import type { Track } from '@/game/tracks/types'
  * leader and each AI; AIs further behind get a throttle boost via topSpeedFactor.
  * Subtle — we want close races, not unfair comebacks.
  *
- * Two knobs from `playerSettings`:
+ * Two knobs gate this:
  *  - `aiDifficulty` is *baked* per-AI on spawn (boost cap / penalty
  *    floor / baseline speed factor live on the controller component);
  *    so a difficulty change takes effect on the next race, not mid-lap.
- *  - `rubberBandAssist` is read here each tick — flipping the toggle
- *    mid-race smoothly settles AI back to baseline.
+ *  - `assistOn` arrives as a parameter (threaded through
+ *    `StepInputs.rubberBandAssist` — single-player reads the live
+ *    `playerSettings.rubberBandAssist` OUTSIDE the step, multiplayer
+ *    passes a frozen default so peers agree). Flipping the toggle
+ *    mid-race smoothly settles AI back to baseline. NOTE: do NOT read
+ *    the `playerSettings` singleton here — that would leak a mutable,
+ *    per-peer value into the deterministic step (ADR 0002; the
+ *    sim-purity guard bans the import).
  *
  * When the assist is off the system still runs to drive `topSpeedFactor`
  * back to the per-AI baseline (instead of hard-snapping), so a player
@@ -36,7 +41,7 @@ const PENALTY_SATURATION_CP = 2
  *  a checkpoint boundary. */
 const SMOOTHING = 0.05
 
-export function rubberBandSystem(sim: SimWorld, track: Track): void {
+export function rubberBandSystem(sim: SimWorld, track: Track, assistOn: boolean): void {
   const racerEids = query(sim, [Racer])
   if (racerEids.length === 0) return
 
@@ -46,7 +51,6 @@ export function rubberBandSystem(sim: SimWorld, track: Track): void {
     if (p > leaderProgress) leaderProgress = p
   }
 
-  const assistOn = playerSettings.rubberBandAssist
   const aiEids = query(sim, [AITag, AIController, Racer])
   for (const eid of aiEids) {
     const r = RacerStore.must(eid)

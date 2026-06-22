@@ -101,6 +101,36 @@ before submitting if your change could affect those areas.
 
 If lint fails, `pnpm format` will fix most issues.
 
+### Local verification gate
+
+CI for this repo can't be trusted — it regularly aborts at setup on a
+spending-limit failure (see [CLAUDE.md](CLAUDE.md) hard rule 1), so the local
+gate **is** the gate. Two convenience scripts wrap the commands above:
+
+```bash
+pnpm verify            # typecheck + lint + test — the pre-push gate
+pnpm preflight:steam   # verify + build + asset-presence/track-asset checks
+                       # run this before cutting a Steam build
+```
+
+`pnpm verify` is the everyday pre-push check; `pnpm build` (and `pnpm e2e` for
+sim/physics/race/netcode changes, per the table above) still apply on top for
+the areas they cover. `pnpm preflight:steam` is the heavier gate before a
+release — it runs `verify`, a production `build`, and validates that the
+compiled assets a Steam build needs are actually present.
+
+**Optional pre-push hook.** To have `pnpm verify` run automatically before
+every push, opt in once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This is opt-in (off by default, so it can't surprise anyone). If `.githooks/`
+doesn't exist in your clone yet, add a `pre-push` script there that runs
+`pnpm verify` — keep it consistent with the command sequence in CLAUDE.md hard
+rule 1 rather than re-listing the checks here.
+
 ## Architecture rules
 
 A few rules that aren't negotiable. They unlock determinism, headless
