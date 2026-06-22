@@ -86,6 +86,9 @@ export type AIControllerData = {
    *  See `DifficultyTuning.steerKp/steerKd/lineBlend`. */
   steerKp: number
   steerKd: number
+  /** Per-difficulty speed taper for the proportional steering gain.
+   *  See `DifficultyTuning.steerSpeedTaper` + `taperedSteerKp`. */
+  steerSpeedTaper: number
   lineBlend: number
 }
 export const AIControllerStore = createStore<AIControllerData>('AIController')
@@ -118,6 +121,7 @@ export function defaultAIController(
     driftCooldownS: 0,
     steerKp: tuning.steerKp,
     steerKd: tuning.steerKd,
+    steerSpeedTaper: tuning.steerSpeedTaper,
     lineBlend: tuning.lineBlend,
   }
 }

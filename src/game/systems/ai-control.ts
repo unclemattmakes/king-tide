@@ -86,6 +86,20 @@ export function decideAIDrift(
 }
 
 /**
+ * Speed-tapered proportional steering gain. The raw `steerKp` that makes the
+ * line at low speed over-corrects (saws the wheel) at top speed; scaling it by
+ * `1 / (1 + speedHoriz·taper)` bleeds authority off as horizontal speed climbs.
+ * `taper` is per-difficulty (`DifficultyTuning.steerSpeedTaper`); `taper = 0`
+ * restores the legacy speed-independent gain. The yaw-rate damper (`steerKd`)
+ * is deliberately NOT tapered — it's the high-speed stabiliser. Pure +
+ * deterministic so it's unit-tested directly. `speedHoriz` is clamped at 0 so a
+ * (shouldn't-happen) negative never amplifies the gain.
+ */
+export function taperedSteerKp(steerKp: number, speedHoriz: number, taper: number): number {
+  return steerKp / (1 + Math.max(0, speedHoriz) * Math.max(0, taper))
+}
+
+/**
  * Spline-following AI: each tick, finds a target ahead on the spline and a
  * stay-close-to-line target right under us, then writes throttle/steer/brake
  * into ControlIntent. Hover system drives the rigid body.
@@ -249,7 +263,10 @@ export function aiControlSystem(
     // Gains are per-difficulty (baked on the controller) so an over-
     // correcting Hard AI can be softened without touching Casual.
     const damp = angvel.y * ai.steerKd
-    let steer = -angle * ai.steerKp + damp
+    // Proportional gain tapers with speed (over-correction at top speed was the
+    // §7 "twitchy at 28 m/s, lazy at 8" issue); damper term stays untapered.
+    const kp = taperedSteerKp(ai.steerKp, speedHoriz, ai.steerSpeedTaper)
+    let steer = -angle * kp + damp
     steer = Math.max(-1, Math.min(1, steer))
 
     // 6. Curvature look-ahead. Walk ~1.5s ahead along the spline summing arc
