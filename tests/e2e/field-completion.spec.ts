@@ -51,18 +51,22 @@ test.describe('full-field completion', () => {
         !REEF_CUP_TRACKS.includes(id) && !FIELD_CHECK_ON,
         `${id} is not a Reef Cup track — gated on FIELD_CHECK=1`,
       )
-      // KNOWN JAMS (tracked, reproduced headed 2026-06-21): the 8-bike field
-      // stalls at a raised-terrain gate on two Reef Cup tracks —
-      //   mexico-city:     slowest bike advances 10/13, never passes cp10
-      //   cape-town-drift: slowest bike advances  6/14, never passes cp6
-      // These are pre-existing track/AI issues this gate surfaced (the recurring
-      // "gate floats above raised terrain" jam class), NOT sim regressions.
-      // Marked fixme so they stay visible in the report without failing the
-      // suite; remove each once its checkpoint is fixed. sandbar is the live
-      // hard gate today.
+      // KNOWN BLOCKER (cape-town-drift only, reproduced headed 2026-06-22):
+      // mexico-city's cp10 float jam is FIXED (the field laps cleanly now), so
+      // it's a live hard gate again. Cape's documented cp6 jam (a crosswise
+      // gate) is also fixed — reoriented to the cp5→cp7 chord — but full 8-bike
+      // completion is still blocked at cp9 (the Table Mountain summit): off-line
+      // AI bikes (holding the grid's lateral lineOffset, up to 8 m) drift onto
+      // the steep SW summit slope and stall ~14 m short of the gate. That's a
+      // terrain / AI-line problem, NOT gate data — clearing the summit's
+      // shipping-container slalom + widening gates got it 0/8→5/8 but couldn't
+      // resolve the stall. A real fix needs a Table-Mountain re-grade (or a
+      // tighter AI line-spread), and cape's content-root .blend is currently a
+      // 2-point-spline stub that can't export a terrain pass. Tracked for a
+      // level pass; remove this fixme once the summit is navigable.
       test.fixme(
-        id === 'mexico-city' || id === 'cape-town-drift',
-        `${id}: known AI field jam at a raised-terrain checkpoint — pending level-design fix`,
+        id === 'cape-town-drift',
+        `${id}: AI field stalls on the cp9 Table Mountain summit — pending a terrain/level pass`,
       )
       // Generous: the poll window is ~110×2s; a slow-but-completing field must
       // not trip the test timeout before the early-exit (or the diagnostic fail).
