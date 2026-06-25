@@ -8,9 +8,18 @@
  * via the `callbacks` parameter.
  */
 
+import { SurfaceType } from '@/engine/sim/surface-types'
 import type { PropManifestEntry } from '@/game/assets/manifest'
-import type { Track } from '@/game/tracks/types'
+import { SKY_COLOR_GRADES, SKY_TONE_MAPPINGS, type Track } from '@/game/tracks/types'
 import { propSizeHint } from './editor-helpers'
+
+/** Surface tags an author can tag a prop's collider with. Mirrors
+ *  `SurfaceType` (src/engine/sim/surface-types.ts) so the dropdown stays in
+ *  sync with the runtime grip table. */
+const SURFACE_VALUES = Object.values(SurfaceType)
+
+/** Degrees-of-freedom presets for a floating (wave-rider) prop. */
+const WAVE_RIDER_DOFS = ['locked', 'yaw'] as const
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -22,6 +31,7 @@ export type PlaceTool =
   | 'pickup'
   | 'pad'
   | 'antiGrav'
+  | 'waveZone'
   | 'spline'
   | 'box'
   | 'sphere'
@@ -35,6 +45,7 @@ export type EntitySel =
   | { kind: 'pickup'; index: number }
   | { kind: 'pad'; index: number }
   | { kind: 'antiGrav'; index: number }
+  | { kind: 'waveZone'; index: number }
   | { kind: 'spline'; splineIndex: number; pointIndex: number }
   | { kind: 'prop'; index: number }
   | { kind: 'start' }
@@ -59,6 +70,7 @@ export function entityKey(s: NonNullable<EntitySel>): string {
   if (s.kind === 'spline') return `spline:${s.splineIndex}:${s.pointIndex}`
   if (s.kind === 'start') return 'start'
   if (s.kind === 'antiGrav') return `antigrav:${s.index}`
+  if (s.kind === 'waveZone') return `wavezone:${s.index}`
   return `${s.kind}:${s.index}`
 }
 
@@ -70,6 +82,7 @@ export function parseEntityKey(k: string): EntitySel {
   if (k.startsWith('pickup:')) return { kind: 'pickup', index: Number(k.slice(7)) }
   if (k.startsWith('pad:')) return { kind: 'pad', index: Number(k.slice(4)) }
   if (k.startsWith('antigrav:')) return { kind: 'antiGrav', index: Number(k.slice(9)) }
+  if (k.startsWith('wavezone:')) return { kind: 'waveZone', index: Number(k.slice(9)) }
   if (k.startsWith('prop:')) return { kind: 'prop', index: Number(k.slice(5)) }
   if (k.startsWith('spline:')) {
     const [, si, pi] = k.split(':')
@@ -122,6 +135,27 @@ export type EditorPanelCallbacks = {
   /** Fires on slider mouseup so the receiver can close out the current
    *  undo coalescing window. */
   onStartSplineTCommit(): void
+  /** Typed numeric entry for a scalar on the currently-selected entity.
+   *  `field` is a logical path (`pos.x`, `halfWidth`, `size.z`, `yaw`,
+   *  `strength`, `heightMult`, …) the receiver maps onto the draft entity.
+   *  Commits one undo step per edit and rebuilds helpers. */
+  onNumEdit(field: string, value: number): void
+  /** Clear an optional numeric field on the selected entity (e.g. a wave
+   *  zone's `directionDeg` / `surge*`). Mirrors `onNumEdit` but deletes. */
+  onNumClear(field: string): void
+  /** Edit a track-level setting: `name` (string), `lapsToFinish` (int),
+   *  `gateSpacing` (number), `floatGates` (boolean). */
+  onTrackFieldEdit(field: string, value: string | number | boolean): void
+  /** Edit a `draft.sky.*` field. `value === null` clears the key (back to
+   *  the runtime default). Strings for `tint` / `colorGrade` / `toneMapping`. */
+  onSkyEdit(field: string, value: string | number | null): void
+  /** Edit a flag on the selected prop: `color` (hex|null), `surface`
+   *  (string|null), `waterline` (bool), `waveRider` (bool), `waveRiderDof`
+   *  (string), `animated` (bool), `clip` (string|null), `loop` (bool). */
+  onPropFlagEdit(field: string, value: string | boolean | null): void
+  /** Unbind the selected gate from the AI spline (delete its `splineT`),
+   *  mirroring the player-start unbind. */
+  onGateUnbindFromSpline(): void
   /** Whether the currently-selected entity supports a given gizmo mode.
    *  Used to disable / grey out mode buttons that wouldn't apply. */
   selSupportsMode(m: GizmoMode): boolean
@@ -145,6 +179,12 @@ export function createEditorPanel(opts: {
   callbacks: EditorPanelCallbacks
 }): EditorPanelHandle {
   const { draft, propAssets, getState, callbacks } = opts
+
+  // Collapsible-section open state, persisted across the panel's full
+  // innerHTML re-renders (a fresh `<details>` would otherwise reset).
+  // Both default closed so the panel stays compact — the outliner is the
+  // primary surface and must stay reachable on short viewports.
+  const sectionOpen: Record<string, boolean> = { track: false, sky: false }
 
   const panel = document.createElement('div')
   panel.id = 'editor-panel'
@@ -209,6 +249,7 @@ export function createEditorPanel(opts: {
            ${placeBtn('gate', '+ Gate')}
            ${placeBtn('pickup', '+ Pickup')}
            ${placeBtn('pad', '+ Boost')}
+           ${placeBtn('waveZone', '+ Wave Zone')}
            ${placeBtn('antiGrav', '+ Anti-Grav')}
            ${placeBtn('spline', '+ Spline pt')}
          </div>
@@ -235,6 +276,7 @@ export function createEditorPanel(opts: {
          <button type="button" id="ed-auto-gates" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;text-align:left">Auto-place gates from spline</button>
        </div>`,
       trackSettingsHtml(),
+      skySettingsHtml(),
       `<div id="ed-outliner" style="border-top:1px solid #2a3a4a;padding-top:8px;flex:1;overflow-y:auto;min-height:140px">
          ${outlinerHtml()}
        </div>`,
@@ -256,14 +298,42 @@ export function createEditorPanel(opts: {
 
   function trackSettingsHtml(): string {
     const h = draft.water?.height ?? 0
-    return `<div style="display:flex;flex-direction:column;gap:4px">
-        <div style="color:#9bb">Track settings</div>
-        <label style="display:flex;align-items:center;gap:6px">
-          <span style="width:70px">Sea level</span>
+    const laps = draft.lapsToFinish ?? 3
+    const spacing = draft.gateSpacing ?? 0
+    return `<details ${sectionOpen.track ? 'open' : ''} data-section="track" style="border-top:1px solid #2a3a4a;padding-top:8px">
+        <summary style="color:#9bb;cursor:pointer;font-weight:bold">Track settings</summary>
+        ${textRow('Name', 'data-trackedit', 'name', draft.name)}
+        ${numRow('Laps', 'data-trackedit', 'lapsToFinish', laps, { min: 1, max: 99, step: 1 })}
+        ${numRow('Gate spacing', 'data-trackedit', 'gateSpacing', spacing, { min: 0, step: 1 })}
+        ${boolRow('Float gates on waves', 'data-trackedit', 'floatGates', draft.floatGates === true)}
+        <label style="display:flex;align-items:center;gap:6px;margin-top:3px">
+          <span style="width:74px;color:#9bb;flex-shrink:0">Sea level</span>
           <input id="ed-water-height" type="range" min="-50" max="50" step="0.1" value="${h}" style="flex:1" />
           <span id="ed-water-height-val" style="width:48px;text-align:right;color:#cdf">${h.toFixed(1)}m</span>
         </label>
-      </div>`
+        ${note('⚠ name · laps · gate spacing · float gates · sea level are <b>Blender-owned</b> — a later .blend re-export overwrites them.')}
+      </details>`
+  }
+
+  function skySettingsHtml(): string {
+    const sky = draft.sky ?? {}
+    const g = (v: number | undefined, d: number) => (typeof v === 'number' ? v : d)
+    return `<details ${sectionOpen.sky ? 'open' : ''} data-section="sky" style="border-top:1px solid #2a3a4a;padding-top:8px">
+        <summary style="color:#9bb;cursor:pointer;font-weight:bold">Sky / atmosphere</summary>
+        ${colorRow('Tint', 'data-skyedit', 'tint', sky.tint)}
+        ${numRow('Cloudiness', 'data-skyedit', 'cloudiness', g(sky.cloudiness, 0.45), { min: 0, max: 1, step: 0.05 })}
+        ${numRow('Cloud tower', 'data-skyedit', 'cloudTowering', g(sky.cloudTowering, 0.35), { min: 0, max: 1, step: 0.05 })}
+        ${numRow('Sun size', 'data-skyedit', 'sunSize', g(sky.sunSize, 1), { min: 0.25, max: 8, step: 0.1 })}
+        ${numRow('Sun intensity', 'data-skyedit', 'sunIntensity', g(sky.sunIntensity, 1), { min: 0, step: 0.05 })}
+        ${numRow('Fog near', 'data-skyedit', 'fogNear', g(sky.fogNear, 500), { min: 0, step: 10 })}
+        ${numRow('Fog far', 'data-skyedit', 'fogFar', g(sky.fogFar, 2200), { min: 0, step: 10 })}
+        ${numRow('Time of day', 'data-skyedit', 'timeOfDay', g(sky.timeOfDay, 0), { min: 0, max: 360, step: 1 })}
+        ${numRow('Bloom', 'data-skyedit', 'bloom', g(sky.bloom, 0), { min: 0, max: 2, step: 0.05 })}
+        ${numRow('Sea state', 'data-skyedit', 'seaStateBeaufort', g(sky.seaStateBeaufort, 4), { min: 0, max: 12, step: 0.5 })}
+        ${selectRow('Colour grade', 'data-skyedit', 'colorGrade', SKY_COLOR_GRADES, sky.colorGrade)}
+        ${selectRow('Tone map', 'data-skyedit', 'toneMapping', SKY_TONE_MAPPINGS, sky.toneMapping)}
+        ${note('Sea state is THE wave-height dial. Atmosphere applies on <b>Play</b> (no live preview here); the whole <b>sky</b> block is Blender-owned.')}
+      </details>`
   }
 
   function placeBtn(t: PlaceTool, label: string): string {
@@ -356,6 +426,16 @@ export function createEditorPanel(opts: {
     )
     sections.push(
       outlinerSection(
+        'Wave Zones',
+        draft.waveZones.map((z, i) => ({
+          k: `wavezone:${i}`,
+          label: `wavezone_${i}  (${z.position.x.toFixed(0)}, ${z.position.z.toFixed(0)})  ×${z.heightMult.toFixed(2)}`,
+          sel: { kind: 'waveZone', index: i } as EntitySel,
+        })),
+      ),
+    )
+    sections.push(
+      outlinerSection(
         'Anti-Grav Zones',
         draft.antiGravZones.map((z, i) => ({
           k: `antigrav:${i}`,
@@ -406,27 +486,51 @@ export function createEditorPanel(opts: {
   function selectedPropsHtml(): string {
     const { sel } = getState()
     if (!sel) return '<span style="color:#566">No selection</span>'
-    if (sel.kind === 'start') {
-      const hasSpline = draft.aiSplines.some((s) => s.id === 'main')
-      const isBound = typeof draft.start.splineT === 'number'
-      const rows: string[] = [
-        `<div><b>start</b></div>`,
-        `<div>pos: ${fmtVec(draft.start.position)}</div>`,
-        `<div>yaw: ${((draft.start.yaw * 180) / Math.PI).toFixed(1)}°</div>`,
-        `<div style="color:#7c9">controls position + facing for the player pole and the 2×4 AI grid</div>`,
-      ]
-      if (isBound) {
-        const t = draft.start.splineT!
-        rows.push(
-          `<div style="color:#7c9">⚓ bound to main spline @ t=${t.toFixed(3)}</div>`,
-          `<label style="display:flex;align-items:center;gap:6px;margin-top:4px">
-             <span style="width:24px;color:#9bb">t</span>
-             <input id="ed-start-spline-t" type="range" min="0" max="1" step="0.001" value="${t}" style="flex:1" />
-             <span id="ed-start-spline-t-val" style="width:48px;text-align:right;color:#cdf">${t.toFixed(3)}</span>
-           </label>`,
-          `<button type="button" id="ed-start-unbind" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;margin-top:4px">Unbind from spline</button>`,
-        )
-      } else if (hasSpline) {
+    if (sel.kind === 'start') return startPropsHtml()
+    if (sel.kind === 'prop') return propPropsHtml(sel.index)
+    if (sel.kind === 'gate') return gatePropsHtml(sel.index)
+    if (sel.kind === 'pickup') {
+      const p = draft.pickupSpawns[sel.index]
+      if (!p) return '(missing)'
+      return `<div><b>pickup_${sel.index}</b></div>${vec3Row('pos', 'data-numedit', 'pos', p)}`
+    }
+    if (sel.kind === 'pad') return padPropsHtml(sel.index)
+    if (sel.kind === 'antiGrav') return antiGravPropsHtml(sel.index)
+    if (sel.kind === 'waveZone') return waveZonePropsHtml(sel.index)
+    const sp = draft.aiSplines[sel.splineIndex]
+    if (!sp) return '(missing)'
+    const arr = sp.anchors ?? sp.points
+    const p = arr[sel.pointIndex]
+    if (!p) return '(missing)'
+    const label = sp.anchors ? 'spline anchor' : 'spline pt'
+    return `<div><b>${label} ${sel.pointIndex}</b></div>${vec3Row('pos', 'data-numedit', 'pos', p)}`
+  }
+
+  function startPropsHtml(): string {
+    const hasSpline = draft.aiSplines.some((s) => s.id === 'main')
+    const isBound = typeof draft.start.splineT === 'number'
+    const rows: string[] = [
+      `<div><b>start</b></div>`,
+      `<div style="color:#7c9">controls position + facing for the player pole and the 2×4 AI grid</div>`,
+    ]
+    if (isBound) {
+      const t = draft.start.splineT!
+      rows.push(
+        `<div style="color:#7c9">⚓ bound to main spline @ t=${t.toFixed(3)}</div>`,
+        numRow('Height (y)', 'data-numedit', 'pos.y', draft.start.position.y, { step: 0.5 }),
+        `<label style="display:flex;align-items:center;gap:6px;margin-top:4px">
+           <span style="width:24px;color:#9bb">t</span>
+           <input id="ed-start-spline-t" type="range" min="0" max="1" step="0.001" value="${t}" style="flex:1" />
+           <span id="ed-start-spline-t-val" style="width:48px;text-align:right;color:#cdf">${t.toFixed(3)}</span>
+         </label>`,
+        `<button type="button" id="ed-start-unbind" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;margin-top:4px">Unbind from spline</button>`,
+      )
+    } else {
+      rows.push(
+        vec3Row('pos', 'data-numedit', 'pos', draft.start.position),
+        numRow('Yaw°', 'data-numedit', 'yawDeg', (draft.start.yaw * 180) / Math.PI, { step: 1 }),
+      )
+      if (hasSpline) {
         rows.push(
           `<button type="button" id="ed-start-bind" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;margin-top:4px">Snap to spline</button>`,
         )
@@ -435,63 +539,198 @@ export function createEditorPanel(opts: {
           `<div style="color:#778">no main spline — place spline anchors to enable curve binding</div>`,
         )
       }
-      return rows.join('')
     }
-    if (sel.kind === 'prop') {
-      const p = draft.props[sel.index]
-      if (!p) return '(missing)'
-      return [
-        `<div><b>${PROP_LABELS[p.type]}_${sel.index}</b></div>`,
-        `<div>pos: ${fmtVec(p.position)}</div>`,
-        `<div>size: ${fmtVec(p.size)}</div>`,
-        `<div style="color:#7c9">${propSizeHint(p.type)}</div>`,
-      ].join('')
+    return rows.join('')
+  }
+
+  function gatePropsHtml(index: number): string {
+    const cp = draft.checkpoints[index]
+    if (!cp) return '(missing)'
+    const bound = typeof cp.splineT === 'number'
+    const rows: string[] = [`<div><b>cp_${String(cp.index).padStart(2, '0')}</b></div>`]
+    if (bound) {
+      rows.push(
+        `<div style="color:#7c9">⚓ bound to spline @ t=${cp.splineT!.toFixed(3)}</div>`,
+        numRow('t', 'data-numedit', 'splineT', cp.splineT!, { min: 0, max: 1, step: 0.001 }),
+        numRow('Height (y)', 'data-numedit', 'pos.y', cp.position.y, { step: 0.5 }),
+      )
+    } else {
+      rows.push(vec3Row('pos', 'data-numedit', 'pos', cp.position))
     }
-    if (sel.kind === 'gate') {
-      const cp = draft.checkpoints[sel.index]
-      if (!cp) return '(missing)'
-      const bound =
-        typeof cp.splineT === 'number'
-          ? `<div style="color:#7c9">⚓ bound to spline @ t=${cp.splineT.toFixed(3)}</div>`
-          : ''
-      return [
-        `<div><b>cp_${String(cp.index).padStart(2, '0')}</b></div>`,
-        `<div>pos: ${fmtVec(cp.position)}</div>`,
-        `<div>halfWidth: ${cp.halfWidth.toFixed(2)} · height: ${cp.height.toFixed(2)}</div>`,
-        bound,
-      ].join('')
+    rows.push(
+      numRow('Half width', 'data-numedit', 'halfWidth', cp.halfWidth, {
+        min: 0.5,
+        max: 200,
+        step: 0.5,
+      }),
+      numRow('Height', 'data-numedit', 'height', cp.height, { min: 0.5, max: 50, step: 0.5 }),
+    )
+    if (bound) {
+      rows.push(
+        `<button type="button" id="ed-gate-unbind" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;margin-top:4px">Unbind from spline</button>`,
+      )
     }
-    if (sel.kind === 'pickup') {
-      const p = draft.pickupSpawns[sel.index]
-      if (!p) return '(missing)'
-      return `<div><b>pickup_${sel.index}</b></div><div>pos: ${fmtVec(p)}</div>`
-    }
-    if (sel.kind === 'pad') {
-      const pad = draft.boostPads[sel.index]
-      if (!pad) return '(missing)'
-      return [
-        `<div><b>pad_${sel.index}</b></div>`,
-        `<div>pos: ${fmtVec(pad.position)}</div>`,
-        `<div>half: ${pad.halfWidth.toFixed(2)} × ${pad.halfHeight.toFixed(2)} × ${pad.halfDepth.toFixed(2)} · strength: ${pad.strength.toFixed(2)}</div>`,
-      ].join('')
-    }
-    if (sel.kind === 'antiGrav') {
-      const z = draft.antiGravZones[sel.index]
-      if (!z) return '(missing)'
-      return [
-        `<div><b>antigrav_${sel.index}</b></div>`,
-        `<div>pos: ${fmtVec(z.position)}</div>`,
-        `<div>halfW: ${z.halfWidth.toFixed(2)} · halfH: ${z.halfHeight.toFixed(2)} · halfD: ${z.halfDepth.toFixed(2)}</div>`,
-        `<div style="color:#7c9">rotate so local +Y matches the road surface normal</div>`,
-      ].join('')
-    }
-    const sp = draft.aiSplines[sel.splineIndex]
-    if (!sp) return '(missing)'
-    const arr = sp.anchors ?? sp.points
-    const p = arr[sel.pointIndex]
+    return rows.join('')
+  }
+
+  function padPropsHtml(index: number): string {
+    const pad = draft.boostPads[index]
+    if (!pad) return '(missing)'
+    return [
+      `<div><b>pad_${index}</b></div>`,
+      vec3Row('pos', 'data-numedit', 'pos', pad.position),
+      numRow('Half width', 'data-numedit', 'halfWidth', pad.halfWidth, {
+        min: 0.5,
+        max: 50,
+        step: 0.5,
+      }),
+      numRow('Half height', 'data-numedit', 'halfHeight', pad.halfHeight, {
+        min: 0.5,
+        max: 50,
+        step: 0.5,
+      }),
+      numRow('Half depth', 'data-numedit', 'halfDepth', pad.halfDepth, {
+        min: 0.5,
+        max: 100,
+        step: 0.5,
+      }),
+      numRow('Strength', 'data-numedit', 'strength', pad.strength, { min: 1, max: 5, step: 0.1 }),
+      note('strength = top-speed multiplier while the bike is inside the volume.'),
+    ].join('')
+  }
+
+  function antiGravPropsHtml(index: number): string {
+    const z = draft.antiGravZones[index]
+    if (!z) return '(missing)'
+    return [
+      `<div><b>antigrav_${index}</b></div>`,
+      vec3Row('pos', 'data-numedit', 'pos', z.position),
+      numRow('Half width', 'data-numedit', 'halfWidth', z.halfWidth, {
+        min: 0.5,
+        max: 200,
+        step: 0.5,
+      }),
+      numRow('Half height', 'data-numedit', 'halfHeight', z.halfHeight, {
+        min: 0.5,
+        max: 100,
+        step: 0.5,
+      }),
+      numRow('Half depth', 'data-numedit', 'halfDepth', z.halfDepth, {
+        min: 0.5,
+        max: 400,
+        step: 0.5,
+      }),
+      note(
+        'rotate so local +Y matches the road surface normal. (Anti-grav is parked for a future DLC — no shipped track uses it.)',
+      ),
+    ].join('')
+  }
+
+  function waveZonePropsHtml(index: number): string {
+    const z = draft.waveZones[index]
+    if (!z) return '(missing)'
+    const hasDir = typeof z.directionDeg === 'number'
+    const hasSurge = typeof z.surgePeriodS === 'number'
+    const rows: string[] = [
+      `<div><b>wavezone_${index}</b></div>`,
+      vec3Row('pos', 'data-numedit', 'pos', z.position),
+      numRow('Half width', 'data-numedit', 'halfWidth', z.halfWidth, {
+        min: 0.5,
+        max: 600,
+        step: 1,
+      }),
+      numRow('Half height', 'data-numedit', 'halfHeight', z.halfHeight, {
+        min: 0.5,
+        max: 200,
+        step: 1,
+      }),
+      numRow('Half depth', 'data-numedit', 'halfDepth', z.halfDepth, {
+        min: 0.5,
+        max: 600,
+        step: 1,
+      }),
+      numRow('Height ×', 'data-numedit', 'heightMult', z.heightMult, {
+        min: 0.05,
+        max: 8,
+        step: 0.05,
+      }),
+      numRow('Freq ×', 'data-numedit', 'freqMult', z.freqMult, { min: 0.1, max: 8, step: 0.05 }),
+      numRow('Blend (m)', 'data-numedit', 'blendRadiusM', z.blendRadiusM, {
+        min: 0.5,
+        max: 200,
+        step: 1,
+      }),
+    ]
+    rows.push(
+      hasDir
+        ? `${numRow('Swell dir°', 'data-numedit', 'directionDeg', z.directionDeg!, { min: -180, max: 180, step: 1 })}<button type="button" data-numclear="directionDeg" style="background:#234;color:#9ab;border:1px solid #456;border-radius:3px;cursor:pointer;font:inherit;padding:1px 6px;margin-top:2px">clear dir (inherit global)</button>`
+        : `<button type="button" data-numedit-set="directionDeg" style="background:#234;color:#9ab;border:1px solid #456;border-radius:3px;cursor:pointer;font:inherit;padding:2px 6px;margin-top:3px">+ swell direction override</button>`,
+    )
+    rows.push(
+      hasSurge
+        ? [
+            numRow('Surge period', 'data-numedit', 'surgePeriodS', z.surgePeriodS!, {
+              min: 0.5,
+              step: 0.5,
+            }),
+            numRow('Surge amp', 'data-numedit', 'surgeAmplitude', z.surgeAmplitude ?? 0, {
+              step: 0.1,
+            }),
+            `<button type="button" data-numclear="surge" style="background:#234;color:#9ab;border:1px solid #456;border-radius:3px;cursor:pointer;font:inherit;padding:1px 6px;margin-top:2px">clear surge</button>`,
+          ].join('')
+        : `<button type="button" data-numedit-set="surge" style="background:#234;color:#9ab;border:1px solid #456;border-radius:3px;cursor:pointer;font:inherit;padding:2px 6px;margin-top:3px">+ periodic surge (tsunami)</button>`,
+    )
+    rows.push(
+      note(
+        'Scales global wave amplitude/frequency inside the box (live: buoyancy + water shader + AI). Max 8 zones/track.',
+      ),
+    )
+    return rows.join('')
+  }
+
+  function propPropsHtml(index: number): string {
+    const p = draft.props[index]
     if (!p) return '(missing)'
-    const label = sp.anchors ? 'spline anchor' : 'spline pt'
-    return `<div><b>${label} ${sel.pointIndex}</b></div><div>pos: ${fmtVec(p)}</div>`
+    const isAsset = p.type === 'asset'
+    const rows: string[] = [
+      `<div><b>${PROP_LABELS[p.type]}_${index}</b>${isAsset && p.assetId ? ` <span style="color:#789">${escapeHtml(p.assetId)}</span>` : ''}</div>`,
+      vec3Row('pos', 'data-numedit', 'pos', p.position),
+      vec3Row(isAsset ? 'scale' : 'size', 'data-numedit', 'size', p.size, isAsset ? 0.05 : 0.25),
+      `<div style="color:#7c9">${isAsset ? 'size = uniform-ish scale of the GLB' : escapeHtml(propSizeHint(p.type))}</div>`,
+    ]
+    // ── Flags ──
+    rows.push(
+      `<div style="color:#9bb;margin-top:6px;border-top:1px solid #2a3a4a;padding-top:5px">Flags</div>`,
+    )
+    if (!isAsset) {
+      rows.push(colorRow('Colour', 'data-propflag', 'color', p.color))
+    }
+    rows.push(
+      selectRow('Surface', 'data-propflag', 'surface', SURFACE_VALUES, p.surface ?? 'default'),
+    )
+    rows.push(boolRow('Waterline bands', 'data-propflag', 'waterline', p.waterline !== false))
+    rows.push(boolRow('Float on waves', 'data-propflag', 'waveRider', p.waveRider != null))
+    if (p.waveRider != null) {
+      rows.push(
+        selectRow(
+          '  ↳ DOF',
+          'data-propflag',
+          'waveRiderDof',
+          WAVE_RIDER_DOFS,
+          p.waveRider.dof ?? 'locked',
+        ),
+      )
+    }
+    if (isAsset) {
+      rows.push(boolRow('Animated', 'data-propflag', 'animated', p.animated === true))
+      if (p.animated) {
+        rows.push(
+          textRow('  ↳ Clip', 'data-propflag', 'clip', p.clip ?? ''),
+          boolRow('  ↳ Loop', 'data-propflag', 'loop', p.loop !== false),
+        )
+      }
+    }
+    return rows.join('')
   }
 
   // ── Event wiring ───────────────────────────────────────────────────────
@@ -557,6 +796,86 @@ export function createEditorPanel(opts: {
         callbacks.onStartSplineTCommit()
       })
     }
+    panel.querySelector('#ed-gate-unbind')?.addEventListener('click', () => {
+      callbacks.onGateUnbindFromSpline()
+    })
+
+    // ── Generic authoring controls (numeric entry / flags / settings) ──
+    // Persist collapsible-section open state across full re-renders.
+    panel.querySelectorAll<HTMLDetailsElement>('[data-section]').forEach((el) => {
+      el.addEventListener('toggle', () => {
+        sectionOpen[el.dataset.section as string] = el.open
+      })
+    })
+    // Typed numeric entry on the selected entity — one undo per commit.
+    panel.querySelectorAll<HTMLInputElement>('[data-numedit]').forEach((el) => {
+      el.addEventListener('change', () => {
+        const v = parseFloat(el.value)
+        if (Number.isFinite(v)) callbacks.onNumEdit(el.dataset.numedit as string, v)
+      })
+    })
+    // Materialise an optional numeric field at a sane default.
+    panel.querySelectorAll<HTMLElement>('[data-numedit-set]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const f = el.dataset.numeditSet as string
+        if (f === 'surge') callbacks.onNumEdit('surgePeriodS', 8)
+        else callbacks.onNumEdit(f, 0)
+      })
+    })
+    panel.querySelectorAll<HTMLElement>('[data-numclear]').forEach((el) => {
+      el.addEventListener('click', () => callbacks.onNumClear(el.dataset.numclear as string))
+    })
+    // Track-level settings (name / laps / gateSpacing / floatGates).
+    panel.querySelectorAll<HTMLElement>('[data-trackedit]').forEach((el) => {
+      const field = el.dataset.trackedit as string
+      el.addEventListener('change', () => {
+        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+          callbacks.onTrackFieldEdit(field, el.checked)
+        } else if (el instanceof HTMLInputElement && el.type === 'number') {
+          const v = parseFloat(el.value)
+          if (Number.isFinite(v)) callbacks.onTrackFieldEdit(field, v)
+        } else if (el instanceof HTMLInputElement) {
+          callbacks.onTrackFieldEdit(field, el.value)
+        }
+      })
+    })
+    // Sky / atmosphere block.
+    panel.querySelectorAll<HTMLElement>('[data-skyedit]').forEach((el) => {
+      const field = el.dataset.skyedit as string
+      el.addEventListener('change', () => {
+        if (el instanceof HTMLSelectElement) {
+          callbacks.onSkyEdit(field, el.value)
+        } else if (el instanceof HTMLInputElement && el.type === 'number') {
+          const v = parseFloat(el.value)
+          if (Number.isFinite(v)) callbacks.onSkyEdit(field, v)
+        } else if (el instanceof HTMLInputElement) {
+          callbacks.onSkyEdit(field, el.value)
+        }
+      })
+    })
+    panel.querySelectorAll<HTMLElement>('[data-skyedit-clear]').forEach((el) => {
+      el.addEventListener('click', () =>
+        callbacks.onSkyEdit(el.dataset.skyeditClear as string, null),
+      )
+    })
+    // Per-prop flags.
+    panel.querySelectorAll<HTMLElement>('[data-propflag]').forEach((el) => {
+      const field = el.dataset.propflag as string
+      el.addEventListener('change', () => {
+        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+          callbacks.onPropFlagEdit(field, el.checked)
+        } else if (el instanceof HTMLSelectElement) {
+          callbacks.onPropFlagEdit(field, el.value)
+        } else if (el instanceof HTMLInputElement) {
+          callbacks.onPropFlagEdit(field, el.value)
+        }
+      })
+    })
+    panel.querySelectorAll<HTMLElement>('[data-propflag-clear]').forEach((el) => {
+      el.addEventListener('click', () =>
+        callbacks.onPropFlagEdit(el.dataset.propflagClear as string, null),
+      )
+    })
   }
 
   return { render, renderLight, setStatus, dispose }
@@ -732,11 +1051,112 @@ export function promptNewTrackFlow(opts: {
   window.location.href = url.toString()
 }
 
-// ── Local string utils ───────────────────────────────────────────────────
+// ── Input-builder helpers ─────────────────────────────────────────────────
+//
+// Every authoring control routes through one of a small set of `data-*`
+// attributes that `wirePanelEvents` listens for. The attribute name selects
+// which callback fires; the attribute value is the logical field path.
 
-function fmtVec(v: { x: number; y: number; z: number }): string {
-  return `(${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)})`
+const INPUT_STYLE =
+  'background:#1a2230;color:#cdf;border:1px solid #3a4a5a;border-radius:3px;padding:2px 4px;font:inherit;min-width:0'
+
+/** A single editable number. `attr` is the routing data-attribute name
+ *  (e.g. `data-numedit`). Renders nothing fancy — commit fires on change. */
+function numInput(
+  attr: string,
+  field: string,
+  value: number,
+  opts?: { min?: number; max?: number; step?: number; width?: number },
+): string {
+  const bits: string[] = [`step="${opts?.step ?? 'any'}"`]
+  if (opts?.min !== undefined) bits.push(`min="${opts.min}"`)
+  if (opts?.max !== undefined) bits.push(`max="${opts.max}"`)
+  const w = opts?.width ?? 60
+  return `<input type="number" ${attr}="${escapeHtml(field)}" value="${value}" ${bits.join(
+    ' ',
+  )} style="${INPUT_STYLE};width:${w}px" />`
 }
+
+/** Label + control row. */
+function fieldRow(label: string, control: string): string {
+  return `<label style="display:flex;align-items:center;gap:6px;margin-top:3px"><span style="width:74px;color:#9bb;flex-shrink:0">${label}</span>${control}</label>`
+}
+
+/** A labelled x/y/z triple of number inputs, fields `${prefix}.x` etc. */
+function vec3Row(
+  label: string,
+  attr: string,
+  prefix: string,
+  v: { x: number; y: number; z: number },
+  step = 0.1,
+): string {
+  const i = (axis: 'x' | 'y' | 'z') =>
+    numInput(attr, `${prefix}.${axis}`, Number(v[axis].toFixed(3)), { step, width: 54 })
+  return `<label style="display:flex;align-items:center;gap:4px;margin-top:3px"><span style="width:74px;color:#9bb;flex-shrink:0">${label}</span>${i('x')}${i('y')}${i('z')}</label>`
+}
+
+/** A bounded number row. */
+function numRow(
+  label: string,
+  attr: string,
+  field: string,
+  value: number,
+  opts?: { min?: number; max?: number; step?: number },
+): string {
+  return fieldRow(label, numInput(attr, field, Number(value.toFixed(4)), { ...opts, width: 72 }))
+}
+
+/** A checkbox row. */
+function boolRow(label: string, attr: string, field: string, checked: boolean): string {
+  return `<label style="display:flex;align-items:center;gap:6px;margin-top:3px;cursor:pointer"><input type="checkbox" ${attr}="${escapeHtml(
+    field,
+  )}" ${checked ? 'checked' : ''} /><span style="color:#9bb">${label}</span></label>`
+}
+
+/** A <select> row. `value` may be undefined → first option selected. */
+function selectRow(
+  label: string,
+  attr: string,
+  field: string,
+  options: readonly string[],
+  value: string | undefined,
+): string {
+  const opts = options
+    .map(
+      (o) =>
+        `<option value="${escapeHtml(o)}"${o === value ? ' selected' : ''}>${escapeHtml(o)}</option>`,
+    )
+    .join('')
+  return fieldRow(
+    label,
+    `<select ${attr}="${escapeHtml(field)}" style="${INPUT_STYLE};flex:1">${opts}</select>`,
+  )
+}
+
+/** A text-input row. */
+function textRow(label: string, attr: string, field: string, value: string): string {
+  return fieldRow(
+    label,
+    `<input type="text" ${attr}="${escapeHtml(field)}" value="${escapeHtml(value)}" style="${INPUT_STYLE};flex:1" />`,
+  )
+}
+
+/** A colour-picker row with a clear button (clears back to the default). */
+function colorRow(label: string, attr: string, field: string, value: string | undefined): string {
+  const v = value ?? '#c0a070'
+  return `<label style="display:flex;align-items:center;gap:6px;margin-top:3px"><span style="width:74px;color:#9bb;flex-shrink:0">${label}</span><input type="color" ${attr}="${escapeHtml(
+    field,
+  )}" value="${escapeHtml(v)}" style="width:40px;height:20px;background:#1a2230;border:1px solid #3a4a5a;border-radius:3px" /><button type="button" ${attr}-clear="${escapeHtml(
+    field,
+  )}" style="background:#234;color:#9ab;border:1px solid #456;border-radius:3px;cursor:pointer;font:inherit;padding:1px 6px">clear</button></label>`
+}
+
+/** Small grey caption — used for "applies on Play" / re-export warnings. */
+function note(text: string): string {
+  return `<div style="color:#7a869a;font-size:10px;line-height:1.35;margin-top:3px">${text}</div>`
+}
+
+// ── Local string utils ───────────────────────────────────────────────────
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => {

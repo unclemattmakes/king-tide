@@ -49,13 +49,23 @@ prompts to confirm if there are pending edits.
   gate orientation), indexed `cp_NN`. Bound gates (the default) snap
   to the AI spline; their pose is derived from the curve.
 - **Pickup spawns** as orange spheres.
-- **Boost pads** as cyan slabs with a forward-arrow.
+- **Boost pads** as cyan trigger-volume boxes with a forward-arrow.
+- **Wave zones** as teal boxes with a swell-axis double arrow — oriented
+  volumes that scale the global wave amplitude/frequency inside them
+  (the wave-mastery mechanic). Distinct hue from the purple anti-grav box.
 - **AI spline** as a smooth Catmull-Rom curve passing through a small
   set of bigger blue **anchors** (each with a faint vertical post).
   Drag anchors to reshape the curve — the editor resamples and
   repositions all bound gates live.
 - **Outliner panel** (top-left): every entity grouped by kind, click to
   select.
+- **Properties panel** (under the outliner): every scalar on the selected
+  entity is an **editable number input** — type exact values for
+  positions, gate width/height, pad strength, prop size, wave-zone
+  multipliers, etc. (the gizmo and these inputs are interchangeable).
+- **Track settings + Sky** sections (collapsible, top of the panel) author
+  the track-level JSON blocks — name, laps, gate spacing, float-gates, sea
+  level, and the full sky/atmosphere palette.
 
 ## Workflow
 
@@ -64,12 +74,15 @@ prompts to confirm if there are pending edits.
 2. **Switch the gizmo mode** with the panel buttons or W / E / R hotkeys.
 3. **Drag a gizmo handle** to move, rotate, or scale.
 4. **Place new entities** with the **+ Gate / + Pickup / + Boost /
-   + Spline pt** buttons — the next ground click drops the entity.
+   + Wave Zone / + Anti-Grav / + Spline pt** buttons (plus the Shapes /
+   Assets placers) — the next ground click drops the entity.
    - Newly-placed gates auto-bind to the spline at the click's nearest
-     curve point (you can toggle this off later by hand-editing the
-     JSON to remove `splineT`).
+     curve point; **Unbind from spline** in the gate's properties panel
+     (or the start's) frees it for hand placement.
    - Newly-placed spline anchors insert into the segment closest to
      the click so the curve stays continuous.
+   - Wave zones cap at 8 per track (the runtime evaluates a fixed-size
+     zone array); a 9th placement is refused.
 5. **Undo** with Ctrl/Cmd+Z (or your platform equivalent). Stack depth
    is 50; each placement, deletion, and gizmo drag is a single step.
 6. **Save** writes `public/tracks/<id>.json` via the dev middleware.
@@ -80,10 +93,14 @@ prompts to confirm if there are pending edits.
 | Mode | Hotkey | Affects |
 |---|---|---|
 | Move | `W` | Translate (X/Y/Z) |
-| Rotate | `E` | Yaw around Y (gates + pads only) |
-| Scale | `R` | Resize (gates: halfWidth + height; pads: halfWidth + halfDepth) |
+| Rotate | `E` | Yaw around Y (gates + pads); full XYZ (props, anti-grav + wave zones) |
+| Scale | `R` | Resize (gates: halfWidth + height; pads / zones: all three half-extents) |
 
-- **Gates + Boost Pads** support all three modes.
+> Every dimension the gizmo bakes is also a **typed input** in the
+> properties panel — drag for feel, type for exact values. Both push one
+> undo step.
+
+- **Gates + Boost Pads + Wave Zones + Anti-Grav Zones** support all three modes.
 - **Spline-bound gates** (the default for new gates) translate by
   *sliding along the spline* — drag the gizmo and the gate snaps to
   the nearest curve point, updating its `splineT`. Rotation is locked
@@ -165,18 +182,51 @@ By default, new gates set `splineT` to bind themselves to the AI spline:
 - Rotation is locked (the curve tangent decides yaw).
 - Reshaping the spline auto-updates every bound gate's pose.
 
-To unbind a gate from the spline, hand-edit the JSON to remove its
-`splineT` field. Phase-3 work will surface this as a panel toggle.
+To unbind a gate from the spline, select it and click **Unbind from
+spline** in its properties panel (`splineT` is removed; the rotate gizmo
+re-enables for free placement). The player start has the same
+bind/unbind pair plus a `t`-slider.
+
+## Track-level + atmosphere authoring
+
+The panel's collapsible **Track settings** and **Sky / atmosphere**
+sections author the track-level JSON the editor used to leave to Blender
+or a text editor:
+
+- **Track settings** — `name`, `lapsToFinish`, `gateSpacing` (feeds
+  *Auto-place gates*), `floatGates`, and the sea-level slider.
+- **Sky / atmosphere** — `tint`, `cloudiness`, `cloudTowering`, `sunSize`,
+  `sunIntensity`, `fogNear` / `fogFar`, `timeOfDay`, `bloom`,
+  `seaStateBeaufort` (the master wave-height dial), `colorGrade`, and
+  `toneMapping`. These freeze at construction, so they apply on **Play**
+  — the editor renders a bare water plane with no sky preview.
+
+> **⚠ Blender re-export overwrites these.** `name`, `lapsToFinish`,
+> `gateSpacing`, `floatGates`, sea level, and the whole `sky` block are
+> *Blender-owned* — if the track also has a `.blend`, the next
+> *Export Track to Game* will clobber editor edits to them. (Gameplay
+> placement — gates, props, wave zones, etc. — is editor-canonical and
+> safe.) The panel flags this inline.
+
+Per-prop **flags** live in a selected prop's properties: `color`
+(primitives), `surface` (grip tag), `waterline` opt-out, **Float on
+waves** (`waveRider` + DOF), and — for asset props — `animated` /
+`clip` / `loop`.
+
+Everything the editor authors round-trips through `trackToJson` on Save,
+so blocks it doesn't expose a control for (e.g. `terrainShader`, `audio`,
+`waveStamps`, `lapWeather`) still survive untouched — hand-edit those in
+the JSON.
 
 ## Limitations
 
 - **No diff vs. saved.** Status appears under the Save button; the
   underlying file isn't watched for outside changes.
-- **Boost pads have no runtime effect yet.** They render and persist but
-  the sim doesn't react. Wiring the speed-up is its own task.
-- **Numeric input boxes are read-only.** The properties panel shows
-  values but you can't type into them — use the gizmo. Hand-edit the
-  JSON for fine-grained control.
-- **No "unbind from spline" UI.** Hand-edit JSON to remove `splineT`.
+- **No in-editor preview of atmosphere / terrain-shader.** Edit mode
+  renders a flat water plane with no environment GLB or sky, so sky,
+  horizon, and terrain-shader changes only show up on **Play**.
+- **A few JSON blocks are still hand-edit only** — `terrainShader`,
+  `audio`, `waveStamps`, `lapWeather`, `water.spectrum/look`. They
+  round-trip safely on Save; the editor just has no control for them yet.
 
 These are the next things to build.

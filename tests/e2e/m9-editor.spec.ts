@@ -40,13 +40,63 @@ test.describe('M9.18 in-app editor', () => {
     await expect(outliner).toContainText('Boost Pads (0)')
     await expect(outliner).toContainText('Spline anchors (9)')
 
-    // Click a checkpoint row → selection updates the props panel.
+    // Click a checkpoint row → selection updates the props panel with
+    // editable numeric inputs (the typed-entry surface).
     await outliner.locator('div[data-select="gate:0"]').click()
     await expect(panel.locator('#ed-props')).toContainText('cp_00')
-    await expect(panel.locator('#ed-props')).toContainText('halfWidth')
+    await expect(panel.locator('#ed-props')).toContainText('Half width')
+    await expect(panel.locator('#ed-props input[data-numedit="halfWidth"]')).toBeVisible()
     // Lagoon-edit's gates are spline-bound, so the props panel should
     // show the binding marker.
     await expect(panel.locator('#ed-props')).toContainText('bound to spline')
+  })
+
+  test('exposes track-settings, sky, and wave-zone authoring surfaces', async ({ page }) => {
+    test.setTimeout(30_000)
+    await page.goto('/?track=calibration&edit=1')
+
+    const panel = page.locator('#editor-panel')
+    await expect(panel).toBeVisible()
+
+    // New place tool for wave zones.
+    await expect(panel.locator('button[data-place="waveZone"]')).toBeVisible()
+
+    // Track settings: open the (default-collapsed) section and confirm the
+    // name / laps / float-gates inputs.
+    const track = panel.locator('details[data-section="track"]')
+    await track.locator('summary').click()
+    await expect(track.locator('input[data-trackedit="name"]')).toBeVisible()
+    await expect(track.locator('input[data-trackedit="lapsToFinish"]')).toBeVisible()
+    await expect(track.locator('input[data-trackedit="floatGates"]')).toBeVisible()
+    // Collapse it again so the outliner stays reachable below.
+    await track.locator('summary').click()
+
+    // Sky section: open the <details> and confirm the atmosphere controls.
+    const sky = panel.locator('details[data-section="sky"]')
+    await sky.locator('summary').click()
+    await expect(sky.locator('input[data-skyedit="seaStateBeaufort"]')).toBeVisible()
+    await expect(sky.locator('select[data-skyedit="colorGrade"]')).toBeVisible()
+    await sky.locator('summary').click()
+
+    // Place a wave zone FIRST (no entity selected → no gizmo to intercept
+    // the ground click). It shows up in the outliner and its props panel
+    // exposes the multiplier inputs.
+    await panel.locator('button[data-place="waveZone"]').click()
+    const canvas = page.locator('#app canvas').first()
+    await canvas.waitFor()
+    const box = await canvas.boundingBox()
+    if (!box) throw new Error('no canvas bounding box')
+    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5)
+    await expect(panel.locator('#ed-outliner')).toContainText('Wave Zones (1)')
+    await expect(panel.locator('#ed-props input[data-numedit="heightMult"]')).toBeVisible()
+
+    // Typed numeric entry mutates the draft: edit a gate's height and
+    // confirm the input round-trips the value through a re-render.
+    await panel.locator('#ed-outliner div[data-select="gate:0"]').click()
+    const heightInput = panel.locator('#ed-props input[data-numedit="height"]')
+    await heightInput.fill('9')
+    await heightInput.blur()
+    await expect(panel.locator('#ed-props input[data-numedit="height"]')).toHaveValue('9')
   })
 
   test('Ctrl+Z undoes a placement', async ({ page }) => {

@@ -26,12 +26,21 @@ import { yawFromQuaternion } from './editor-helpers'
 import type { EntitySel, GizmoMode } from './editor-ui'
 
 /** Entity kinds — derived from a helper's `userData.entityKey` prefix. */
-export type EntityKind = 'gate' | 'pad' | 'antiGrav' | 'pickup' | 'prop' | 'start' | 'spline'
+export type EntityKind =
+  | 'gate'
+  | 'pad'
+  | 'antiGrav'
+  | 'waveZone'
+  | 'pickup'
+  | 'prop'
+  | 'start'
+  | 'spline'
 
 export function entityKindFromKey(k: string): EntityKind {
   if (k.startsWith('gate')) return 'gate'
   if (k.startsWith('pad')) return 'pad'
   if (k.startsWith('antigrav')) return 'antiGrav'
+  if (k.startsWith('wavezone')) return 'waveZone'
   if (k.startsWith('pickup')) return 'pickup'
   if (k.startsWith('prop')) return 'prop'
   if (k === 'start') return 'start'
@@ -56,10 +65,11 @@ export function configureGizmoAxes(tc: TransformControls, kind: EntityKind, mode
     return
   }
   if (mode === 'rotate') {
-    // Start / gates / pads rotate around Y only (yaw). Props and anti-grav
-    // zones rotate around all three axes — anti-grav needs full rotation so
-    // the author can roll/pitch the zone to match a banked road surface.
-    if (kind === 'prop' || kind === 'antiGrav') {
+    // Start / gates / pads rotate around Y only (yaw). Props, anti-grav, and
+    // wave zones rotate around all three axes — anti-grav needs full rotation
+    // to match a banked road; wave zones can be yawed (swell bearing) and the
+    // extra freedom is harmless.
+    if (kind === 'prop' || kind === 'antiGrav' || kind === 'waveZone') {
       tc.showX = true
       tc.showY = true
       tc.showZ = true
@@ -188,6 +198,18 @@ export function writeHelperPoseToDraft(
     z.rotation.w = h.quaternion.w
     return { splineMoved: false }
   }
+  if (s.kind === 'waveZone') {
+    const z = draft.waveZones[s.index]
+    if (!z) return { splineMoved: false }
+    z.position.x = h.position.x
+    z.position.y = h.position.y
+    z.position.z = h.position.z
+    z.rotation.x = h.quaternion.x
+    z.rotation.y = h.quaternion.y
+    z.rotation.z = h.quaternion.z
+    z.rotation.w = h.quaternion.w
+    return { splineMoved: false }
+  }
   if (s.kind === 'spline') {
     // Edits the editable array (anchors when present, points for legacy).
     const sp = draft.aiSplines[s.splineIndex]
@@ -270,6 +292,13 @@ export function bakeScaleToDraft(draft: Track, h: THREE.Object3D, s: NonNullable
       z.halfWidth = clampPositive(z.halfWidth * sx, 0.5, 200)
       z.halfHeight = clampPositive(z.halfHeight * sy, 0.5, 100)
       z.halfDepth = clampPositive(z.halfDepth * sz, 0.5, 400)
+    }
+  } else if (s.kind === 'waveZone') {
+    const z = draft.waveZones[s.index]
+    if (z) {
+      z.halfWidth = clampPositive(z.halfWidth * sx, 0.5, 600)
+      z.halfHeight = clampPositive(z.halfHeight * sy, 0.5, 200)
+      z.halfDepth = clampPositive(z.halfDepth * sz, 0.5, 600)
     }
   } else if (s.kind === 'prop') {
     const p = draft.props[s.index]

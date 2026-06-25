@@ -16,6 +16,7 @@ import {
   parseEntityKey,
   promptNewTrackFlow,
 } from './editor-ui'
+import { applyNumEdit, applyPropFlag } from './field-edits'
 import {
   bakeScaleToDraft,
   configureGizmoAxes,
@@ -391,6 +392,73 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         rebuildHelpers()
         panelHandle.render()
         panelHandle.setStatus(`Placed ${placements.length} gates at ${spacing.toFixed(0)}m`, '#7d8')
+      },
+      onNumEdit: (field, value) => {
+        if (!sel) return
+        undo.push()
+        applyNumEdit(draft, sel, field, value)
+        // Full rebuild: dimension edits rebuild geometry at the new size, and a
+        // splineT edit re-derives the bound gate's pose via recomputeSplineDerived.
+        rebuildHelpers()
+        renderPanel()
+      },
+      onNumClear: (field) => {
+        if (sel?.kind !== 'waveZone') return
+        const z = draft.waveZones[sel.index]
+        if (!z) return
+        undo.push()
+        if (field === 'directionDeg') {
+          delete z.directionDeg
+        } else if (field === 'surge') {
+          delete z.surgePeriodS
+          delete z.surgeAmplitude
+        }
+        rebuildHelpers()
+        renderPanel()
+      },
+      onTrackFieldEdit: (field, value) => {
+        undo.push()
+        if (field === 'name') {
+          draft.name = String(value)
+        } else if (field === 'lapsToFinish') {
+          const n = Math.round(Number(value))
+          if (Number.isFinite(n) && n >= 1) draft.lapsToFinish = n
+        } else if (field === 'gateSpacing') {
+          const n = Number(value)
+          if (Number.isFinite(n) && n > 0) draft.gateSpacing = n
+          else delete draft.gateSpacing
+        } else if (field === 'floatGates') {
+          draft.floatGates = value === true
+        }
+        renderPanel()
+      },
+      onSkyEdit: (field, value) => {
+        undo.push()
+        if (!draft.sky) draft.sky = {}
+        const sky = draft.sky as Record<string, unknown>
+        if (value === null) delete sky[field]
+        else sky[field] = value
+        renderPanel()
+      },
+      onPropFlagEdit: (field, value) => {
+        if (sel?.kind !== 'prop') return
+        const p = draft.props[sel.index]
+        if (!p) return
+        undo.push()
+        applyPropFlag(p, field, value)
+        // Colour + waveRider toggle change the helper visual / panel layout.
+        rebuildHelpers()
+        renderPanel()
+      },
+      onGateUnbindFromSpline: () => {
+        if (sel?.kind !== 'gate') return
+        const cp = draft.checkpoints[sel.index]
+        if (!cp || typeof cp.splineT !== 'number') return
+        undo.push()
+        delete cp.splineT
+        rebuildHelpers()
+        renderPanel()
+        panelHandle.setStatus('Gate unbound — free placement', '#7d8')
       },
       selSupportsMode,
     },

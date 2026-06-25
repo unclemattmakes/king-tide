@@ -13,7 +13,14 @@ import * as THREE from 'three'
 import { AI_GRID_SLOTS } from '@/boot/grid-offsets'
 import { buildPropGeometry } from '@/engine/render/props-geometry'
 import type { Vec3 } from '@/engine/sim/physics/vec'
-import type { AntiGravZone, BoostPad, Checkpoint, Prop, PropType } from '@/game/tracks/types'
+import type {
+  AntiGravZone,
+  BoostPad,
+  Checkpoint,
+  Prop,
+  PropType,
+  WaveZone,
+} from '@/game/tracks/types'
 
 export function makeGateHelper(cp: Checkpoint, selected: boolean): THREE.Group {
   const g = new THREE.Group()
@@ -179,6 +186,66 @@ export function makeAntiGravHelper(zone: AntiGravZone, selected: boolean): THREE
   const head = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 12), arrowMat)
   head.position.y = -zone.halfHeight + arrowLen + 0.45
   g.add(head)
+
+  g.userData.setSelected = (v: boolean) => {
+    boxMat.color.setHex(v ? selColor : baseColor)
+    wireMat.color.setHex(v ? selColor : baseColor)
+  }
+  return g
+}
+
+/**
+ * Wave-zone helper. Translucent teal box matching the zone's full extents
+ * (so gizmo scale handles map onto the half-extent fields) with a flat
+ * double-headed arrow along local +X — the swell axis the zone aligns to
+ * when `directionDeg` is unset. Distinct hue from the purple anti-grav box
+ * so the two oriented-box entity types never read as the same thing.
+ */
+export function makeWaveZoneHelper(zone: WaveZone, selected: boolean): THREE.Group {
+  const g = new THREE.Group()
+  g.position.set(zone.position.x, zone.position.y, zone.position.z)
+  g.quaternion.set(zone.rotation.x, zone.rotation.y, zone.rotation.z, zone.rotation.w)
+
+  const baseColor = 0x33ccbb
+  const selColor = 0x99ffee
+  const w = zone.halfWidth * 2
+  const h = zone.halfHeight * 2
+  const d = zone.halfDepth * 2
+
+  const boxMat = new THREE.MeshBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.14,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), boxMat))
+
+  const wireMat = new THREE.LineBasicMaterial({
+    color: selected ? selColor : baseColor,
+    transparent: true,
+    opacity: 0.85,
+  })
+  g.add(
+    new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.BoxGeometry(w, h, d)), wireMat),
+  )
+
+  // Swell-axis double arrow along local ±X, laid flat near the floor.
+  const arrowMat = new THREE.MeshBasicMaterial({ color: 0xeafffb, transparent: true, opacity: 0.9 })
+  const shaftLen = Math.min(zone.halfWidth * 1.5, zone.halfWidth * 2 - 1)
+  const shaft = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.18, Math.max(1, shaftLen), 8),
+    arrowMat,
+  )
+  shaft.rotation.z = Math.PI / 2 // lay the cylinder along X
+  shaft.position.y = -zone.halfHeight + 0.6
+  g.add(shaft)
+  for (const dir of [1, -1]) {
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.0, 12), arrowMat)
+    head.rotation.z = dir > 0 ? -Math.PI / 2 : Math.PI / 2
+    head.position.set((dir * Math.max(1, shaftLen)) / 2 + dir * 0.4, -zone.halfHeight + 0.6, 0)
+    g.add(head)
+  }
 
   g.userData.setSelected = (v: boolean) => {
     boxMat.color.setHex(v ? selColor : baseColor)

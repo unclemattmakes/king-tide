@@ -84,6 +84,26 @@ export function placeAt(opts: PlaceAtOptions): EntitySel {
     })
     return { kind: 'antiGrav', index: draft.antiGravZones.length - 1 }
   }
+  if (tool === 'waveZone') {
+    // Cap at MAX_WAVE_ZONES (8) — the GPU evaluates a fixed-size zone array,
+    // and the runtime truncates over-authored lists. Refuse a 9th here so the
+    // editor never desyncs from what ships.
+    if (draft.waveZones.length >= 8) return null
+    // Centre on the water plane; a generous box that an author scales to the
+    // patch of sea they want heavier/calmer. Neutral multipliers so a fresh
+    // zone changes nothing until tuned.
+    draft.waveZones.push({
+      position: { x: hit.x, y: 0, z: hit.z },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+      halfWidth: 40,
+      halfHeight: 10,
+      halfDepth: 40,
+      heightMult: 1.5,
+      freqMult: 1,
+      blendRadiusM: 20,
+    })
+    return { kind: 'waveZone', index: draft.waveZones.length - 1 }
+  }
   if (PROP_PLACE_TOOLS.includes(tool)) {
     const propType = tool as PropType
     const size = defaultPropSize(propType)
@@ -151,6 +171,10 @@ export function deleteSelected(draft: Track, sel: EntitySel): boolean {
   }
   if (sel.kind === 'antiGrav') {
     draft.antiGravZones.splice(sel.index, 1)
+    return true
+  }
+  if (sel.kind === 'waveZone') {
+    draft.waveZones.splice(sel.index, 1)
     return true
   }
   if (sel.kind === 'prop') {
