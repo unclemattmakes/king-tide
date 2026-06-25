@@ -10,9 +10,12 @@
  *      Treated as the "all-in-glb" pipeline; environment visuals
  *      load from the same file.
  *
- * In edit mode (`?edit=1`) we skip environment visuals (the editor
- * provides its own viewport) and fall back to an empty draft track if
- * neither JSON nor GLB exists yet — the user authors from scratch.
+ * In edit mode (`?edit=1`) we still load environment visuals + bake the
+ * terrain heightmap (so the author sees real terrain, shoaling water, and
+ * the material waterline) but skip the static colliders — the editor runs
+ * no physics. A missing/not-yet-exported env GLB degrades gracefully in
+ * edit mode rather than bricking the editor. We fall back to an empty draft
+ * track if neither JSON nor GLB exists yet — the user authors from scratch.
  *
  * Safety floor (universal backstop collider at y = 0) is created up
  * front so anything that bricks during track build still has ground.
@@ -64,8 +67,9 @@ export type LoadedTrack = {
   track: Track
   /** Top-down max-Y heightmap of all static terrain in the track, used by
    *  the water shader to attenuate wave displacement in shallows and drive
-   *  surf foam. Null in edit mode and for the empty-draft fallback (no
-   *  terrain to sample). */
+   *  surf foam. Baked in BOTH race and edit mode now (the editor renders the
+   *  environment). Null only for the empty-draft fallback (no terrain to
+   *  sample) or when an env GLB failed to load in edit mode. */
   terrainHeightmap: TerrainHeightmap | null
   /** Author-supplied horizon mesh geometry pulled out of the track's GLB
    *  (any mesh tagged `kind=horizon`). Forwarded to `createHorizonRing`
@@ -189,27 +193,44 @@ export async function loadTrackForBoot(opts: {
     const track = buildTrackFromJson(JSON.parse(await jsonRes.text()))
     let horizonGeometry: THREE.BufferGeometry | undefined
     let environmentGlbRoot: THREE.Object3D | undefined
-    if (track.environmentGlb && !editMode) {
-      const env = await loadGlbTrackVisuals(assetUrl(track.environmentGlb), {
-        // Anchor the terrain wet band + underwater tint to the real water
-        // surface (not y=0) by threading the track's water height in.
-        terrainShader: { ...track.terrainShader, waterLevel: track.water?.height ?? 0 },
-      })
-      scene.add(env.scene)
-      // Collision: prefer a shipped decimated proxy (`<glb>-collider.glb`, built
-      // by tools/blender/build_track_collider.py) so Rapier's trimesh BVH builds
-      // over a fraction of the render mesh's triangles — the bulk of the
-      // `track+env` boot cost. Falls back to colliding the render geometry when
-      // no proxy is shipped. The heightmap below still bakes from the high-poly
-      // mesh, so water shoaling + the intro raycast are unchanged. The corridor
-      // then clips whichever mesh we collide down to the playable band.
-      const colliderProxy = await loadColliderProxy(
-        assetUrl(track.environmentGlb.replace(/\.glb$/i, '-collider.glb')),
-      )
-      attachTrackColliders(colliderProxy ?? env.scene, phys, collisionCorridorFor(track))
-      terrainRoots.push(env.scene)
-      horizonGeometry = env.horizonGeometry
-      environmentGlbRoot = env.scene
+    if (track.environmentGlb) {
+      // Edit mode now renders the environment too (so the author sees real
+      // terrain/buildings + the waterline + shoaling water, not a bare
+      // plane). A missing / not-yet-exported GLB must NOT brick the editor,
+      // so the load degrades gracefully there; in the race path it stays a
+      // hard error.
+      try {
+        const env = await loadGlbTrackVisuals(assetUrl(track.environmentGlb), {
+          // Anchor the terrain wet band + underwater tint to the real water
+          // surface (not y=0) by threading the track's water height in.
+          terrainShader: { ...track.terrainShader, waterLevel: track.water?.height ?? 0 },
+        })
+        scene.add(env.scene)
+        // Collision is race-only — the editor runs no physics, so skip the
+        // (expensive) trimesh BVH build entirely in edit mode. Prefer a
+        // shipped decimated proxy (`<glb>-collider.glb`, built by
+        // tools/blender/build_track_collider.py) so Rapier's BVH builds over
+        // a fraction of the render mesh's triangles — the bulk of the
+        // `track+env` boot cost — falling back to the render geometry. The
+        // heightmap below still bakes from the high-poly mesh in BOTH modes,
+        // so water shoaling + the waterline read identically in the editor.
+        if (!editMode) {
+          const colliderProxy = await loadColliderProxy(
+            assetUrl(track.environmentGlb.replace(/\.glb$/i, '-collider.glb')),
+          )
+          attachTrackColliders(colliderProxy ?? env.scene, phys, collisionCorridorFor(track))
+        }
+        terrainRoots.push(env.scene)
+        horizonGeometry = env.horizonGeometry
+        environmentGlbRoot = env.scene
+      } catch (e) {
+        if (!editMode) throw e
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[editor] environment GLB failed to load (${track.environmentGlb}); authoring without it`,
+          e,
+        )
+      }
     }
     return {
       track,
@@ -243,19 +264,20 @@ export async function loadTrackForBoot(opts: {
     })
     let horizonGeometry: THREE.BufferGeometry | undefined
     let environmentGlbRoot: THREE.Object3D | undefined
+    // Render the environment in edit mode too; collision stays race-only.
+    const env = await loadGlbTrackVisuals(glbUrl, {
+      terrainShader: { waterLevel: track.water?.height ?? 0 },
+    })
+    scene.add(env.scene)
     if (!editMode) {
-      const env = await loadGlbTrackVisuals(glbUrl, {
-        terrainShader: { waterLevel: track.water?.height ?? 0 },
-      })
-      scene.add(env.scene)
       // Same decimated-collision-proxy preference as the JSON-track path above,
       // with the corridor clip applied to whichever mesh we collide.
       const colliderProxy = await loadColliderProxy(glbUrl.replace(/\.glb$/i, '-collider.glb'))
       attachTrackColliders(colliderProxy ?? env.scene, phys, collisionCorridorFor(track))
-      terrainRoots.push(env.scene)
-      horizonGeometry = env.horizonGeometry
-      environmentGlbRoot = env.scene
     }
+    terrainRoots.push(env.scene)
+    horizonGeometry = env.horizonGeometry
+    environmentGlbRoot = env.scene
     return {
       track,
       terrainHeightmap: bakeHeightmapAndMarkReflections(track.water?.height ?? 0),

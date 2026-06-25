@@ -17,7 +17,8 @@ test.describe('M9.x editor shapes + start + viewport select', () => {
     await page.goto('/?track=calibration&edit=1')
 
     const panel = page.locator('#editor-panel')
-    await expect(panel).toBeVisible()
+    // Edit mode now boots the real environment GLB before mounting the panel.
+    await expect(panel).toBeVisible({ timeout: 30_000 })
 
     // Shapes toolbar exists.
     for (const t of ['box', 'sphere', 'cylinder', 'pipe', 'halfpipe']) {

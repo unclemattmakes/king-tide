@@ -203,6 +203,11 @@ export function createEditorPanel(opts: {
     'display: flex',
     'flex-direction: column',
     'gap: 8px',
+    // Master scroll: with the toolbar + collapsible sections + outliner +
+    // a tall properties block, total content can exceed the viewport. Let the
+    // whole panel scroll so every control (incl. the prop flags + Save) stays
+    // reachable on short windows; the outliner / props also scroll internally.
+    'overflow-y: auto',
     'z-index: 30',
     'pointer-events: auto',
   ].join(';')
@@ -277,10 +282,10 @@ export function createEditorPanel(opts: {
        </div>`,
       trackSettingsHtml(),
       skySettingsHtml(),
-      `<div id="ed-outliner" style="border-top:1px solid #2a3a4a;padding-top:8px;flex:1;overflow-y:auto;min-height:140px">
+      `<div id="ed-outliner" style="border-top:1px solid #2a3a4a;padding-top:8px;max-height:42vh;overflow-y:auto;min-height:120px">
          ${outlinerHtml()}
        </div>`,
-      `<div id="ed-props" style="border-top:1px solid #2a3a4a;padding-top:8px;font-size:11px;color:#bcd">
+      `<div id="ed-props" style="border-top:1px solid #2a3a4a;padding-top:8px;font-size:11px;color:#bcd;max-height:38vh;overflow-y:auto">
          ${selectedPropsHtml()}
        </div>`,
       `<div style="display:flex;gap:6px;border-top:1px solid #2a3a4a;padding-top:8px">
@@ -332,7 +337,7 @@ export function createEditorPanel(opts: {
         ${numRow('Sea state', 'data-skyedit', 'seaStateBeaufort', g(sky.seaStateBeaufort, 4), { min: 0, max: 12, step: 0.5 })}
         ${selectRow('Colour grade', 'data-skyedit', 'colorGrade', SKY_COLOR_GRADES, sky.colorGrade)}
         ${selectRow('Tone map', 'data-skyedit', 'toneMapping', SKY_TONE_MAPPINGS, sky.toneMapping)}
-        ${note('Sea state is THE wave-height dial. Atmosphere applies on <b>Play</b> (no live preview here); the whole <b>sky</b> block is Blender-owned.')}
+        ${note('Sea state is THE wave-height dial — it updates the <b>live water</b> here. The rest of the atmosphere (clouds/fog/sun/grade) applies on <b>Play</b>. The whole <b>sky</b> block is Blender-owned.')}
       </details>`
   }
 

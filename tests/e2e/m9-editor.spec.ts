@@ -20,7 +20,9 @@ test.describe('M9.18 in-app editor', () => {
     await page.goto('/?edit=1')
 
     const panel = page.locator('#editor-panel')
-    await expect(panel).toBeVisible()
+    // Edit mode now boots the real environment GLB before mounting the
+    // panel, so allow a generous load window (also absorbs Vite cold-start).
+    await expect(panel).toBeVisible({ timeout: 30_000 })
     await expect(panel).toContainText('EDITOR · lagoon-edit')
 
     // Place + Mode toolbars present.
@@ -56,7 +58,9 @@ test.describe('M9.18 in-app editor', () => {
     await page.goto('/?track=calibration&edit=1')
 
     const panel = page.locator('#editor-panel')
-    await expect(panel).toBeVisible()
+    // Edit mode now boots the real environment GLB before mounting the
+    // panel, so allow a generous load window (also absorbs Vite cold-start).
+    await expect(panel).toBeVisible({ timeout: 30_000 })
 
     // New place tool for wave zones.
     await expect(panel.locator('button[data-place="waveZone"]')).toBeVisible()
@@ -104,7 +108,9 @@ test.describe('M9.18 in-app editor', () => {
     await page.goto('/?track=calibration&edit=1')
 
     const panel = page.locator('#editor-panel')
-    await expect(panel).toBeVisible()
+    // Edit mode now boots the real environment GLB before mounting the
+    // panel, so allow a generous load window (also absorbs Vite cold-start).
+    await expect(panel).toBeVisible({ timeout: 30_000 })
     const outliner = panel.locator('#ed-outliner')
     await expect(outliner).toContainText('Pickups (1)')
 
@@ -127,7 +133,9 @@ test.describe('M9.18 in-app editor', () => {
     await page.goto('/?track=calibration&edit=1')
 
     const panel = page.locator('#editor-panel')
-    await expect(panel).toBeVisible()
+    // Edit mode now boots the real environment GLB before mounting the
+    // panel, so allow a generous load window (also absorbs Vite cold-start).
+    await expect(panel).toBeVisible({ timeout: 30_000 })
     await expect(panel.locator('#ed-outliner')).toContainText('Pickups (1)')
 
     // Activate +Pickup, click the canvas centre.

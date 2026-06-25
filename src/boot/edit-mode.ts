@@ -13,7 +13,7 @@ import { installTrackEditor } from '@/engine/editor/track-editor'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import type { SkySystem } from '@/engine/render/sky'
 import { updateUnderwaterFog } from '@/engine/render/water'
-import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
+import { advanceWaveField, sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import type { PropManifestEntry } from '@/game/assets/manifest'
 import type { Track } from '@/game/tracks/types'
 import { hideLoadingScreen } from './loading-screen'
@@ -48,6 +48,11 @@ export function startEditMode(opts: EditModeWiringOpts): void {
     backend,
   } = opts
   if (opts.backendEl) opts.backendEl.textContent = `editor · backend ${backend}`
+  // Dev-only handle: lets the fidelity e2e (and ad-hoc debugging) confirm the
+  // editor's water is actually advancing. Pairs with `window.__scene`.
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    ;(window as unknown as { __editWaveField?: WaveFieldState }).__editWaveField = waveField
+  }
   const editor = installTrackEditor({
     scene,
     camera,
@@ -55,6 +60,7 @@ export function startEditMode(opts: EditModeWiringOpts): void {
     domEl: appEl,
     track,
     ...(propAssets ? { propAssets } : {}),
+    waveField,
     setWaterHeight: (h) => {
       waveField.baseY = h
       waterMesh.mesh.position.y = h
@@ -65,6 +71,12 @@ export function startEditMode(opts: EditModeWiringOpts): void {
     const now = performance.now()
     const dt = Math.min(0.1, (now - editLastT) / 1000)
     editLastT = now
+    // Advance the wave field so the editor's water actually moves — crests
+    // roll, the waterline breathes, and any floating (wave-rider) props bob.
+    // Without this the surface (and floats) sit frozen. Mirrors the dev
+    // scenes (?waterlab / ?waveriders); the editor has no time-scale toggle
+    // so it always runs at real time.
+    advanceWaveField(waveField, dt)
     // Editor: lighting is fixed at the track's `timeOfDay` (the dome
     // bakes a single env-map at load), so this tick is just shadow-
     // camera focus tracking off the editor camera.
@@ -78,7 +90,7 @@ export function startEditMode(opts: EditModeWiringOpts): void {
       sampleHeight(waveField, camera.position.x, camera.position.z),
     )
     waterMesh.tick()
-    editor.tick()
+    editor.tick(dt)
     requestAnimationFrame(editFrame)
   }
   hideLoadingScreen()
