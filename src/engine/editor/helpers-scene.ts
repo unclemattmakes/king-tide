@@ -26,6 +26,7 @@ import {
   makePropHelper,
   makeSplineCurve,
   makeStartHelper,
+  makeWaveZoneHelper,
 } from './editor-helpers'
 import { type EntitySel, entityKey } from './editor-ui'
 import { editableSplinePoints, recomputeSplineDerived } from './spline-ops'
@@ -131,6 +132,13 @@ export function createHelpersScene(opts: {
     for (const [i, zone] of draft.antiGravZones.entries()) {
       const k = `antigrav:${i}`
       const h = makeAntiGravHelper(zone, isSel(sel, { kind: 'antiGrav', index: i }))
+      h.userData.entityKey = k
+      helpers.set(k, h)
+      helpersGroup.add(h)
+    }
+    for (const [i, zone] of draft.waveZones.entries()) {
+      const k = `wavezone:${i}`
+      const h = makeWaveZoneHelper(zone, isSel(sel, { kind: 'waveZone', index: i }))
       h.userData.entityKey = k
       helpers.set(k, h)
       helpersGroup.add(h)

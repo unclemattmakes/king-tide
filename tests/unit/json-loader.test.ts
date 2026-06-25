@@ -109,6 +109,81 @@ describe('buildTrackFromJson', () => {
     expect(rebuilt.environmentGlb).toEqual(built.environmentGlb)
   })
 
+  it('editor-save round-trip preserves every editor-authorable block', () => {
+    // The in-app editor serialises the whole draft via trackToJson on Save.
+    // This is the load-bearing safety invariant for the editor's atmosphere /
+    // wave-zone / per-prop authoring: a block the serializer forgets would be
+    // silently dropped on the next Save, clobbering Blender-authored data. So
+    // assert every block the editor can now touch survives a full round-trip.
+    const raw = baseTrack()
+    raw.gateSpacing = 22
+    raw.floatGates = true
+    raw.lapsToFinish = 4
+    raw.name = 'Round Trip Bay'
+    raw.sky = {
+      tint: '#ffd9c4',
+      cloudiness: 0.7,
+      sunIntensity: 1.3,
+      fogNear: 600,
+      fogFar: 2600,
+      timeOfDay: 140,
+      bloom: 0.6,
+      seaStateBeaufort: 5.5,
+      colorGrade: 'miami_pastel',
+      toneMapping: 'agx',
+    }
+    raw.horizon = { radius: 1600, peakHeight: 340, seed: 7, silhouetteDark: 0.5 }
+    raw.terrainShader = { altMin: -40, altMax: 110, variation: 0.25, pathTint: [0.4, 0.3, 0.2] }
+    raw.audio = {
+      music: 'round-trip.opus',
+      ambient: ['gulls.opus', 'surf.opus'],
+      ambientGains: [0.4, 0.6],
+    }
+    raw.waveZones = [
+      {
+        position: { x: 30, y: 0, z: 12 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        halfWidth: 40,
+        halfHeight: 10,
+        halfDepth: 40,
+        heightMult: 1.8,
+        freqMult: 1.1,
+        blendRadiusM: 18,
+        directionDeg: 45,
+        surgePeriodS: 30,
+        surgeAmplitude: 1.5,
+      },
+    ]
+    raw.props = [
+      {
+        type: 'asset',
+        assetId: 'buoy',
+        position: { x: 5, y: 0, z: 5 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        size: { x: 1, y: 1, z: 1 },
+        surface: 'metal',
+        waterline: false,
+        waveRider: { dof: 'yaw' },
+        animated: true,
+        clip: 'Swim',
+        loop: false,
+      },
+    ]
+
+    const built = buildTrackFromJson(raw)
+    const rebuilt = buildTrackFromJson(trackToJson(built))
+    expect(rebuilt.sky).toEqual(built.sky)
+    expect(rebuilt.horizon).toEqual(built.horizon)
+    expect(rebuilt.terrainShader).toEqual(built.terrainShader)
+    expect(rebuilt.audio).toEqual(built.audio)
+    expect(rebuilt.waveZones).toEqual(built.waveZones)
+    expect(rebuilt.props).toEqual(built.props)
+    expect(rebuilt.gateSpacing).toBe(22)
+    expect(rebuilt.floatGates).toBe(true)
+    expect(rebuilt.lapsToFinish).toBe(4)
+    expect(rebuilt.name).toBe('Round Trip Bay')
+  })
+
   it('rejects missing required fields', () => {
     expect(() => buildTrackFromJson({})).toThrow(/missing required field "id"/)
     expect(() => buildTrackFromJson({ id: 'x' })).toThrow(/missing required field "name"/)

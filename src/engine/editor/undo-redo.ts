@@ -43,20 +43,18 @@ export function createUndoStack(draft: Track, rebuild: () => void): UndoStack {
     const snap = stack.pop()
     if (!snap) return false
     const restored = JSON.parse(snap) as Track
-    // Mutate draft fields in-place so any external references stay valid.
-    draft.id = restored.id
-    draft.name = restored.name
-    draft.lapsToFinish = restored.lapsToFinish
-    draft.start = restored.start
-    draft.checkpoints = restored.checkpoints
-    draft.aiSplines = restored.aiSplines
-    draft.pickupSpawns = restored.pickupSpawns
-    draft.boostPads = restored.boostPads
-    draft.antiGravZones = Array.isArray(restored.antiGravZones) ? restored.antiGravZones : []
-    draft.waveZones = Array.isArray(restored.waveZones) ? restored.waveZones : []
-    draft.props = Array.isArray(restored.props) ? restored.props : []
-    if (restored.water) draft.water = restored.water
-    if (restored.environmentGlb) draft.environmentGlb = restored.environmentGlb
+    // Generic in-place full restore: drop every own key of `draft`, then copy
+    // all keys from the snapshot. This keeps the SAME `draft` object reference
+    // (the helpers map, the panel, and the save path all close over it) while
+    // covering EVERY field — including the optional blocks the editor now
+    // authors (sky, horizon, terrainShader, waveZones, waveStamps, audio,
+    // gateSpacing, floatGates, …). A hand-maintained field list silently fails
+    // to revert anything it forgets, so we restore the whole object instead.
+    const d = draft as unknown as Record<string, unknown>
+    for (const k of Object.keys(d)) delete d[k]
+    Object.assign(d, restored)
+    // Invariant the rest of the editor relies on: `props` is always an array.
+    if (!Array.isArray(draft.props)) draft.props = []
     rebuild()
     return true
   }
