@@ -1,10 +1,12 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
+import type { WaveFieldState } from '@/engine/sim/water/wave-field'
 import type { PropManifestEntry } from '@/game/assets/manifest'
 import { nearestT, pointAtT, tangentAtT } from '@/game/tracks/catmull-rom'
 import { DEFAULT_GATE_SPACING_M, resampleByArcLength } from '@/game/tracks/gate-placement'
 import type { Track } from '@/game/tracks/types'
+import { createEditorLiveWater } from './editor-live-water'
 import {
   createEditorPanel,
   type EditorPanelHandle,
@@ -16,6 +18,7 @@ import {
   parseEntityKey,
   promptNewTrackFlow,
 } from './editor-ui'
+import { createEditorFloatPreview } from './editor-wave-rider'
 import { applyNumEdit, applyPropFlag } from './field-edits'
 import {
   bakeScaleToDraft,
@@ -91,10 +94,16 @@ export type EditorOptions = {
    *  slider drags. Optional so headless / test wiring still works.
    *  Wave amplitudes oscillate around this Y. */
   setWaterHeight?: (heightM: number) => void
+  /** Live wave field (from the editor boot). When supplied, floating
+   *  (wave-rider) props bob/tilt on the surface for placement preview.
+   *  Optional so headless / test wiring still works. */
+  waveField?: WaveFieldState
 }
 
 export type EditorHandle = {
-  tick(): void
+  /** Advance one frame. `dt` (seconds) drives the wave-rider float preview;
+   *  pass 0 (or omit) for a static render. */
+  tick(dt?: number): void
   dispose(): void
 }
 
@@ -161,9 +170,33 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   // ── Helpers scene ───────────────────────────────────────────────────────
   const helpersScene = createHelpersScene({ scene, draft, getSel: () => sel })
 
+  // ── Wave-rider float preview ────────────────────────────────────────────
+  // Floating props (per-instance `waveRider`, or wave-rider assets like the
+  // buoy) bob/tilt on the live surface so the author sees their resting
+  // height + motion while placing. Built only when the editor was handed a
+  // live wave field (real boot); absent in headless/test wiring.
+  const waveRiderAssetIds = new Set(
+    (opts.propAssets ?? []).filter((a) => a.waveRider).map((a) => a.id),
+  )
+  const floatPreview = opts.waveField
+    ? createEditorFloatPreview(draft, opts.waveField, waveRiderAssetIds)
+    : null
+
+  // ── Live water re-config ────────────────────────────────────────────────
+  // Editing wave zones / sea state updates the VISIBLE water immediately
+  // (the two biggest water params the editor authors; height is already live
+  // via `setWaterHeight`).
+  const liveWater = opts.waveField ? createEditorLiveWater(opts.waveField, draft) : null
+
   function rebuildHelpers(): void {
     tc.detach()
     helpersScene.rebuild()
+    // Re-derive the float set whenever the prop topology changes (place /
+    // delete / undo / float-toggle all route through here).
+    floatPreview?.rebuild()
+    // Keep the live water surface in step with the draft's zones + sea state
+    // (covers wave-zone place/edit/delete and undo/redo).
+    liveWater?.sync()
     if (sel) {
       const h = helpersScene.helpers.get(entityKey(sel))
       if (h) attachGizmo(h)
@@ -438,6 +471,12 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         const sky = draft.sky as Record<string, unknown>
         if (value === null) delete sky[field]
         else sky[field] = value
+        // Sea state is the one sky knob that drives the WATER (not just the
+        // dome), so it updates the live surface immediately; the rest apply
+        // on Play. (No rebuildHelpers here — sky has no helpers.)
+        if (field === 'seaStateBeaufort' && typeof value === 'number') {
+          liveWater?.applySeaState(value)
+        }
         renderPanel()
       },
       onPropFlagEdit: (field, value) => {
@@ -585,7 +624,20 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   rebuildHelpers()
   renderPanel()
 
-  function tick(): void {
+  function tick(dt = 0): void {
+    // Float the wave-rider props onto the live surface. Skip the selected
+    // prop so its gizmo stays grabbable (a bobbing helper would fight the
+    // drag); it resumes floating on deselect.
+    if (floatPreview && dt > 0) {
+      floatPreview.step(dt)
+      for (const [propIndex, pose] of floatPreview.poses) {
+        if (sel?.kind === 'prop' && sel.index === propIndex) continue
+        const h = helpersScene.helpers.get(`prop:${propIndex}`)
+        if (!h) continue
+        h.position.set(pose.x, pose.y, pose.z)
+        h.quaternion.set(pose.qx, pose.qy, pose.qz, pose.qw)
+      }
+    }
     orbit.update()
     renderer.render(scene, camera)
   }

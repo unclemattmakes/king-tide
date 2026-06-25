@@ -44,7 +44,10 @@ prompts to confirm if there are pending edits.
 
 ## What's on screen
 
-- **Water plane** — the world's flat reference at y=0.
+- **Real game water** — the live animated sea at `water.height`, driven by
+  the track's `water` / `sky` params (sea state, swell, wave zones), with
+  shoaling + the material waterline where it meets terrain. Plus the
+  **environment GLB** (terrain/buildings) loaded for placement reference.
 - **Gates** as orange transparent goalposts (small forward-arrow shows
   gate orientation), indexed `cp_NN`. Bound gates (the default) snap
   to the AI spline; their pose is derived from the curve.
@@ -152,8 +155,13 @@ export. Example for `public/tracks/mybeach.json`:
 }
 ```
 
-In editor mode the .glb is **not** loaded (you author against the bare
-water plane without parallax distractions). It loads on Play.
+The editor now **loads the env GLB in edit mode** — you author against the
+real terrain/buildings, the real game water (driven by the track's
+`water` / `sky` params, animated live), and the material waterline, instead
+of a bare plane. Only the static colliders are skipped (the editor runs no
+physics), and a missing/not-yet-exported GLB degrades gracefully (the editor
+still opens). The gizmo only raycasts editor helpers, so the terrain never
+intercepts selection clicks.
 
 ## Splines: anchors vs. legacy points
 
@@ -212,6 +220,14 @@ Per-prop **flags** live in a selected prop's properties: `color`
 (primitives), `surface` (grip tag), `waterline` opt-out, **Float on
 waves** (`waveRider` + DOF), and — for asset props — `animated` /
 `clip` / `loop`.
+
+**Floating props bob live in the editor.** Any prop with **Float on waves**
+(or a wave-rider asset like the buoy) bobs and tilts on the real water
+surface so you can see its resting height and motion while placing it —
+this is a placement *preview* (bob / tilt / rest height); it does NOT model
+collisions, wake, or hit-impulses (those need Play mode). The currently-
+**selected** prop stops bobbing so its gizmo stays grabbable, and resumes
+on deselect.
 
 Everything the editor authors round-trips through `trackToJson` on Save,
 so blocks it doesn't expose a control for (e.g. `terrainShader`, `audio`,
