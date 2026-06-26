@@ -52,6 +52,7 @@ This is the **dev + modder-facing** documentation. If you're trying to:
 
 - **Run the game locally** or wire up a controller → start in [Build & Run](/build/setup).
 - **Build your first track in Blender** → [Your first track](/blender/your-first-track) — blank scene to playable map.
+- **Go deeper on level-making** → in-repo [`docs/level-making.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md) — reading order, which-doc-for-whom, and the two authoring workflows.
 - **Make a new bike, prop, or track** → [Modding](/modding/overview).
 - **Hack on the engine itself** → [Contributing](/contributing/).
 - **Look up a number** (top speed, hover height, pickup behavior) → [Gameplay](/gameplay/bikes).

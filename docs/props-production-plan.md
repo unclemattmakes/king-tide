@@ -9,11 +9,13 @@ This doc is the *prop-art production strategy* layer — how each asset gets
 made, conditioned, and shipped without breaking the instancing contract.
 
 > **Before building any prop, read [art-direction.md](art-direction.md)** — the
-> "clean stylized toy" register, the built/broken/blooming material-state rule,
-> the waterline rule, and the prop-builder checklist define *how a prop should
-> look*. This doc defines how it gets *made and shipped*. For the **per-family
-> look + copy-paste ComfyUI concept prompts** (the AI-lane concept phase this
-> plan routes to), see [prop-art-direction.md](prop-art-direction.md).
+> built/broken/blooming material-state rule, the waterline rule, and the
+> prop-builder checklist define *how a prop should look*. (The v1 "clean stylized
+> toy" register named here is superseded by the v2 **painterly-vinyl** look; see
+> [art-direction.md](art-direction.md) for the current register.) This doc defines
+> how it gets *made and shipped*. For the **per-family look + copy-paste ComfyUI
+> concept prompts** (the AI-lane concept phase this plan routes to), see
+> [prop-art-direction.md](prop-art-direction.md).
 
 ## Where we are
 
@@ -205,7 +207,10 @@ color-layer strip — see [ai-prop-pipeline.md](ai-prop-pipeline.md)).
 ## Master archetype list
 
 Deduplicated across the 12 v1 tracks (+ the emerging Golden Gate Drowned).
-Tiered by production method; each maps to a lane above.
+Tiered by production method; each maps to a lane above. (Historical v1
+inventory — names like "South Beach" are v1 tracks; South Beach was cut and the
+current lineup lives in [tracks/README.md](tracks/README.md). The *archetype →
+lane* mapping is still valid regardless of which tracks ship.)
 
 ### (A) Hard-surface / architectural → **procedural** (Phase 1)
 - Towers: lighthouse cylinder (Hatteras), stepped spire (Angkor), Campanile

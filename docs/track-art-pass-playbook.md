@@ -12,6 +12,8 @@
 > read [track-art-direction.md](./track-art-direction.md) (and
 > [prop-art-direction.md](./prop-art-direction.md) for the props you're placing)
 > before you start.
+>
+> New to level-making? Start at the hub: [level-making](./level-making.md).
 
 An "art pass" = the foundations (terrain, racing line, checkpoints, buoys) are
 already authored; you're adding scenery. Two surfaces hold a track's data and

@@ -18,7 +18,7 @@ The panel re-renders based on the `.blend`'s parent directory:
 | `bikes-src/<id>.blend` | Bike | **Export Bike to Game**, Copy Play / Viewer URL |
 | anything else | Unknown | Help text — save your .blend somewhere recognised |
 
-Inside track mode you get 18 sub-panels covering every authoring
+Inside track mode you get ~24 sub-panels covering every authoring
 tool. Most sub-panels are **selection-driven** — they only render
 when an object of the matching kind is the active object. The
 **Hoverbike** top-bar menu (always visible) and the `Shift+H` pie
@@ -32,6 +32,18 @@ truth; the export is one click.
 
 ## Track sub-panels
 
+### One-click setup (start here)
+
+The fastest blank-scene → playable path. These spawn the core
+authoring objects so the selection-driven sub-panels below have
+something to render. Prefer them over the manual spawn steps.
+
+| Operator | What it does |
+|---|---|
+| **Scaffold Track Essentials** | One click: creates `ai_spline_main` + `start_00` + `start_01` — everything the lint requires — so a from-scratch `.blend` goes from "two lint errors" to "ready to refine". Safe to re-run; skips anything that already exists (the panel surfaces it as **Scaffold Missing Essentials**). |
+| **Add AI Spline** | Drops `ai_spline_main`, the canonical racing line every other tool snaps to. AI bikes follow it; gates auto-space along it. (Re-exporting from Blender **overwrites** `aiSplines` in the JSON — edit the racing-line *shape* in Blender, not the in-app editor. See [Export Track to Game](#export-track-to-game).) |
+| **Add Player Starts** | Drops `start_00` / `start_01`; the 8-bike grid (player + 7 AI) spawns relative to `start_00` per `specs/grid-offsets.json`. |
+
 ### Spline tools
 
 Operates on `ai_spline_main` — the canonical racing line.
@@ -41,6 +53,9 @@ Operates on `ai_spline_main` — the canonical racing line.
 | **Snap Spline to Terrain** | Raycasts each control point straight down onto the scene, then lifts each hit by **Hover (m)**. | Hides preview gizmos during the cast so they can't catch the ray. Hides `road_main` too so the spline lands on terrain, not the road slab. Water counts as drivable. |
 | **Cursor → Spline** | Moves the 3D cursor to a parameter `t` ∈ [0,1] along the racing line, with rotation aligned to the tangent. | Useful before dropping a ramp / boost pad / prop so it inherits the racing-line orientation. |
 | **Snap Starts to Spline** | Repositions `start_00` / `start_01` on the racing line, perpendicular to the tangent, at **Start gap** apart. | The grid pattern for AI bikes spawns relative to `start_00` (see `specs/grid-offsets.json`). |
+| **Bind Start to Spline** / **Unbind Start from Spline** | Constrains (or releases) the active start empty to ride the racing line, so re-shaping the spline drags the start along with it. | Bound starts track spline edits; unbind to park a start at a fixed pose. |
+| **Reverse Spline Direction** | Flips the racing line's direction so the track runs the other way round. | Re-stamp gates / starts afterward. |
+| **Shift Off Obstacles** | Nudges spline control points laterally off any geometry they're clipping into. | Quick fix after dropping the line through props / terrain. |
 | **Add Ramp at Spline t** | Snaps the cursor (using *t*), then drops a ramp. One-click. | Uses the current ramp dimensions from the Ramps sub-panel. |
 | **Auto-place Ramps** | Drops tangent-aligned ramps at every curvature peak above **\|κ\|**, respecting **Spacing**. | Same curvature detector that powers the turn-indicator preview. |
 
@@ -184,8 +199,8 @@ The three profiles:
   control point's **Tilt** field. Tilt = ±π/2 for a wall, ±π for a
   ceiling, anything between for a banked corner. Same N-panel →
   Item → Tilt slider as the road tool, plus the **Anti-Grav
-  presets** row in the Gameplay sub-panel (Flat / Bank L / Wall R /
-  Ceiling) for one-click set.
+  presets** row in the Gameplay sub-panel (Flat / Bank L / Bank R /
+  Wall L / Wall R / Ceiling) for one-click set.
 
 Each Build emits:
 
@@ -255,13 +270,47 @@ Sculpt + raise/lower knobs: `hoverbike_sculpt_radius`,
 `hoverbike_sculpt_magnitude`, `hoverbike_sculpt_smooth_iters`,
 `hoverbike_sculpt_smooth_weight`.
 
+### Terrain templates
+
+One-click procedural terrain bases — drop a whole landscape, then
+shape it. Faster than importing a heightmap when you want to start
+from a generated form.
+
+| Operator | What it does |
+|---|---|
+| **Add Island Terrain (template)** | Drops a GN-driven island base (the `HV_Island` graph). Author at least **one positive peak well out from centre** — submerging every peak collapses the graph to a sentinel floor. |
+| **Add Island Mod Zone** | Adds a local modifier zone on the island terrain for per-region height tweaks. |
+| **Add Multi-Biome Terrain** | Drops a GN-driven multi-biome base (varied terrain bands feeding the scatter / biome-palette tools below). |
+| **Add Terrain Material** | Attaches the runtime-matching terrain material so the EEVEE preview reads closer to the shipped look. |
+
+::: tip Conform a road / spline to the template
+With a GN-modified terrain active, the Road tool's **Build Road**
+errors unless you bake the modifier first. The **road-conform GN**
+operators — `attach_road_conform` and `snap_curve_to_terrain` —
+project a road curve onto the live GN surface without baking, so
+the slab follows generated terrain non-destructively.
+:::
+
+### Scatter & foliage
+
+The scatter subsystem paints foliage / debris / rocks across the
+terrain from reusable biome palettes. Selection-driven: spawn a
+zone or palette, then its sub-panel appears.
+
+| Operator | What it does |
+|---|---|
+| **Add Scatter Zone** | Drops a scatter zone volume; instances a biome palette across the terrain inside it. (`Refresh Scatter Zones` rebuilds every zone's instancing.) |
+| **Add Biome Palette** | Creates a reusable palette of prop / foliage assets with density + scale rules that scatter zones and strokes draw from. (`Edit Biome Mask` / `Clear Biome Mask` paint where the palette applies.) |
+| **Add Scatter Stroke** | Hand-paints a stroke of scattered assets along a path — for trails of debris, a hedge line, a rubble drift. |
+
 ### Water
 
 Sea level + Gerstner wave preview.
 
 | Operator | What it does |
 |---|---|
-| **Add Water Volume** | Creates `water_volume_main` (cube empty) with `kind=water`, `wave_height=0.6`, `wave_freq=0.5` extras. Spawns the wave preview plane. |
+| **Add Water Preview** | Canonical. Creates the `kind=water` sea-level reference + spawns the wave-displaced preview plane. The everyday "give this track water" button. |
+| **Add Water Volume (legacy / wave overrides)** | Legacy path. Creates `water_volume_main` (cube empty) with `kind=water`, `wave_height=0.6`, `wave_freq=0.5` extras. Use only when you need the `wave_height` / `wave_freq` override extras — live wave amplitude now comes from `sky.seaStateBeaufort` + wave zones, so most tracks want **Add Water Preview**. |
 | **Rebuild Water Preview** | Rebuilds the wave-displaced preview plane around the volume. |
 | **Hide Water Preview** | Toggles the preview collection's visibility off without deleting. |
 
@@ -405,6 +454,25 @@ For end-to-end worked examples (Aqualand tsunami timer, harbour
 calm, set-piece swell aimed at a turn, choppy-vs-rolling) see the
 [Wave zones cookbook](./wave-zones).
 
+### Props, prop-lines & decals
+
+Dressing the track with environment assets. Single props, parametric
+"asset along a curve" prop-lines, and projected decals — all
+round-trip through editor-owned JSON (`props`, `propLines`), so they
+survive Blender re-exports and can also be placed in the in-app
+editor.
+
+| Operator | What it does |
+|---|---|
+| **Add Prop Placement** | Drops a single prop reference from the library at the 3D cursor. Lives in the **Props** sub-panel (`HOVERBIKE_PT_props`). Round-trips through `props` in the JSON (editor-owned). |
+| **Add Prop Line** | Parametric prop-line — places an asset repeatedly along a curve with deterministic spacing / jitter (Epic 2). **Props** counterpart for fences, buoy strings, lamp rows. `Import Prop Lines` / `Write Prop Lines` sync the **Prop lines** sub-panel (`HOVERBIKE_PT_prop_lines`) with `propLines` in the JSON. |
+| **Add Decal** | Drops a thin projected `kind=decal` decal mesh — road markings, grime, signage stamps. Lives in the **Track decals** sub-panel (`HOVERBIKE_PT_track_decals`). |
+| **Setup Prop Mesh Bake** / **Bake Prop Meshes** | Prop-library baking helpers — pre-bake prop meshes for the painterly-vinyl intake. |
+
+Prop *placement* is a designer task — see the
+[track art-pass playbook](https://github.com/occ-matt/hoverbike/blob/main/docs/track-art-pass-playbook.md)
+for where to flank the race line safely.
+
 ### Gameplay
 
 Gates, boost pads, anti-grav zones, racer preview, turn indicators
@@ -418,6 +486,7 @@ section.
 | **Materialise to cp_NN** | Pin the current spline-derived gate positions to `cp_NN` empties so individual gates can be hand-tweaked. |
 | **Re-stamp from Spline** | Re-stamp existing `cp_NN` empties from the current spline (when you've moved the spline and want to refresh hand-placed gates). |
 | **Demote to Spline (wipe cp_NN)** | Delete every `cp_NN` empty and return to pure spline-driven gates. |
+| **Rebuild Gate Buoys** | Auto-drops buoy markers wherever the gate line crosses open water. Needs a water reference in the scene — run **Add Water Preview** first. |
 | **Add Boost Pad** | Drops a `boost_NN` empty at the 3D cursor. The empty's local +Y axis is the boost direction. |
 | **Refresh Boost Pads** | Rebuilds the cyan-emissive slab gizmos under every `boost_NN` empty. |
 | **+ Anti-Grav Zone** | Drops an `antigrav_NN` empty at the 3D cursor — a free-standing anti-grav volume not bound to a curve. Used for off-route stretches and entry / exit pads that don't need a swept surface. |
@@ -634,30 +703,53 @@ These live above the sub-panels (always visible in track mode):
 
 ### Export Track to Game
 
-The export merges with the existing JSON instead of overwriting,
-so in-app editor saves survive Blender re-exports. The contract:
+The export **merges** with the existing JSON instead of overwriting,
+so in-app editor saves survive Blender re-exports. Each top-level key
+has exactly one owner.
 
-| Field | Who owns it |
-|---|---|
-| `environmentGlb` | Blender (always) — points at the just-written .glb |
-| `water` | Blender — `wave_height` / `wave_freq` from `water_volume_main` extras, height from its Z |
-| `terrainShader` | Blender — the `hoverbike_shader_*` scene props |
-| `aiSplines` | Blender — baked from `ai_spline_main` (and `ai_spline_alt_*` if present) |
-| `gateSpacing` | Blender — `hoverbike_gate_spacing` |
-| `start` | Blender — `start_00`'s transform |
-| `horizon` | Blender — when a `horizon_ring` mesh is present, its block in the JSON is updated alongside the GLB mesh; otherwise the procedural-fallback knobs from the sub-panel are written |
-| `sky` | Blender — every sky-preset scene prop |
-| `checkpoints` | Blender if the .blend has `cp_NN` empties; editor otherwise |
-| `pickups` | Blender if the .blend has `pickup_*` empties; editor otherwise |
-| `boostPads` | Blender if the .blend has `boost_NN` empties; editor otherwise |
-| `antiGravZones` | Blender if the .blend has `antigrav_NN` empties; editor otherwise |
-| `waveZones` | Blender if the .blend has `wave_zone_NN` empties; editor otherwise |
-| `audio` | Editor only — there's no Blender side to audio (music + ambient gains) |
-| Anything else (props, sky overrides, etc.) | Editor — preserved through Blender exports |
+**Blender-owned** (a re-export **overwrites** these from the `.blend`):
+
+```
+id, name, environmentGlb, water, terrainShader, sky, aiSplines,
+gateSpacing, floatGates, lapsToFinish, start, waveRiderBuoys, roadSpline
+```
+
+The dict-valued ones (`water`, `sky`, `terrainShader`) merge
+per-subkey, so editor-added subfields survive; the array-valued
+ones (`aiSplines`, `waveRiderBuoys`, `roadSpline`) are replaced
+wholesale.
+
+**Editor-owned** (preserved across every Blender re-export; authored
+in the in-app editor, or — legacy — via `cp_NN` / `pickup_NN` /
+`wave_zone_NN` / etc. empties in the `.blend`):
+
+```
+checkpoints (gates), pickupSpawns, boostPads, props, propLines,
+antiGravZones, waveZones, audio
+```
+
+::: warning `aiSplines` is Blender-owned
+The racing line is Blender-owned. If you nudge spline anchors in the
+in-app editor and then re-export from Blender, the Blender curve
+**overwrites** your editor edits. Rule of thumb: **edit the racing-line
+shape in Blender; use the in-app editor for gate / pickup / boost /
+prop placement.** Gates go either way — `gateSpacing` auto-spaces them
+from Blender, or hand-placed `cp_NN` / editor `checkpoints` are
+editor-owned and survive re-export.
+:::
+
+For the editor-owned keys, the merge is **opt-in**: if the `.blend`
+holds the legacy empties (`cp_NN`, `boost_NN`, `wave_zone_NN`,
+`antigrav_NN`, `pickup_*`), Blender owns that list this export;
+otherwise the in-app editor's placements stay untouched.
 
 Pre-export the addon also bakes any NURBS / Bezier curves to flat
 point arrays in `extras` (glTF doesn't carry curves natively), so
 the runtime loader sees the racing line as a polyline.
+
+For the full round-trip contract and the two authoring workflows it
+bridges, see the
+[Making a level hub](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md).
 
 ---
 
@@ -686,7 +778,7 @@ than by sub-panel:
 
 | Submenu | Contents |
 |---|---|
-| **Add** | Add Water Volume, Wave Zone, Anti-Grav Zone, Anti-Grav Curve, Boost Pad, Ramp, Emitter, Downtown, Horizon Ring, Camera Hero, Tunnel Starter Curve, Road Curve, Placement Helper. |
+| **Add** | Add Water Preview, Wave Zone, Anti-Grav Zone, Anti-Grav Curve, Boost Pad, Ramp, Emitter, Downtown, Horizon Ring, Camera Hero, Tunnel Starter Curve, Road Curve, Placement Helper. |
 | **Build / Refresh** | Build Road, Build Tunnel, Build Anti-Grav Surface, Rebuild Gate Preview, Rebuild Racer Preview, Rebuild Water Preview, Rebuild Ghost Lap, Rebuild Turn Indicators, Refresh Wave Zone Visuals, Refresh Anti-Grav Zones, Refresh Boost Pads. |
 | **Spline** | Snap Spline to Terrain, Cursor → Spline, Snap Starts to Spline, Add Ramp at Spline t, Auto-place Ramps, Toggle Spline Anti-Grav, Tilt presets. |
 | **Terrain** | Import Heightmap, Apply Terrain Modifiers, Subdivide Terrain, Sculpt Terrain, Raise / Lower @ cursor, Smooth Terrain, Bake AO + Path Wear, Bake Path-Worn. |
@@ -872,7 +964,7 @@ from code. Run with:
 | `seed_template_tunnels.py` | `tracks-src/template-tunnels.blend` | Three mountains, one hand-authored tunnel through each, AI spline threading all three. |
 | `seed_template_tunnel_island.py` | `tracks-src/template-tunnel-island.blend` | Older tunnel-through-island reference. |
 | `seed_template_antigrav_showcase.py` | `tracks-src/template-antigrav-showcase.blend` | Tube + ribbon + banked-strip reference for the anti-grav surface tool. |
-| `seed_track_*.py` | `tracks-src/<id>.blend` | Per-track seeders — one per ship-quality v1 track (Aqualand, Marina Bay 7, Liberty Drowned, Shibuya Submerged, Cape Town Drift, Doge's Drift, The Maw, South Beach Sunken, Hatteras Light, Kilauea Crown, Angkor Drowned, Sandbar). |
+| `seed_track_*.py` | `tracks-src/<id>.blend` | Per-track seeders (`pnpm seed:track-<id>`) — one per seed-built track (Aqualand, Marina Bay 7, Liberty Drowned, Shibuya Submerged, Cape Town Drift, Doge's Drift, The Maw, Hatteras Light, Kilauea Crown, Angkor Drowned, Sandbar/Mayday Bay). *(South Beach Sunken was cut in the 2026-06 content pass — rebuilt as Mexico City, which is authored from a content-root `.blend`, not a seed.)* |
 | `seed_props_library.py` | `tracks-src/props-library.blend` | The shared prop library — `prop_gate_mesh`, etc. Linked (not appended) from track `.blend`s, so re-running this re-flows every track. |
 | `seed_landmarks_library.py` / `seed_landmarks_showcase.py` | `tracks-src/landmarks-library.blend` / `landmarks-showcase.blend` | Per-city skyline / set-piece landmark meshes (Statue of Liberty, Doge's Palace, Marina Bay Sands, etc) and a calibration scene that lays them out. |
 | `seed_prop_kit.py` | `tools/blender/lib/prop_kit.blend` | Placeholder kit parts for `build_prop.py`. |

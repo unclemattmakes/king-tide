@@ -1,5 +1,10 @@
 # Hoverbike — Prop Art Direction v1
 
+> **v1→v2 note:** the v1 "clean stylized toy" register below is superseded by the
+> v2 **painterly-vinyl** look. The per-family lane logic, prompts, and material-state
+> rules here still hold; for the current register, defer to
+> [art-direction.md](./art-direction.md).
+
 > Per-archetype-family application of [art-direction.md](./art-direction.md) —
 > the "clean stylized toy" register, the **built / broken / blooming** rule, the
 > waterline rule, and "glow is a privilege." For each prop family it gives the
@@ -77,7 +82,7 @@ spindly fragments, floating disconnected parts, holes
 
 ### Rock family — sea-stacks · shoal rocks · boulders · temple rubble
 
-*Used by:* The Maw, Hatteras, Liberty, Angkor, South Beach, Cape Town. The
+*Used by:* The Maw, Hatteras, Liberty, Angkor, Mexico City, Cape Town. The
 de-risking pilot family — runs the full `make-props` chain cleanly.
 
 - **Material state:** **broken + blooming** — weathered stone mass with a

@@ -1,5 +1,9 @@
 # Blender pipeline overview
 
+::: tip New to level-making?
+Start at the [Making a level hub](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md) for the newcomer reading order, the which-doc-for-whom map, and the two authoring workflows.
+:::
+
 The Hoverbike asset pipeline runs through **Blender 5.1+**. Most of
 what you build in Blender exports to a single `.glb` per track or
 per bike, which the runtime loads at boot. The pipeline has three
@@ -37,7 +41,7 @@ Thumbnail / Utility submenus) and a `Shift+H` pie menu for
 keyboard-driven workflow — both register the same operators as
 the sidebar.
 
-In **track mode** the panel exposes 18 selection-driven sub-panels.
+In **track mode** the panel exposes ~24 selection-driven sub-panels.
 Most are scoped: they only render when an object of the matching
 kind is active in the viewport (e.g. the **Wave zones** sub-panel
 only appears when a `wave_zone_NN` empty is selected). This keeps
@@ -54,11 +58,18 @@ appears.
 | Downtown | Procedural city block at the 3D cursor (multi-block grid, terrain-conformed plinth). |
 | Ramps | Drop a parametric stunt wedge at the 3D cursor. |
 | Terrain | Heightmap import, sculpt-mode entry, raise/lower at cursor, smooth, AO + path-wear bakes. |
+| Terrain templates | One-click **Add Island Terrain** / **Add Multi-Biome Terrain** starter landforms + island mod-zones. |
+| Terrain material | Adds the runtime-matching terrain material so the viewport previews the in-game shading. |
 | Water | Sea-level slider + wave preview plane. |
+| Gate buoys | Auto-places marker buoys where the racing line crosses open water (needs a water reference present). |
 | Horizon | Per-track distant silhouette mesh (or procedural ring fallback). |
 | Sky preset | Per-track tint, cloudiness, sun, fog, time-of-day, colour grade, sea-state Beaufort. |
 | Wave zones | Per-zone wave amplitude / frequency / surge multipliers. See [Wave zones cookbook](./wave-zones). |
 | Gameplay | Gates, boost pads, racer preview, turn indicators — placement + previews. |
+| Props | Place library props (`prop_NN`) along the track. |
+| Prop lines | Parametric "asset along a curve" — scatter a prop down a spline at a given spacing. |
+| Decals | Thin projected decal meshes (paint, signage, scorch) laid onto terrain / geometry. |
+| Scatter / biome palette / scatter stroke | Foliage subsystem — scatter zones, per-biome palette masks, and hand-painted scatter strokes. |
 | Emitters | Particle systems for VFX (steam, foam, embers, gulls, neon, ash). |
 | Ghost lap + chase cam | Auto-flying preview bike along the racing line. |
 | Terrain shader (runtime) | Tunes the runtime ramp / slope / wet-band / coloration without touching the .ts. |
@@ -83,14 +94,18 @@ examples of the wave-mastery tools see the
 tools/blender/
 ├── hoverbike_addon/             ← in-Blender addon (package)
 │   ├── __init__.py              ← bl_info + per-module register
-│   ├── panel.py                 ← sidebar UI (parent + 18 sub-panels)
+│   ├── panel.py                 ← sidebar UI (parent + sub-panels; more register from modules)
 │   ├── menu.py                  ← top-bar menu + Shift+H pie menu
+│   ├── prefs.py                 ← addon preferences (project-root path, etc.)
 │   │
-│   ├── road.py · tunnel.py · ramp.py · downtown.py · terrain.py
+│   ├── road.py · road_conform_gn.py · tunnel.py · ramp.py · downtown.py
+│   ├── terrain.py · terrain_material.py · island_terrain.py · multibiome_terrain.py
 │   ├── spline.py · placement_helper.py · turn_indicators.py
-│   ├── water.py · wave_zone.py · horizon.py · sky_preset.py
-│   ├── antigrav.py · antigrav_ribbon.py
+│   ├── water.py · wave_zone.py · gate_buoys.py · horizon.py · sky_preset.py
+│   ├── antigrav.py · antigrav_ribbon.py   ← PARKED (anti-grav cut from races; kept for a possible DLC)
 │   ├── emitter.py · boost_pad.py
+│   ├── prop_placements.py · propline_placements.py · prop_bake.py · decal.py
+│   ├── scatter.py · scatter_stroke.py · biome_palette.py   ← foliage subsystem
 │   ├── previews.py · ghost_lap.py · thumbnail.py · bake.py
 │   ├── export.py · track_meta.py · terrain_shader.py · auto_tag.py
 │   ├── new_map.py               ← "duplicate a template" wizard
@@ -108,7 +123,7 @@ tools/blender/
 ├── seed_template_mesa.py        ← procedural mesa scene
 ├── seed_template_downtown.py    ← procedural downtown scene
 ├── seed_template_tunnels.py     ← procedural tunnels-through-hills
-├── seed_template_antigrav_showcase.py ← anti-grav tube/ribbon/strip reference
+├── seed_template_antigrav_showcase.py ← PARKED — anti-grav tube/ribbon/strip reference (cut from races)
 ├── seed_props_library.py        ← rebuilds tracks-src/props-library.blend
 ├── seed_landmarks_library.py    ← rebuilds tracks-src/landmarks-library.blend
 ├── seed_prop_kit.py             ← rebuilds tools/blender/lib/prop_kit.blend
@@ -133,10 +148,10 @@ Outside `tools/blender/` the relevant directories are:
 | Path | Contents |
 |---|---|
 | `bikes-src/<id>.blend` | One per bike — the geometry source of truth. |
-| `tracks-src/<id>.blend` | One per track — editing this is the canonical track workflow. |
+| `tracks-src/<id>.blend` | One per track — editing this is the track workflow. The `tracks-src/` folder can live in your clone or a Drive-synced folder outside it; either way the `.blend` is gitignored. |
 | `tracks-src/props-library.blend` | Linked-library source for `prop_gate_mesh` (the real gate prop) and other shared props. |
 | `tracks-src/landmarks-library.blend` | Linked-library source for per-city skyline / landmark meshes. |
-| `tracks-src/template-*.blend` | Seed-generated template scenes (island, alpine, dunes, mesa, downtown, tunnels, antigrav-showcase). Start a new track by duplicating one with **Hoverbike → Utility → New Map from Template**. |
+| `tracks-src/template-*.blend` | Seed-generated template scenes (island, alpine, dunes, mesa, downtown, tunnels; antigrav-showcase is **parked**). Start a new track by duplicating one with **Hoverbike → Utility → New Map from Template**. |
 | `specs/bikes/<id>.json` | Slim metadata + recolour overrides for each bike. |
 | `specs/tracks/<id>.json` | Declarative spec for spec-driven tracks (the headless builder reads these). |
 | `specs/props/<id>.json` | Parametric specs for kit-assembled props. |

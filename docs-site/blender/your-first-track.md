@@ -16,10 +16,19 @@ it once.
 
 ::: warning Where you save matters
 The filename and parent directory are how the addon decides which
-mode to enter. Save your track as `tracks-src/<id>.blend` inside
-your hoverbike clone. The basename (`<id>`) becomes the in-game
-track id; `tracks-src/sandbar.blend` plays at
+mode to enter. Save your track as `tracks-src/<id>.blend`. The addon
+detects "track mode" from the `tracks-src/` folder name — that folder
+can be **inside your clone** (simplest) or a **Drive-synced `tracks-src/`
+outside it** (the team's setup); either way the export still lands in
+your configured repo clone. The `.blend` is **gitignored** both ways —
+only the compiled `public/assets/tracks/<id>.glb` + `public/tracks/<id>.json`
+get committed. The basename (`<id>`) becomes the in-game track id;
+`tracks-src/sandbar.blend` plays at
 `http://localhost:5191/?track=sandbar`.
+
+To start from an existing layout instead of a blank scene, use the
+addon's **New Map from Template** — it copies a `template-*.blend` to
+a fresh `tracks-src/<id>.blend` for you.
 :::
 
 ## Big picture
@@ -44,8 +53,9 @@ In Blender:
 
 1. **File → New → General**. Delete the default cube, camera, and
    light (`A` then `X`).
-2. **File → Save As…** → navigate into `tracks-src/` in your repo
-   clone → name the file `<id>.blend` (use lowercase letters,
+2. **File → Save As…** → navigate into a `tracks-src/` folder (inside
+   your repo clone is simplest; a Drive-synced `tracks-src/` outside it
+   works too) → name the file `<id>.blend` (use lowercase letters,
    digits, dashes — that becomes your in-game track id). Save.
 
 The addon detects "track mode" from the parent directory. Press
@@ -119,6 +129,18 @@ The **AI spline** (`ai_spline_main`, a NURBS curve) does two jobs:
 the AI bikes follow it, and the gate placement runs along it. A
 track without an AI spline won't lint clean.
 
+**Easy path (recommended):** Hoverbike sidebar → top → **Scaffold
+Track Essentials**. One click drops a starter `ai_spline_main` *and*
+the player starts (the next step) in place — the fastest way from
+blank scene to lintable. (You can also click **Add AI Spline** on its
+own for just the spline.) Then shape the curve to your terrain: Tab
+into edit mode, move the control points, **close the loop** (Curve
+menu → *Toggle Cyclic*, or `Alt+C`), Tab out.
+
+::: details What those buttons do under the hood
+**Add AI Spline** (and the spline half of **Scaffold Track Essentials**)
+is the same as building it by hand:
+
 1. **Add → Curve → Bezier** → rename it `ai_spline_main` in the
    Outliner.
 2. Object Properties → Custom Properties → add `kind` = `ai_spline`
@@ -126,12 +148,14 @@ track without an AI spline won't lint clean.
 3. Tab into edit mode and shape the racing line. A handful of
    control points (8–12) is plenty — the runtime resamples it into
    a dense polyline. **Close the loop:** Curve menu → *Toggle
-   Cyclic*, or `Alt+C`.
-4. Tab back out.
-5. Hoverbike sidebar → **Spline tools** → adjust *Hover (m)*
-   (default 3 m) to a comfortable racing altitude → click **Snap
-   Spline to Terrain**. Every control point raycasts straight down
-   onto the terrain and lifts by the hover height.
+   Cyclic*, or `Alt+C`. Tab back out.
+:::
+
+Once shaped, drop the curve onto the ground: Hoverbike sidebar →
+**Spline tools** → adjust *Hover (m)* (default 3 m) to a comfortable
+racing altitude → click **Snap Spline to Terrain**. Every control
+point raycasts straight down onto the terrain and lifts by the hover
+height.
 
 ::: tip Make sure your loop sits cleanly above the surface
 After snapping, eyeball the curve — it should hug the terrain
@@ -144,19 +168,30 @@ clicked **Build Road** already.
 
 ## 4. Place the start grid
 
+**Easy path (recommended):** if you ran **Scaffold Track Essentials**
+in the previous step, the starts are already placed — skip ahead. To
+add (or re-add) them on their own, Hoverbike sidebar → top → **Add
+Player Starts**. Then snap them onto the racing line: Hoverbike
+sidebar → **Spline tools** → set *Start gap* (default ~5 m) → **Snap
+Starts to Spline**.
+
+::: details What it does under the hood
+**Add Player Starts** is the same as placing the start empties by hand:
+
 1. **Add → Empty → Arrows** → rename `start_00`. The empty's local
    +Y axis is the direction the racer faces; rotate around Z to aim.
 2. Custom properties: `kind` = `start`, `index` = 0 (Int).
-3. Hoverbike sidebar → **Spline tools** → set *Start gap* (default
-   ~5 m) → click **Snap Starts to Spline**. The operator
-   repositions `start_00` (and `start_01` if you've added one) on
-   the racing line, lined up perpendicular to the tangent at
-   parameter `t = 0`.
+3. **Snap Starts to Spline** (Spline tools) repositions `start_00`
+   (and `start_01` if you've added one) on the racing line, lined up
+   perpendicular to the tangent at parameter `t = 0`.
 
 For a multi-bike grid, duplicate `start_00` (Shift+D) and rename
-the copy `start_01`. The AI bikes spawn in slots defined by
-`specs/grid-offsets.json` — you can preview them with **Rebuild
-Racer Preview** in the Gameplay sub-panel.
+the copy `start_01`.
+:::
+
+The AI bikes spawn in slots defined by `specs/grid-offsets.json` —
+you can preview them with **Rebuild Racer Preview** in the Gameplay
+sub-panel.
 
 ## 5. Add water and sea level
 
@@ -165,9 +200,9 @@ volume — the wave field renders everywhere outside drivable
 geometry, and the bike's "ride waves" rule kicks in below water.
 
 1. Hoverbike sidebar → **Water** sub-panel → click **Add Water
-   Volume**. The addon creates `water_volume_main`, a cube-shaped
-   empty with the right `kind` / `wave_height` / `wave_freq`
-   extras. The wave preview plane appears automatically.
+   Preview**. The addon creates `water_volume_main` (with the right
+   `kind` / `wave_height` / `wave_freq` extras) and the wave preview
+   plane appears automatically.
 2. Scrub **Sea level (m)** to set the surface height. Negative
    values give an island; positive values flood the basin.
 3. Optionally tune **Wave preview** *Size*, *Subdiv*, *Time* to
@@ -177,6 +212,12 @@ geometry, and the bike's "ride waves" rule kicks in below water.
 If you'd rather drag the volume in the viewport, just grab the
 `water_volume_main` empty along Z — the preview follows live via
 the addon's depsgraph hook.
+
+::: tip Legacy: Add Water Volume
+**Add Water Volume (legacy / wave overrides)** is the older operator,
+kept only for hand-tuning per-volume wave overrides. For a normal
+track, **Add Water Preview** is the one you want — start there.
+:::
 
 ## 6. Lint, Export, playtest
 
@@ -235,6 +276,13 @@ needed; the level picker will list it on next reload.
 
 You now have a playable track. The rest of this page is **optional
 authoring** — features you can layer on top.
+
+::: tip Anti-grav is parked
+You may run across anti-grav zones in the addon, templates, or older
+docs. **Anti-grav is parked** (cut from races, kept for a possible
+future DLC) — no shipped track uses it, so don't chase it for your
+first map. Verticality comes from terrain, ramps, berms, and cliffs.
+:::
 
 ---
 
@@ -472,6 +520,16 @@ For the round-trip contract — which fields Blender owns vs. which
 fields the editor owns — see [Addon reference → Export Track to Game](./addon-reference#export-track-to-game).
 
 ## Where to go next
+
+You've got a greybox you can race. To take it from there to a dressed,
+shippable map:
+
+- **The full picture — where every level-making doc fits** → [Making a level: start here](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md).
+- **The build-from-scratch content pass** → [Level-design playbook](https://github.com/occ-matt/hoverbike/blob/main/docs/level-design-playbook.md).
+- **Per-track design docs (canonical layouts + intent)** → [docs/tracks](https://github.com/occ-matt/hoverbike/blob/main/docs/tracks/README.md).
+- **Dressing the track with props + foliage** → [Track art-pass playbook](https://github.com/occ-matt/hoverbike/blob/main/docs/track-art-pass-playbook.md).
+
+Tooling references:
 
 - **Full operator + panel reference** → [Addon reference](./addon-reference).
 - **The naming + extras matrix** → [Scene conventions](./scene-conventions).

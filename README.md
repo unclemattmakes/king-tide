@@ -18,6 +18,7 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 - [Product plan](docs/product-plan.md) — vision + MVP scope
 - [Implementation plan](docs/implementation-plan.md) — architecture + milestones
 - [Architecture decisions](docs/adr/README.md) — ECS, sim/render split, WebGPU, Rapier
+- [**Making a level**](docs/level-making.md) — **start here to build a track**: reading order, the pipeline end-to-end, the Blender↔editor export contract
 - [In-app track editor](docs/track-editor-guide.md) — authoring gameplay data
 - [Blender pipeline](docs/blender-pipeline-guide.md) — authoring environment geometry
 - [Dev + modder docs site](docs-site/) — VitePress site (`pnpm docs:dev`) covering build, gameplay, asset pipeline, and reference

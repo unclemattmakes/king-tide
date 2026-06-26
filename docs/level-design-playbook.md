@@ -1,5 +1,16 @@
 # Level-design playbook — building a track from a shape-only canvas
 
+> **New here?** Start at the level-making hub — [level-making](./level-making.md) —
+> for the newcomer reading order and the which-doc-for-whom map.
+
+> **Who this is for.** This is the **agent/MCP-driven** content-pass workflow: a
+> session driving the connected Blender over MCP (`execute_blender_code`) and calling
+> the addon's `bpy.ops.hoverbike.*` operators directly. **A human at the keyboard
+> should start at the published "Your first track" walkthrough and use the N-panel
+> addon buttons instead** — the `bpy.ops` operators here map 1:1 to the panel buttons,
+> so this playbook doubles as a tool cheat-sheet (§9) and
+> [blender-pipeline-guide.md](./blender-pipeline-guide.md) is the human-facing geometry guide.
+
 > **⚠ Canonical track-build workflow (consolidated 2026-06).** This is *the*
 > build-a-track-from-scratch playbook — it supersedes the archived
 > [track-build-playbook.md](./track-build-playbook.md), whose unique gotchas were
@@ -20,10 +31,12 @@
 > art-target docs in [tracks/](./tracks/README.md).
 >
 > The whole job is done in the connected Blender via MCP (`execute_blender_code`
-> + `render_viewport_to_path`), authoring the content-root `.blend` and exporting
-> with `bpy.ops.hoverbike.export_track`. The `.blend` lives in the Drive content
-> root (`C:\project-content\hoverbike\tracks-src\<id>.blend`, gitignored); only
-> the compiled GLB + JSON are committed.
+> + `render_viewport_to_path`), authoring the `.blend` and exporting with
+> `bpy.ops.hoverbike.export_track`. The `.blend` lives in `tracks-src/<id>.blend`
+> — the team keeps theirs Drive-synced (outside the clone), but it can equally be
+> your clone's own `tracks-src/`; the addon detects "track mode" from the folder
+> name either way, and the `.blend` is gitignored either way. Only the compiled
+> GLB + JSON are committed.
 
 ## 0. The two rules that matter most
 

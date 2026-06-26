@@ -355,6 +355,8 @@ the per-vertex ALU), not about authoring more empties.
 | `tracks-src/the-maw.blend` | Multiple zones with competing swell trains across the central arch. |
 | `public/tracks/*.json` `waveZones` arrays | Production examples — read the JSON for the exact final values. |
 
+> Most of these reference tracks are still **greybox route-stubs** awaiting the v2 art pass (only Mayday Bay and The Maw are art-dressed). Judge the wave look **in-engine** (`?track=<id>`), not from the `.blend` — water, waterline, and foam are runtime shaders that don't show in Blender.
+
 ## See also
 
 - [Addon reference → Wave zones](./addon-reference#wave-zones) — operator + property table.

@@ -2,6 +2,35 @@
 
 ## Shipped tracks
 
+The named city tracks — every one a post-flood city, real or fictional — are the
+playable lineup:
+
+| Track | URL | Notes |
+|---|---|---|
+| Mayday Bay | `?track=sandbar` | Tutorial lagoon; Reef Cup opener. **Art-dressed.** (Slug stays `sandbar`; display name is Mayday Bay.) |
+| Mexico City | `?track=mexico-city` | Reef Cup round 2. Greybox route-stub. |
+| Cape Town Drift | `?track=cape-town-drift` | Reef Cup finale. Greybox route-stub. |
+| The Maw | `?track=the-maw` | Figure-8 slalom. **Art-dressed.** |
+| Shibuya Submerged | `?track=shibuya-submerged` | Greybox route-stub. |
+| Liberty Drowned | `?track=liberty-drowned` | Greybox route-stub. |
+| Kilauea Crown | `?track=kilauea-crown` | Greybox route-stub. |
+| Marina Bay 7 | `?track=marina-bay-7` | Greybox route-stub. |
+| Doge's Drift | `?track=doges-drift` | Greybox route-stub. |
+| Aqualand | `?track=aqualand` | Greybox route-stub. |
+| Angkor Drowned | `?track=angkor-drowned` | Greybox route-stub. |
+| Hatteras Light | `?track=hatteras-light` | Greybox route-stub. |
+| Golden Gate Drowned | `?track=golden-gate-drowned` | Greybox route-stub. |
+
+::: warning Only two are art-complete
+`status: 'ship'` means **wired and playable, not art-complete.** Only **Mayday Bay**
+and **The Maw** are dressed; the rest are greybox route-stubs awaiting the v2 art
+pass. The current proof-of-thesis is the **Reef Cup** (Mayday Bay → Mexico City →
+Cape Town Drift) — see [`docs/tracks/README.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/tracks/README.md) for the canonical lineup.
+:::
+
+A handful of **procedural dev tracks** also ship for engine and physics work — they're
+built in code, not authored as city levels:
+
 | Track | URL | Notes |
 |---|---|---|
 | Lagoon Loop | `/` (default) or `?track=lagoon` | Stadium loop with a jump ramp on the right straight. Exercises raycast-vs-static-collider, surface alignment on a slope, and water re-acquisition on landing. |
@@ -18,10 +47,11 @@
 - The **direction arrow** (Crazy Taxi style) above the player points to the next checkpoint. A **sky beacon** marks the gate itself.
 - Crossing the start line after the final lap triggers the **finish overlay** — best lap, total time, and a Restart (`R`) prompt.
 - **Best lap** is saved to localStorage per `(track, bike)` pair. View / clear it from the Garage menu.
+- **Boost pads** are live gameplay: driving over a pad's volume applies a forward boost (`boostPads` in track JSON). Place them in Blender or the in-app editor.
 
 ## AI racers
 
-Four AI opponents per race. They:
+The grid is 8 bikes: you plus **seven AI opponents**. They:
 
 - Follow a **smooth-arc racing spline** (`buildStadiumAISpline`) through the corners with per-bike line offsets so they hold parallel lines instead of converging into a pile-up.
 - Scan ~1.5 s of upcoming spline, derive an implied corner radius, and cap target speed at `√(latAccel × radius)`. Brake fires when current speed exceeds that target.
@@ -29,7 +59,7 @@ Four AI opponents per race. They:
 - **Fire their own pickups** via `aiCombatSystem` (see [Pickups & combat](/gameplay/pickups#ai-pickup-usage)).
 
 ::: warning Cliffside AI is rough
-The climb ramp + cliff drop create a dead-end the AI can't recover from once it lands off-mesa. The bottom half of the track is fine. This is a level-design limitation, not a controller bug — see [`status.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/status.md#ai-navigation--lagoon-solid-cliffside-still-rough).
+The climb ramp + cliff drop create a dead-end the AI can't recover from once it lands off-mesa. The bottom half of the track is fine. This is a level-design limitation, not a controller bug — see [`status.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/status.md) and the README's *Known issues*.
 :::
 
 ## Auto-play mode

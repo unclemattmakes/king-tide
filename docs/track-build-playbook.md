@@ -2,8 +2,11 @@
 
 > **Archived / superseded (2026-06).** This Cape Hatteras–era "four-pass" playbook
 > has been consolidated into the canonical, current workflow:
-> **[level-design-playbook.md](level-design-playbook.md)** — *building a track from
+> **[level-design-playbook.md](./level-design-playbook.md)** — *building a track from
 > a shape-only canvas*.
+>
+> **New here?** Start at the hub: **[level-making.md](./level-making.md)** — *Making
+> a level: start here* (reading order + which-doc-for-whom).
 >
 > Its still-valid, hard-won gotchas were folded into that doc ("Before you start"
 > + §8): orphan datablocks breaking the terrain finders, `cp_NN` needing an
@@ -17,4 +20,4 @@
 > `node tools/blender/seed.mjs seed_props_library.py`.)
 >
 > The original four-pass content remains in git history. Don't author from this
-> file — start at [level-design-playbook.md](level-design-playbook.md).
+> file — start at [level-design-playbook.md](./level-design-playbook.md).

@@ -5,6 +5,10 @@ gates, AI spline, pickups, boost pads, start pose. Pair with Blender for
 collidable environment geometry (see
 [blender-pipeline-guide.md](./blender-pipeline-guide.md)).
 
+> New to level-making? Start at the hub: [level-making](./level-making.md).
+> This is the canonical in-app editor reference — the published docs-site
+> `/modding/tracks` editor section points here.
+
 ## Open the editor
 
 The simplest path:

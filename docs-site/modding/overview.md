@@ -50,7 +50,7 @@ pnpm dev              # http://localhost:5191
 | `specs/bikes/*.json` | authors | Slim metadata + recolour overrides for each variant. `geometry` and `rider` blocks accepted but ignored (legacy). |
 | `specs/props/*.json`, `specs/tracks/*.json` | authors | Parametric specs for kit-assembled props and declarative tracks. |
 | `tools/blender/lib/prop_kit.blend` | authors | Prop kit `.blend` — committed source art. `seed_prop_kit.py` regenerates placeholders. The legacy `bike_parts.blend` + `seed_bike_kit.py` are kept for reference but no longer wired up. |
-| `tools/blender/hoverbike_addon.py` | pipeline | In-Blender addon — installs a Hoverbike sidebar with *Export Bike to Game* / *Export Track to Game* buttons that auto-pick mode by the .blend's parent dir. |
+| `tools/blender/hoverbike_addon/` | pipeline | In-Blender addon (a package, not a single file) — installs a Hoverbike sidebar with *Export Bike to Game* / *Export Track to Game* buttons that auto-pick mode by the .blend's parent dir. |
 | `tools/blender/build_*.py` | pipeline | Headless builders. `build_bike.py` opens `bikes-src/<id>.blend`; `build_prop.py` and `build_track.py` are spec-driven. Each reads one spec via `HOVERBIKE_SPEC` env var. |
 | `tools/blender/run.mjs` | pipeline | Cross-platform Node wrapper. Discovers specs, validates, spawns Blender per spec, writes the manifest. |
 | `public/assets/<cat>/*.glb` | generated | Output GLBs. Currently committed; future work will gitignore them. |
@@ -108,6 +108,8 @@ See [Authoring bikes](/modding/bikes) and [Authoring props](/modding/props).
 
 ### Add a brand-new track
 
+Building a track specifically? → the level-making hub: [`docs/level-making.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md) (reading order, which-doc-for-whom, the two authoring workflows, and where the `.blend` lives).
+
 You can author tracks two ways. Pick whichever fits:
 
 - **Spec-driven** (calibration-style declarative tracks): copy `specs/tracks/test-ring.json` to `specs/tracks/<new-id>.json`, edit, save.
@@ -121,8 +123,8 @@ For environment geometry (cliffs, mesas, hand-modeled props), see [`docs/blender
 
 **"`could not locate Blender`".** `tools/blender/run.mjs` checks `$BLENDER_EXE`, then `PATH`, then OS-default install paths. Set `BLENDER_EXE` if Blender is in a non-standard location.
 
-**Bike loads but renders sideways or stretched.** The Blender → glTF Y-up conversion swaps axes. The builders compensate by authoring with the bike's nose at Blender `-Y` (so it lands at three.js `+Z` forward). If you write a new builder, follow the same convention or ship an explicit rotation on the root.
+**Bike loads but renders sideways or stretched.** The Blender → glTF Y-up conversion swaps axes. The builders compensate by authoring with the bike's nose at Blender `-Y` (so it lands at three.js `+Z` forward). If you write a new builder, follow the same convention or ship an explicit rotation on the root. Note this is the bike-*geometry* rule; gameplay empties (starts, gates, boost pads) instead point **local +Y forward** down-track — the addon yaw-corrects them on export. See [Scene conventions](/blender/scene-conventions).
 
 **Editor's *+Asset* dropdown is empty.** Run `pnpm gen:props` at least once. The editor reads `public/assets/manifest.json`; if no prop GLBs have been built, the dropdown shows the "no assets" hint.
 
-**CI fails on a fresh PR.** [`.github/workflows/asset-pipeline.yml`](https://github.com/occ-matt/hoverbike/blob/main/.github/workflows/asset-pipeline.yml) runs `pnpm gen:all` on PRs that touch `specs/` or `tools/blender/`. The run log shows the exact validation or Blender error.
+**The asset build fails on a fresh PR.** A change under `specs/` or `tools/blender/` must keep `pnpm gen:all` green — run it locally (CI for this repo is unreliable, so the local gate is the gate). The error log shows the exact validation or Blender failure.
