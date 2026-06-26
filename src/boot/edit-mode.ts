@@ -12,6 +12,7 @@ import type * as THREE from 'three'
 import { installTrackEditor } from '@/engine/editor/track-editor'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
 import type { SkySystem } from '@/engine/render/sky'
+import type { TerrainHeightmap } from '@/engine/render/terrain-heightmap'
 import { updateUnderwaterFog } from '@/engine/render/water'
 import { advanceWaveField, sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import type { PropManifestEntry } from '@/game/assets/manifest'
@@ -29,6 +30,9 @@ export interface EditModeWiringOpts {
   horizonRing: HorizonRing
   waterMesh: { tick: () => void; mesh: THREE.Object3D }
   waveField: WaveFieldState
+  /** Baked terrain heightmap (when an env GLB loaded in edit mode) — forwarded
+   *  to the editor so `seatToTerrain` prop-line previews seat onto real terrain. */
+  terrainHeightmap: TerrainHeightmap | null
   backend: string
   backendEl: HTMLElement | null
 }
@@ -45,6 +49,7 @@ export function startEditMode(opts: EditModeWiringOpts): void {
     horizonRing,
     waterMesh,
     waveField,
+    terrainHeightmap,
     backend,
   } = opts
   if (opts.backendEl) opts.backendEl.textContent = `editor · backend ${backend}`
@@ -61,6 +66,7 @@ export function startEditMode(opts: EditModeWiringOpts): void {
     track,
     ...(propAssets ? { propAssets } : {}),
     waveField,
+    terrainHeightmap,
     setWaterHeight: (h) => {
       waveField.baseY = h
       waterMesh.mesh.position.y = h

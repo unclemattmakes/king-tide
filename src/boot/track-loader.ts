@@ -33,7 +33,11 @@ import {
 } from '@/engine/render/glb-track'
 import { createRampMesh } from '@/engine/render/ramp-mesh'
 import { gateShadowCaster, resolveShadowCastMinRadius } from '@/engine/render/shadow-caster-gate'
-import { buildTerrainHeightmap, type TerrainHeightmap } from '@/engine/render/terrain-heightmap'
+import {
+  buildTerrainHeightmap,
+  sampleTerrainHeightAtXZ,
+  type TerrainHeightmap,
+} from '@/engine/render/terrain-heightmap'
 import { WATER_REFLECTION_LAYER } from '@/engine/render/water'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { createLagoonIsland, createSafetyFloor } from '@/game/entities/arena'
@@ -44,6 +48,7 @@ import { createCliffside } from '@/game/tracks/cliffside'
 import { loadTrackFromGlb } from '@/game/tracks/glb-loader'
 import { buildTrackFromJson } from '@/game/tracks/json-loader'
 import { createLagoonLoop } from '@/game/tracks/lagoon-loop'
+import { seatPropLineInstances } from '@/game/tracks/prop-lines'
 import type { Track } from '@/game/tracks/types'
 import { emptyDraftTrack } from './utils'
 
@@ -61,6 +66,19 @@ function collisionCorridorFor(track: Track): CollisionCorridor | null {
   const leash = leashFor(track)
   if (!leash) return null
   return makeCollisionCorridor(leash.points, leash.hard)
+}
+
+/**
+ * Resolve the Y of every `seatToTerrain` prop-line instance against the baked
+ * terrain heightmap (terrain + `normalOffsetM`). No-op when no line opted in or
+ * the track has no heightmap (procedural / failed env). The same deterministic
+ * sampler the water shader + intro raycast use, so the seat is WYSIWYG with the
+ * runtime; the editor + Blender previews seat against their own loaded terrain.
+ */
+function seatPropLinesOnTerrain(track: Track, heightmap: TerrainHeightmap | null): void {
+  if (!heightmap) return
+  if (!track.propLines?.some((l) => l.seatToTerrain)) return
+  seatPropLineInstances(track.props, (x, z) => sampleTerrainHeightAtXZ(heightmap, x, z))
 }
 
 export type LoadedTrack = {
@@ -232,9 +250,15 @@ export async function loadTrackForBoot(opts: {
         )
       }
     }
+    const terrainHeightmap = bakeHeightmapAndMarkReflections(track.water?.height ?? 0)
+    // Seat any `seatToTerrain` prop-line instances onto the just-baked terrain.
+    // `expandPropLine` placed them at curve-Y (it's Three-free + runs before the
+    // heightmap exists); this resolves each tagged instance's Y to terrain +
+    // offset. No-op unless the track authored a seated line.
+    seatPropLinesOnTerrain(track, terrainHeightmap)
     return {
       track,
-      terrainHeightmap: bakeHeightmapAndMarkReflections(track.water?.height ?? 0),
+      terrainHeightmap,
       ...(horizonGeometry ? { horizonGeometry } : {}),
       ...(environmentGlbRoot ? { environmentGlbRoot } : {}),
     }

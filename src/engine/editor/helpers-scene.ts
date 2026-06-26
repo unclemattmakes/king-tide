@@ -15,7 +15,8 @@
  */
 
 import * as THREE from 'three'
-import type { Track } from '@/game/tracks/types'
+import type { Vec3 } from '@/engine/sim/physics/vec'
+import type { PropLine, Track } from '@/game/tracks/types'
 import {
   disposeObj,
   makeAnchorHelper,
@@ -68,8 +69,25 @@ export function createHelpersScene(opts: {
   scene: THREE.Scene
   draft: Track
   getSel: () => EntitySel
+  /** Terrain height sampler for seating `seatToTerrain` prop-line previews —
+   *  the same baked heightmap the runtime uses, so the editor preview is
+   *  WYSIWYG. Absent (or returns null) → instances stay at their curve Y. */
+  sampleTerrainHeight?: (x: number, z: number) => number | null
 }): HelpersScene {
   const { scene, draft, getSel } = opts
+  const sampleTerrainHeight = opts.sampleTerrainHeight
+
+  /** Dense points of the main racing line — the source a spline-bound
+   *  (`bind`) prop-line slices. Re-read each build so anchor edits flow in. */
+  const mainSplinePoints = (): readonly Vec3[] | undefined =>
+    draft.aiSplines.find((s) => s.id === 'main')?.points
+
+  /** Build a prop-line preview with the current spline + terrain context. */
+  const buildPropLinePreview = (line: PropLine): THREE.Group =>
+    makePropLinePreview(line, {
+      mainSplinePoints: mainSplinePoints(),
+      ...(sampleTerrainHeight ? { sampleTerrainHeight } : {}),
+    })
 
   const helpersGroup = new THREE.Group()
   helpersGroup.name = 'editor:helpers'
@@ -194,20 +212,25 @@ export function createHelpersScene(opts: {
 
     // ── Prop lines: instance preview + curve + draggable anchors ──────────
     const propLines = draft.propLines ?? []
+    const mp = mainSplinePoints()
     for (const [li, line] of propLines.entries()) {
-      const preview = makePropLinePreview(line)
+      const preview = buildPropLinePreview(line)
       helpersGroup.add(preview)
       propLinePreviews[li] = preview
-      const curve = makePropLineCurve(line)
+      const curve = makePropLineCurve(line, mp)
       helpersGroup.add(curve)
       propLineCurves[li] = curve
-      for (const [ai, anchor] of line.anchors.entries()) {
-        const k = `proplineanchor:${li}:${ai}`
-        const selected = isSel(sel, { kind: 'propLineAnchor', lineIndex: li, anchorIndex: ai })
-        const h = makePropLineAnchorHelper(anchor, selected)
-        h.userData.entityKey = k
-        helpers.set(k, h)
-        helpersGroup.add(h)
+      // Spline-bound lines have no editable anchors (the racing-line slice is
+      // the curve, tuned via t0/t1) — skip the anchor handles for them.
+      if (!line.bind) {
+        for (const [ai, anchor] of line.anchors.entries()) {
+          const k = `proplineanchor:${li}:${ai}`
+          const selected = isSel(sel, { kind: 'propLineAnchor', lineIndex: li, anchorIndex: ai })
+          const h = makePropLineAnchorHelper(anchor, selected)
+          h.userData.entityKey = k
+          helpers.set(k, h)
+          helpersGroup.add(h)
+        }
       }
     }
   }
@@ -225,10 +248,10 @@ export function createHelpersScene(opts: {
       helpersGroup.remove(oldPreview)
       disposeObj(oldPreview)
     }
-    const preview = makePropLinePreview(line)
+    const preview = buildPropLinePreview(line)
     helpersGroup.add(preview)
     propLinePreviews[lineIndex] = preview
-    const curve = makePropLineCurve(line)
+    const curve = makePropLineCurve(line, mainSplinePoints())
     helpersGroup.add(curve)
     propLineCurves[lineIndex] = curve
   }

@@ -164,7 +164,8 @@ export function applyNumEdit(
 /**
  * Apply a non-numeric edit to a prop-line: `assetId` (string), `spacingMode`
  * ('count'|'arcLength'), `surface` (string|null), `closed`/`alignToTangent`/
- * `waterline`/`waveRider` (bool), `waveRiderDof` (string).
+ * `seatToTerrain`/`waterline`/`waveRider` (bool), `waveRiderDof` (string).
+ * (`bind` is handled in the editor orchestrator — it needs spline context.)
  */
 export function applyPropLineFlag(
   line: PropLine,
@@ -186,6 +187,11 @@ export function applyPropLineFlag(
       // Default is ON; persist only the opt-out.
       if (value === false) line.alignToTangent = false
       else delete line.alignToTangent
+      return
+    case 'seatToTerrain':
+      // Default OFF; persist only the opt-in.
+      if (value === true) line.seatToTerrain = true
+      else delete line.seatToTerrain
       return
     case 'surface':
       if (value === 'default' || value == null || !SURFACE_SET.has(String(value)))

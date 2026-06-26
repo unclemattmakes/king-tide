@@ -8,7 +8,7 @@ import {
 import type { WaveStampInput } from '@/engine/sim/water/wave-field'
 import { isWaterLookKey, type WaterLookOverrides } from '@/engine/water-debug-storage'
 import { pointAtT, sampleCatmullRom, sampleScalarToMatch, tangentAtT } from './catmull-rom'
-import { expandPropLines } from './prop-lines'
+import { expandPropLine } from './prop-lines'
 import {
   type AISpline,
   type AntiGravZone,
@@ -293,10 +293,20 @@ export function buildTrackFromJson(input: unknown): Track {
   // asset props appended to `props` so the render / collider / wave-rider
   // paths treat them as ordinary props. The source array is kept on the track
   // and round-trips; the expanded instances are recomputed each load (and
-  // filtered back out by `trackToJson`).
+  // filtered back out by `trackToJson`). Spline-bound lines (`bind`) take their
+  // source from the main racing line, so feed its dense points in. Lines that
+  // opt into terrain seating tag each instance with the offset-above-terrain so
+  // the boot seat-pass (after the heightmap bakes) can resolve its Y.
   const propLines = readPropLines((input as { propLines?: unknown }).propLines)
   if (propLines.length > 0) {
-    for (const p of expandPropLines(propLines)) props.push(p)
+    const mainPoints = main?.points
+    for (const line of propLines) {
+      const seatOffset = line.seatToTerrain ? (line.normalOffsetM ?? 0) : undefined
+      for (const p of expandPropLine(line, { mainSplinePoints: mainPoints })) {
+        if (seatOffset !== undefined) p.seatToTerrainOffsetM = seatOffset
+        props.push(p)
+      }
+    }
   }
 
   const track: Track = {
@@ -344,14 +354,22 @@ function readPropLines(raw: unknown): PropLine[] {
     if (typeof e.assetId !== 'string' || e.assetId.length === 0) {
       throw new Error(`track-json: propLines[${i}].assetId must be a non-empty string`)
     }
-    if (!Array.isArray(e.anchors) || e.anchors.length < 2) {
-      throw new Error(`track-json: propLines[${i}].anchors must have ≥ 2 entries`)
+    // A line resolves its source EITHER from hand-authored `anchors` OR from a
+    // `bind` to the main spline. Bound lines don't need anchors (a partial t0/t1
+    // slice of the racing line is the curve); anchor lines need ≥2.
+    const bind = readPropLineBind(e.bind, i)
+    if (!bind && (!Array.isArray(e.anchors) || e.anchors.length < 2)) {
+      throw new Error(`track-json: propLines[${i}] needs anchors[≥2] or a bind block (got neither)`)
     }
+    const anchors = Array.isArray(e.anchors)
+      ? e.anchors.map((a, j) => readVec3(a, `propLines[${i}].anchors[${j}]`))
+      : []
     const line: PropLine = {
       id: e.id,
       assetId: e.assetId,
-      anchors: e.anchors.map((a, j) => readVec3(a, `propLines[${i}].anchors[${j}]`)),
+      anchors,
     }
+    if (bind) line.bind = bind
     if (e.closed === true) line.closed = true
     if (e.spacingMode === 'count' || e.spacingMode === 'arcLength') line.spacingMode = e.spacingMode
     const num = (key: string): number | undefined => {
@@ -371,6 +389,7 @@ function readPropLines(raw: unknown): PropLine[] {
     const normalOffsetM = num('normalOffsetM')
     if (normalOffsetM !== undefined) line.normalOffsetM = normalOffsetM
     if (e.alignToTangent === false) line.alignToTangent = false
+    if (e.seatToTerrain === true) line.seatToTerrain = true
     const yawDeg = num('yawDeg')
     if (yawDeg !== undefined) line.yawDeg = yawDeg
     const scale = num('scale')
@@ -399,6 +418,35 @@ function readPropLines(raw: unknown): PropLine[] {
     }
     return line
   })
+}
+
+/** Validate an optional propLine `bind` block ({ spline?, t0?, t1? }). Returns
+ *  undefined when absent. Strict on a present-but-malformed block (authoring
+ *  error). t0/t1 are clamped into [0,1] by the expander, so any finite number
+ *  is accepted here. */
+function readPropLineBind(raw: unknown, i: number): NonNullable<PropLine['bind']> | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!isObject(raw)) throw new Error(`track-json: propLines[${i}].bind must be an object`)
+  const out: NonNullable<PropLine['bind']> = {}
+  const spline = (raw as { spline?: unknown }).spline
+  if (spline !== undefined) {
+    if (spline !== 'main') {
+      throw new Error(`track-json: propLines[${i}].bind.spline must be "main" if present`)
+    }
+    out.spline = 'main'
+  }
+  for (const key of ['t0', 't1'] as const) {
+    const v = (raw as Record<string, unknown>)[key]
+    if (v !== undefined) {
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error(
+          `track-json: propLines[${i}].bind.${key} must be a finite number if present`,
+        )
+      }
+      out[key] = v
+    }
+  }
+  return out
 }
 
 function readOptionalRoadSpline(raw: unknown): RoadSpline | undefined {
@@ -557,6 +605,13 @@ export function trackToJson(track: Track): TrackJson {
         assetId: line.assetId,
         anchors: line.anchors.map((a) => ({ ...a })),
       }
+      if (line.bind) {
+        const b: NonNullable<PropLine['bind']> = {}
+        if (line.bind.spline) b.spline = line.bind.spline
+        if (line.bind.t0 !== undefined) b.t0 = line.bind.t0
+        if (line.bind.t1 !== undefined) b.t1 = line.bind.t1
+        o.bind = b
+      }
       if (line.closed) o.closed = true
       if (line.spacingMode) o.spacingMode = line.spacingMode
       if (line.count !== undefined) o.count = line.count
@@ -564,6 +619,7 @@ export function trackToJson(track: Track): TrackJson {
       if (line.offsetM !== undefined) o.offsetM = line.offsetM
       if (line.normalOffsetM !== undefined) o.normalOffsetM = line.normalOffsetM
       if (line.alignToTangent === false) o.alignToTangent = false
+      if (line.seatToTerrain) o.seatToTerrain = true
       if (line.yawDeg !== undefined) o.yawDeg = line.yawDeg
       if (line.scale !== undefined) o.scale = line.scale
       if (line.surface) o.surface = line.surface
