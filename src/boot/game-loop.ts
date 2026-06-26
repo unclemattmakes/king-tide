@@ -74,6 +74,7 @@ import { probeGpuRenderer } from '@/engine/render/renderer'
 import { renderFrame } from '@/engine/render/renderer-service'
 import { createSharkSequence } from '@/engine/render/shark-sequence'
 import type { SkySystem } from '@/engine/render/sky'
+import { setTerrainWaterLevel } from '@/engine/render/terrain-water-level-service'
 import type { TrackVisuals } from '@/engine/render/track-mesh'
 import { createTrickPromptHud } from '@/engine/render/trick-prompt-hud'
 import { createTuckHud } from '@/engine/render/tuck-hud'
@@ -88,6 +89,7 @@ import type { ReplayRecorder } from '@/engine/replay/recorder'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { vecHorizontalLength } from '@/engine/sim/physics/vec'
+import { advanceTide, createTide, type TideConfig, tideActive } from '@/engine/sim/water/tide'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import { detectSteamDeck, getDeckProfile } from '@/engine/steam-deck'
 import { createTutorialDirector } from '@/engine/tutorial/tutorial-director'
@@ -230,6 +232,9 @@ export interface GameLoopOpts {
   waterMesh: {
     tick: (impacts: readonly BikeImpact[], focus: { x: number; z: number }) => void
     debug: { getTimeScale: () => number }
+    /** The sea-surface Object3D. Its `.position.y` is the world sea level the
+     *  water shader mirrors each frame; the King-tide drives it live. */
+    mesh: { position: { y: number } }
   }
   sky: SkySystem
   /** Per-lap weather progression. Stepped each frame; `onLapStart` is
@@ -639,7 +644,11 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // start.yaw convention: 0 = facing +Z, +π/2 = +X → atan2(dx, dz).
     const yaw = Math.atan2(nxt.x - p.x, nxt.z - p.z)
     const hy = yaw / 2
-    rb.setTranslation({ x: p.x, y: p.y + 1.5, z: p.z }, true)
+    // Clear the live sea: the spline Y is authored at the mean tide, so on a
+    // risen tide `p.y + 1.5` can sit under water — drop in at the higher of the
+    // spline point and the current surface so buoyancy catches the bike.
+    const respawnY = Math.max(p.y, waveField.baseY) + 1.5
+    rb.setTranslation({ x: p.x, y: respawnY, z: p.z }, true)
     rb.setRotation({ x: 0, y: Math.sin(hy), z: 0, w: Math.cos(hy) }, true)
     rb.setLinvel({ x: 0, y: 0, z: 0 }, true)
     rb.setAngvel({ x: 0, y: 0, z: 0 }, true)
@@ -794,6 +803,33 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // determinism preserved). `0` here means "fire the very next eligible
   // frame" — the cap kicks in only after the first render lands.
   let lastRenderedAt = 0
+
+  // ── King-tide ──────────────────────────────────────────────────────────
+  // A slow vertical swing of the mean water level across the race (see
+  // engine/sim/water/tide.ts). Authored per-track via `water.tide`; a
+  // `?tide=<amp>[,<periodS>[,<phase>]]` URL override forces/retunes it on any
+  // track for verification (amplitude 0 = off). The frame loop assigns the
+  // current `tide.height` to BOTH `waveField.baseY` (sim buoyancy) and
+  // `waterMesh.mesh.position.y` (the shader's sea level) so the surface, the
+  // floating buoys and the gate bob all ride it together. Untouched when the
+  // track ships no tide and no override → every existing track is unchanged.
+  const tideBaseHeight = track.water?.height ?? 0
+  const tideOverride = ((): TideConfig | undefined => {
+    if (typeof window === 'undefined') return undefined
+    const raw = new URLSearchParams(window.location.search).get('tide')
+    if (raw === null) return undefined
+    const parts = raw.split(',')
+    const amp = Number(parts[0])
+    const period = Number(parts[1])
+    const phase = Number(parts[2])
+    if (!Number.isFinite(amp)) return undefined
+    return {
+      amplitudeM: amp,
+      periodS: Number.isFinite(period) && period > 0 ? period : 120,
+      ...(Number.isFinite(phase) ? { phase } : {}),
+    }
+  })()
+  const tide = createTide(tideBaseHeight, tideOverride ?? track.water?.tide)
 
   // Step 8 — Perf overlay + rolling-window recorder. The recorder samples
   // every render frame (allocation-free); the HUD reads cached stats at
@@ -1073,6 +1109,20 @@ export function startGameLoop(opts: GameLoopOpts): void {
   function frame(now: number): void {
     const dt = Math.min((now - last) / 1000, 1 / 15)
     last = now
+
+    // King-tide: breathe the mean water level for THIS frame before the sim
+    // accumulator (so buoyancy reads the new baseY) and before the render
+    // (waterMesh syncs mesh.y → the shader sea level). The flat racing-line
+    // ribbon rides along by the tide delta. No-op on still-water tracks.
+    if (tideActive(tide)) {
+      const h = advanceTide(tide, dt)
+      waveField.baseY = h
+      waterMesh.mesh.position.y = h
+      // The terrain shader anchors its wet band / waterline trio / underwater
+      // tint to this; push it so the painted shoreline rides the tide too.
+      setTerrainWaterLevel(h)
+      if (racingLineRibbon) racingLineRibbon.mesh.position.y = h - tideBaseHeight
+    }
 
     // Step 8 — feed the rolling-window recorder. Allocation-free hot path
     // (writes a single Float32Array slot + advances the head index). The

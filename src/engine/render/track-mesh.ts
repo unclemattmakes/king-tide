@@ -40,12 +40,21 @@ export function createTrackVisuals(track: Track, options: TrackVisualsOptions = 
 
   const gatePropTemplate = options.gatePropTemplate ?? null
   // Gates that bob on the swell (track opted into `floatGates` + this gate sits
-  // over water). Each frame `tick` drives their Y onto the wave surface; the
-  // authored Y is the rest height. Empty → tick is a no-op.
-  const floatingGates: { index: number; x: number; y: number; z: number }[] = []
+  // over water). Each frame `tick` drives their Y onto the live wave surface.
+  // `restY` is the authored height ABOVE the mean water line, so the gate rides
+  // both the swell and a moving King-tide (`waveField.baseY`) — at the mean
+  // tide this is identical to the old `authoredY + (surface − baseY)`. Empty →
+  // tick is a no-op.
+  const meanWaterY = track.water?.height ?? 0
+  const floatingGates: { index: number; x: number; z: number; restY: number }[] = []
   for (const cp of track.checkpoints) {
     if (gateFloatsOnWaves(track, cp)) {
-      floatingGates.push({ index: cp.index, x: cp.position.x, y: cp.position.y, z: cp.position.z })
+      floatingGates.push({
+        index: cp.index,
+        x: cp.position.x,
+        z: cp.position.z,
+        restY: cp.position.y - meanWaterY,
+      })
     }
   }
 
@@ -101,10 +110,11 @@ export function createTrackVisuals(track: Track, options: TrackVisualsOptions = 
 
   function tick(waveField: WaveFieldState) {
     if (floatingGates.length === 0) return
-    // y = authoredY + (surface − meanLevel): a gate on the water rides the swell;
-    // the trigger (race.ts) stays static and is widened instead.
+    // y = surface + restY: the gate rides the live wave surface (which carries
+    // the King-tide via baseY) at its authored offset above the water line; the
+    // trigger (race.ts) stays static and is widened instead.
     for (const g of floatingGates) {
-      const y = g.y + sampleHeight(waveField, g.x, g.z) - waveField.baseY
+      const y = sampleHeight(waveField, g.x, g.z) + g.restY
       if (instancedGates) {
         instancedGates.setY(g.index, y)
       } else {

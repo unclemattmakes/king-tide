@@ -9,6 +9,7 @@ import { applyFoliageSwayToMesh } from '@/engine/render/foliage-sway'
 import { applyLavaRiverMaterialToScene } from '@/engine/render/lava-river-material'
 import { applyVinylMaterialToScene } from '@/engine/render/painterly-vinyl-material'
 import { applyTerrainShaderToScene } from '@/engine/render/terrain-shader'
+import { clearTerrainWaterLevel } from '@/engine/render/terrain-water-level-service'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { asSurfaceType } from '@/engine/sim/surface-types'
 import type { GltfRoot } from '@/game/tracks/glb-loader'
@@ -130,6 +131,7 @@ export async function loadGlbTrackVisuals(
   // Fresh brush-tuner targets for this load — the terrain + vinyl passes below
   // re-register their live brush-uniform handles (brush-tuning-service.ts).
   clearBrushTargets()
+  clearTerrainWaterLevel()
   applyTerrainShaderToScene(scene, opts?.terrainShader ?? {})
   // Foliage sway hook — adds the shared wind vertex-displacement to every
   // mesh with a material whose name starts with ``mat_foliage_`` (palms,

@@ -165,4 +165,35 @@ describe('wave-rider sim system', () => {
     // the world step).
     expect(actualY).toBeCloseTo(expectedY, 4)
   })
+
+  it('beaches on exposed terrain when the tide drops below it', () => {
+    // King-tide beaching: water at y=0, terrain at +2 → the float rests on the
+    // ground (terrainY + offset), not on the lower water surface.
+    const field = flatField(0)
+    const sys = createWaveRiderSystem(sim, phys, field, { sampleTerrainY: () => 2 })
+    const eid = createWaveRider(sim, phys, {
+      position: { x: 40, y: 0, z: 40 },
+      archetype: 'buoy',
+    })
+    sys.step(1 / 60)
+    phys.world.step()
+    const wr = WaveRiderStore.get(eid)!
+    const rb = phys.world.getRigidBody(RBHandleStore.get(eid)!.handle)!
+    expect(rb.translation().y).toBeCloseTo(2 + wr.tuning.floatOffsetY, 4)
+  })
+
+  it('floats (does not beach) when terrain sits below the water', () => {
+    // Terrain at -5, well under the water (y=0) → normal float on the surface.
+    const field = flatField(0)
+    const sys = createWaveRiderSystem(sim, phys, field, { sampleTerrainY: () => -5 })
+    const eid = createWaveRider(sim, phys, {
+      position: { x: -40, y: 0, z: -40 },
+      archetype: 'buoy',
+    })
+    sys.step(1 / 60)
+    phys.world.step()
+    const wr = WaveRiderStore.get(eid)!
+    const rb = phys.world.getRigidBody(RBHandleStore.get(eid)!.handle)!
+    expect(rb.translation().y).toBeCloseTo(field.baseY + wr.tuning.floatOffsetY, 4)
+  })
 })
