@@ -73,6 +73,7 @@ from . import (
     previews,
     prop_bake,
     prop_placements,
+    propline_placements,
     ramp,
     road,
     road_conform_gn,
@@ -172,6 +173,9 @@ _MODULES = (
     # prop_placements adds the HOVERBIKE_PT_props sub-panel parented on
     # HOVERBIKE_PT_panel — another panel child, so it registers after panel.
     prop_placements,
+    # propline_placements adds the HOVERBIKE_PT_prop_lines sub-panel, also a
+    # child of HOVERBIKE_PT_panel — register after panel for the same reason.
+    propline_placements,
     # menu registers absolute-last — its submenu/pie classes call into
     # operators registered by every module above, and its
     # VIEW3D_MT_editor_menus append needs to land after Blender's stock

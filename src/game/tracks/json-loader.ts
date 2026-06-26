@@ -8,6 +8,7 @@ import {
 import type { WaveStampInput } from '@/engine/sim/water/wave-field'
 import { isWaterLookKey, type WaterLookOverrides } from '@/engine/water-debug-storage'
 import { pointAtT, sampleCatmullRom, sampleScalarToMatch, tangentAtT } from './catmull-rom'
+import { expandPropLines } from './prop-lines'
 import {
   type AISpline,
   type AntiGravZone,
@@ -18,6 +19,7 @@ import {
   type HorizonConfig,
   type LapWeather,
   type Prop,
+  type PropLine,
   type PropType,
   type RoadSpline,
   SKY_COLOR_GRADES,
@@ -64,6 +66,7 @@ export type TrackJson = {
   waveZones?: WaveZone[]
   waveStamps?: WaveStampInput[]
   props?: Prop[]
+  propLines?: PropLine[]
   environmentGlb?: string
   water?: WaterConfig
   sky?: SkyConfig
@@ -286,6 +289,16 @@ export function buildTrackFromJson(input: unknown): Track {
   // (auto-off over land) is decided at use sites via `gateFloatsOnWaves`.
   const floatGates = (input as { floatGates?: unknown }).floatGates === true
 
+  // Parametric prop-lines: validate the source, then expand each into tagged
+  // asset props appended to `props` so the render / collider / wave-rider
+  // paths treat them as ordinary props. The source array is kept on the track
+  // and round-trips; the expanded instances are recomputed each load (and
+  // filtered back out by `trackToJson`).
+  const propLines = readPropLines((input as { propLines?: unknown }).propLines)
+  if (propLines.length > 0) {
+    for (const p of expandPropLines(propLines)) props.push(p)
+  }
+
   const track: Track = {
     id,
     name,
@@ -311,7 +324,81 @@ export function buildTrackFromJson(input: unknown): Track {
   if (audio) track.audio = audio
   if (lapWeather) track.lapWeather = lapWeather
   if (roadSpline) track.roadSpline = roadSpline
+  if (propLines.length > 0) track.propLines = propLines
   return track
+}
+
+/** Validate the optional `propLines[]` block. Each line needs an id, an
+ *  assetId, and ≥2 anchors; the rest are optional with runtime defaults. */
+function readPropLines(raw: unknown): PropLine[] {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) {
+    throw new Error('track-json: propLines must be an array if present')
+  }
+  return raw.map((entry, i) => {
+    if (!isObject(entry)) throw new Error(`track-json: propLines[${i}] must be an object`)
+    const e = entry as Record<string, unknown>
+    if (typeof e.id !== 'string' || e.id.length === 0) {
+      throw new Error(`track-json: propLines[${i}].id must be a non-empty string`)
+    }
+    if (typeof e.assetId !== 'string' || e.assetId.length === 0) {
+      throw new Error(`track-json: propLines[${i}].assetId must be a non-empty string`)
+    }
+    if (!Array.isArray(e.anchors) || e.anchors.length < 2) {
+      throw new Error(`track-json: propLines[${i}].anchors must have ≥ 2 entries`)
+    }
+    const line: PropLine = {
+      id: e.id,
+      assetId: e.assetId,
+      anchors: e.anchors.map((a, j) => readVec3(a, `propLines[${i}].anchors[${j}]`)),
+    }
+    if (e.closed === true) line.closed = true
+    if (e.spacingMode === 'count' || e.spacingMode === 'arcLength') line.spacingMode = e.spacingMode
+    const num = (key: string): number | undefined => {
+      const v = e[key]
+      if (v === undefined) return undefined
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error(`track-json: propLines[${i}].${key} must be a finite number if present`)
+      }
+      return v
+    }
+    const count = num('count')
+    if (count !== undefined) line.count = count
+    const spacingM = num('spacingM')
+    if (spacingM !== undefined) line.spacingM = spacingM
+    const offsetM = num('offsetM')
+    if (offsetM !== undefined) line.offsetM = offsetM
+    const normalOffsetM = num('normalOffsetM')
+    if (normalOffsetM !== undefined) line.normalOffsetM = normalOffsetM
+    if (e.alignToTangent === false) line.alignToTangent = false
+    const yawDeg = num('yawDeg')
+    if (yawDeg !== undefined) line.yawDeg = yawDeg
+    const scale = num('scale')
+    if (scale !== undefined) line.scale = scale
+    const surface = asSurfaceType(e.surface)
+    if (surface) line.surface = surface
+    if (isObject(e.waveRider)) {
+      const dof = (e.waveRider as { dof?: unknown }).dof
+      line.waveRider = dof === 'yaw' ? { dof: 'yaw' } : { dof: 'locked' }
+    }
+    if (e.waterline === false) line.waterline = false
+    if (isObject(e.jitter)) {
+      const j = e.jitter as Record<string, unknown>
+      const jget = (k: string): number | undefined =>
+        typeof j[k] === 'number' && Number.isFinite(j[k]) ? (j[k] as number) : undefined
+      const jit: NonNullable<PropLine['jitter']> = {}
+      const posM = jget('posM')
+      if (posM !== undefined) jit.posM = posM
+      const jy = jget('yawDeg')
+      if (jy !== undefined) jit.yawDeg = jy
+      const smin = jget('scaleMin')
+      if (smin !== undefined) jit.scaleMin = smin
+      const smax = jget('scaleMax')
+      if (smax !== undefined) jit.scaleMax = smax
+      line.jitter = jit
+    }
+    return line
+  })
 }
 
 function readOptionalRoadSpline(raw: unknown): RoadSpline | undefined {
@@ -411,25 +498,30 @@ export function trackToJson(track: Track): TrackJson {
       if (z.surgeAmplitude !== undefined) out.surgeAmplitude = z.surgeAmplitude
       return out
     }),
-    props: track.props.map((p) => {
-      const out: Prop = {
-        type: p.type,
-        position: { ...p.position },
-        rotation: { ...p.rotation },
-        size: { ...p.size },
-      }
-      if (p.color) out.color = p.color
-      if (p.assetId) out.assetId = p.assetId
-      if (p.surface) out.surface = p.surface
-      // Preserve asset-prop behaviour flags so an editor save round-trips
-      // them instead of silently dropping them.
-      if (p.animated) out.animated = true
-      if (p.clip) out.clip = p.clip
-      if (p.loop === false) out.loop = false
-      if (p.waveRider) out.waveRider = { dof: p.waveRider.dof ?? 'locked' }
-      if (p.waterline === false) out.waterline = false
-      return out
-    }),
+    // Props EXPANDED from `propLines` (tagged `fromPropLine`) are NOT
+    // serialized — the `propLines` source below is, and the loader re-expands
+    // them. Serializing both would double them on the next load.
+    props: track.props
+      .filter((p) => !p.fromPropLine)
+      .map((p) => {
+        const out: Prop = {
+          type: p.type,
+          position: { ...p.position },
+          rotation: { ...p.rotation },
+          size: { ...p.size },
+        }
+        if (p.color) out.color = p.color
+        if (p.assetId) out.assetId = p.assetId
+        if (p.surface) out.surface = p.surface
+        // Preserve asset-prop behaviour flags so an editor save round-trips
+        // them instead of silently dropping them.
+        if (p.animated) out.animated = true
+        if (p.clip) out.clip = p.clip
+        if (p.loop === false) out.loop = false
+        if (p.waveRider) out.waveRider = { dof: p.waveRider.dof ?? 'locked' }
+        if (p.waterline === false) out.waterline = false
+        return out
+      }),
   }
   if (track.environmentGlb) out.environmentGlb = track.environmentGlb
   if (track.water) out.water = { ...track.water }
@@ -454,6 +546,32 @@ export function trackToJson(track: Track): TrackJson {
   if (track.lapWeather) out.lapWeather = track.lapWeather.map((w) => ({ ...w }))
   if (track.roadSpline) {
     out.roadSpline = { points: track.roadSpline.points.map((p) => ({ ...p })) }
+  }
+  // Parametric prop-lines: serialize the authoring SOURCE (the expanded
+  // instances live in `props` tagged `fromPropLine` and were filtered out
+  // above). Deep-copy so callers can't mutate the track through the JSON.
+  if (track.propLines && track.propLines.length > 0) {
+    out.propLines = track.propLines.map((line) => {
+      const o: PropLine = {
+        id: line.id,
+        assetId: line.assetId,
+        anchors: line.anchors.map((a) => ({ ...a })),
+      }
+      if (line.closed) o.closed = true
+      if (line.spacingMode) o.spacingMode = line.spacingMode
+      if (line.count !== undefined) o.count = line.count
+      if (line.spacingM !== undefined) o.spacingM = line.spacingM
+      if (line.offsetM !== undefined) o.offsetM = line.offsetM
+      if (line.normalOffsetM !== undefined) o.normalOffsetM = line.normalOffsetM
+      if (line.alignToTangent === false) o.alignToTangent = false
+      if (line.yawDeg !== undefined) o.yawDeg = line.yawDeg
+      if (line.scale !== undefined) o.scale = line.scale
+      if (line.surface) o.surface = line.surface
+      if (line.waveRider) o.waveRider = { dof: line.waveRider.dof ?? 'locked' }
+      if (line.waterline === false) o.waterline = false
+      if (line.jitter) o.jitter = { ...line.jitter }
+      return o
+    })
   }
   return out
 }

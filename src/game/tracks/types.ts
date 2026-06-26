@@ -66,8 +66,13 @@ export type Track = {
    *  See `gateFloatsOnWaves`. Default false. */
   floatGates?: boolean
   /** Editor-authored static props (boxes, pipes, half-pipes, etc).
-   *  Rendered + collidable at runtime. Empty for procedural tracks. */
+   *  Rendered + collidable at runtime. Empty for procedural tracks.
+   *  At load this ALSO holds the props expanded from `propLines` (tagged
+   *  `fromPropLine`); `trackToJson` filters those back out on save. */
   props: Prop[]
+  /** Parametric "instance an asset along a curve" lines. Expanded to tagged
+   *  `props` at load (see {@link PropLine}); the source array round-trips. */
+  propLines?: PropLine[]
   /** Optional .glb URL for collidable environment geometry. JSON-authored
    *  tracks reference a Blender-exported asset here; the runtime loads it
    *  via the render-side glb loader and registers static colliders. */
@@ -455,6 +460,71 @@ export type Prop = {
    *  For instanced asset placements the opt-out is per-asset: a field drops the
    *  waterline only when EVERY placement of that asset sets `false`. */
   waterline?: boolean
+  /** Runtime-only marker: this prop was EXPANDED from a `PropLine` at load,
+   *  not hand-authored. Never serialized (`trackToJson` filters these out and
+   *  re-serializes the `propLines` source instead), and the editor treats them
+   *  as a non-editable preview. Absent on authored props. */
+  fromPropLine?: boolean
+}
+
+/**
+ * Parametric "instance an asset GLB along a curve" — a NON-destructive prop
+ * line (palm row, dock pilings, buoy chain, lamp posts). Expanded to ordinary
+ * {@link Prop}s at load by `expandPropLine` ({@link import('./prop-lines')}),
+ * so the render / collider / wave-rider paths are unchanged. The expansion is
+ * DETERMINISTIC (frozen Catmull-Rom + arc-length walk + a seeded mulberry32
+ * jitter) so the in-app editor preview, the runtime, and the Blender preview
+ * all produce byte-identical instances from the same curve + params.
+ *
+ * Editor-canonical (NOT a `BLENDER_OWNED_JSON_KEY`): authored in the in-app
+ * editor OR Blender (`propline_placements.py`), round-tripped like `props[]`.
+ */
+export type PropLine = {
+  /** Stable unique key within the track. Also the jitter seed source — change
+   *  it and the random scatter re-rolls. e.g. "palm_row_north". */
+  id: string
+  /** Asset-manifest id to instance (same namespace as `Prop.assetId`). */
+  assetId: string
+  /** Catmull-Rom control points in three.js world space (≥2). Identical
+   *  representation to `AISpline.anchors` — NOT Bézier handles. */
+  anchors: Vec3[]
+  /** Whether the curve loops back to the first anchor. Default false. */
+  closed?: boolean
+  /** How instance count is decided. Default 'arcLength'. */
+  spacingMode?: 'count' | 'arcLength'
+  /** Exact instance count (when spacingMode='count'). */
+  count?: number
+  /** Target metres between instances (when spacingMode='arcLength'); the
+   *  actual count rounds to fit the curve cleanly. */
+  spacingM?: number
+  /** Lateral offset perpendicular to the curve tangent, metres (left = +). */
+  offsetM?: number
+  /** Vertical offset added to the sampled curve Y, metres. (Terrain seating
+   *  is baked into this by the authoring tools; the runtime does not raycast.) */
+  normalOffsetM?: number
+  /** Yaw each instance to the curve tangent. Default true. */
+  alignToTangent?: boolean
+  /** Constant yaw (deg) — used alone when alignToTangent=false, or added on
+   *  top of the tangent yaw (e.g. face palms 90° off the path). Default 0. */
+  yawDeg?: number
+  /** Uniform base size multiplier on `Prop.size`. Default 1. */
+  scale?: number
+  /** Copied onto every expanded prop's `surface`. */
+  surface?: SurfaceTypeValue
+  /** Copied onto every expanded prop's `waveRider` (per-instance float). */
+  waveRider?: PropWaveRider
+  /** Copied onto every expanded prop's `waterline` opt-out. */
+  waterline?: boolean
+  /** Per-instance deterministic random deviation. */
+  jitter?: {
+    /** Max radial XZ offset, metres. Default 0. */
+    posM?: number
+    /** Max ± yaw deviation, degrees. Default 0. */
+    yawDeg?: number
+    /** Min / max extra size multiplier. Default 1 / 1. */
+    scaleMin?: number
+    scaleMax?: number
+  }
 }
 
 export type PropType = 'box' | 'sphere' | 'cylinder' | 'pipe' | 'halfpipe' | 'asset'

@@ -19,7 +19,7 @@ import {
   promptNewTrackFlow,
 } from './editor-ui'
 import { createEditorFloatPreview } from './editor-wave-rider'
-import { applyNumEdit, applyPropFlag } from './field-edits'
+import { applyNumEdit, applyPropFlag, applyPropLineFlag } from './field-edits'
 import {
   bakeScaleToDraft,
   configureGizmoAxes,
@@ -111,6 +111,11 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   const { scene, camera, renderer, track } = opts
   const draft: Track = JSON.parse(JSON.stringify(track)) as Track
   if (!Array.isArray(draft.props)) draft.props = []
+  // `buildTrackFromJson` expands `propLines` into tagged props; the editor
+  // owns the propLines SOURCE and re-derives the instances as a live preview,
+  // so strip the expanded copies (they'd otherwise show as editable boxes and
+  // double on save). The source stays on `draft.propLines`.
+  draft.props = draft.props.filter((p) => !p.fromPropLine)
   const canvasEl = renderer.domElement
 
   // ── Camera + orbit ──────────────────────────────────────────────────────
@@ -200,7 +205,12 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     if (sel) {
       const h = helpersScene.helpers.get(entityKey(sel))
       if (h) attachGizmo(h)
-      else sel = null
+      else if (sel.kind === 'propLine') {
+        // A prop-line has no gizmo-helper (it's edited via its anchors +
+        // params), so a missing helper is NORMAL — keep the selection unless
+        // the line itself was removed.
+        if (!draft.propLines?.[sel.index]) sel = null
+      } else sel = null
     }
   }
 
@@ -248,7 +258,7 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     if (!h || !sel) return
     // Translate + rotate write back live; scale waits for drag end.
     if (mode !== 'scale') {
-      const { splineMoved } = writeHelperPoseToDraft(draft, h, sel)
+      const { splineMoved, propLineMoved } = writeHelperPoseToDraft(draft, h, sel)
       if (splineMoved) {
         // Anchor moved: regenerate dense curve samples + reposition any
         // bound gates. Geometry-only refresh (no full rebuildHelpers) for
@@ -256,6 +266,11 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         recomputeSplineDerived(draft)
         helpersScene.refreshSplineCurveMesh()
         helpersScene.refreshBoundGateHelpers()
+      }
+      if (propLineMoved !== undefined) {
+        // Prop-line anchor dragged → re-expand + redraw that line's curve +
+        // instance preview live (its anchors move via the gizmo).
+        helpersScene.refreshPropLine(propLineMoved)
       }
     }
     renderPanelLight()
@@ -272,8 +287,8 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
       // Also bake any pose drift that snuck in during the same drag.
       writeHelperPoseToDraft(draft, h, sel)
       rebuildHelpers()
-    } else if (sel.kind === 'spline') {
-      // Anchor moved → regenerate dense samples + reposition bound gates.
+    } else if (sel.kind === 'spline' || sel.kind === 'propLineAnchor') {
+      // Anchor moved → settle: regenerate dense samples / re-expand the line.
       rebuildHelpers()
     }
     renderPanel()
@@ -498,6 +513,30 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         rebuildHelpers()
         renderPanel()
         panelHandle.setStatus('Gate unbound — free placement', '#7d8')
+      },
+      onPropLineFlag: (field, value) => {
+        const idx =
+          sel?.kind === 'propLine' ? sel.index : sel?.kind === 'propLineAnchor' ? sel.lineIndex : -1
+        const line = draft.propLines?.[idx]
+        if (!line) return
+        undo.push()
+        applyPropLineFlag(line, field, value)
+        rebuildHelpers()
+        renderPanel()
+      },
+      onPropLineAddAnchor: () => {
+        const idx =
+          sel?.kind === 'propLine' ? sel.index : sel?.kind === 'propLineAnchor' ? sel.lineIndex : -1
+        const line = draft.propLines?.[idx]
+        if (!line || line.anchors.length === 0) return
+        undo.push()
+        // Append a new anchor extrapolated past the last one along the last
+        // segment (or +X for a single-segment line).
+        const a = line.anchors[line.anchors.length - 1]!
+        const b = line.anchors[line.anchors.length - 2] ?? { x: a.x - 20, y: a.y, z: a.z }
+        line.anchors.push({ x: a.x + (a.x - b.x), y: a.y, z: a.z + (a.z - b.z) })
+        rebuildHelpers()
+        renderPanel()
       },
       selSupportsMode,
     },

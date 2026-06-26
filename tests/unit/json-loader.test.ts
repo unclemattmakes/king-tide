@@ -184,6 +184,55 @@ describe('buildTrackFromJson', () => {
     expect(rebuilt.name).toBe('Round Trip Bay')
   })
 
+  it('propLines: expands to tagged props at load, round-trips the source only', () => {
+    const raw = baseTrack()
+    raw.propLines = [
+      {
+        id: 'palm_row',
+        assetId: 'palm',
+        anchors: [
+          { x: 0, y: 0, z: 0 },
+          { x: 40, y: 0, z: 0 },
+        ],
+        spacingMode: 'count',
+        count: 5,
+        offsetM: 3,
+        surface: 'sand',
+        waveRider: { dof: 'yaw' },
+        jitter: { posM: 1, yawDeg: 15 },
+      },
+    ]
+    // Author one hand-placed prop too, to prove the two coexist.
+    raw.props = [
+      {
+        type: 'box',
+        position: { x: 1, y: 1, z: 1 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        size: { x: 2, y: 2, z: 2 },
+      },
+    ]
+    const track = buildTrackFromJson(raw)
+    // Expanded into tagged props, alongside the authored one.
+    const expanded = track.props.filter((p) => p.fromPropLine)
+    expect(expanded).toHaveLength(5)
+    expect(track.props.filter((p) => !p.fromPropLine)).toHaveLength(1)
+    expect(track.propLines).toHaveLength(1)
+
+    // Editor-save round-trip: the expanded instances are NOT serialized (the
+    // source is), so the next load doesn't double them.
+    const back = trackToJson(track)
+    expect((back.props ?? []).some((p) => p.fromPropLine)).toBe(false)
+    expect(back.props ?? []).toHaveLength(1) // just the authored box
+    expect(back.propLines).toHaveLength(1)
+    expect(back.propLines).toEqual(track.propLines)
+
+    const rebuilt = buildTrackFromJson(back)
+    expect(rebuilt.propLines).toEqual(track.propLines)
+    expect(rebuilt.props.filter((p) => p.fromPropLine)).toHaveLength(5)
+    // Deterministic: re-expansion reproduces the same instances exactly.
+    expect(rebuilt.props.filter((p) => p.fromPropLine)).toEqual(expanded)
+  })
+
   it('rejects missing required fields', () => {
     expect(() => buildTrackFromJson({})).toThrow(/missing required field "id"/)
     expect(() => buildTrackFromJson({ id: 'x' })).toThrow(/missing required field "name"/)

@@ -13,11 +13,14 @@ import * as THREE from 'three'
 import { AI_GRID_SLOTS } from '@/boot/grid-offsets'
 import { buildPropGeometry } from '@/engine/render/props-geometry'
 import type { Vec3 } from '@/engine/sim/physics/vec'
+import { sampleCatmullRom } from '@/game/tracks/catmull-rom'
+import { expandPropLine } from '@/game/tracks/prop-lines'
 import type {
   AntiGravZone,
   BoostPad,
   Checkpoint,
   Prop,
+  PropLine,
   PropType,
   WaveZone,
 } from '@/game/tracks/types'
@@ -314,6 +317,101 @@ export function makeSplineCurve(points: { x: number; y: number; z: number }[]): 
   const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x66aacc }))
   line.name = 'editor:spline-curve'
   return line
+}
+
+// ── Prop-line helpers (parametric "asset along a curve") ─────────────────────
+
+/** The Catmull-Rom curve of a prop-line, drawn from its anchors. Distinct
+ *  amber hue so it never reads as the blue AI spline. */
+export function makePropLineCurve(line: PropLine): THREE.Line {
+  const pts = sampleCatmullRom(line.anchors, {
+    divisionsPerSegment: 12,
+    closed: line.closed ?? false,
+    tension: 0.5,
+  })
+  const geom = new THREE.BufferGeometry()
+  if (pts.length < 2) {
+    geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3))
+    return new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0xffaa44 }))
+  }
+  const closed = line.closed ?? false
+  const n = pts.length + (closed ? 1 : 0)
+  const arr = new Float32Array(n * 3)
+  for (let i = 0; i < pts.length; i++) {
+    arr[i * 3] = pts[i]!.x
+    arr[i * 3 + 1] = pts[i]!.y + 0.2
+    arr[i * 3 + 2] = pts[i]!.z
+  }
+  if (closed) {
+    arr[pts.length * 3] = pts[0]!.x
+    arr[pts.length * 3 + 1] = pts[0]!.y + 0.2
+    arr[pts.length * 3 + 2] = pts[0]!.z
+  }
+  geom.setAttribute('position', new THREE.BufferAttribute(arr, 3))
+  const line3 = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0xffaa44 }))
+  line3.name = 'editor:propline-curve'
+  return line3
+}
+
+/** A draggable control point of a prop-line curve. Amber to match the curve
+ *  + distinguish from the blue AI-spline anchors. */
+export function makePropLineAnchorHelper(anchor: Vec3, selected: boolean): THREE.Group {
+  const g = new THREE.Group()
+  // No Y offset — the gizmo writes the dragged position straight back to the
+  // anchor, so an offset would drift the anchor up on every drag.
+  g.position.set(anchor.x, anchor.y, anchor.z)
+  const baseColor = 0xffaa44
+  const selColor = 0xffff66
+  const mat = new THREE.MeshBasicMaterial({ color: selected ? selColor : baseColor })
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(1.2, 12, 12), mat))
+  const postMat = new THREE.MeshBasicMaterial({ color: baseColor, transparent: true, opacity: 0.4 })
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 3, 6), postMat)
+  post.position.set(0, 1.5, 0)
+  g.add(post)
+  g.userData.setSelected = (v: boolean) => {
+    mat.color.setHex(v ? selColor : baseColor)
+  }
+  return g
+}
+
+/** Non-interactive preview of a prop-line's expanded instances: one small
+ *  teal box per instance at the runtime pose (a nose triangle shows facing),
+ *  so the author sees exactly where + how the assets land. Capped so a huge
+ *  count can't tank the editor. */
+export function makePropLinePreview(line: PropLine): THREE.Group {
+  const g = new THREE.Group()
+  const instances = expandPropLine(line)
+  const CAP = 400
+  const shown = instances.slice(0, CAP)
+  const boxMat = new THREE.MeshBasicMaterial({
+    color: 0x55ddbb,
+    transparent: true,
+    opacity: 0.45,
+    depthWrite: false,
+  })
+  const noseMat = new THREE.MeshBasicMaterial({ color: 0xeafffb, transparent: true, opacity: 0.85 })
+  const noseGeom = new THREE.ConeGeometry(0.4, 0.9, 4)
+  noseGeom.rotateX(Math.PI / 2)
+  for (const inst of shown) {
+    const s = inst.size
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        Math.max(0.4, s.x * 1.5),
+        Math.max(0.4, s.y * 2.5),
+        Math.max(0.4, s.z * 1.5),
+      ),
+      boxMat,
+    )
+    box.position.set(inst.position.x, inst.position.y, inst.position.z)
+    box.quaternion.set(inst.rotation.x, inst.rotation.y, inst.rotation.z, inst.rotation.w)
+    g.add(box)
+    const nose = new THREE.Mesh(noseGeom, noseMat)
+    nose.position.copy(box.position)
+    nose.quaternion.copy(box.quaternion)
+    nose.translateZ(Math.max(0.4, s.z * 1.5) * 0.5 + 0.3)
+    g.add(nose)
+  }
+  return g
 }
 
 /** Bike footprint (m). Roughly matches a tucked rider on the racer

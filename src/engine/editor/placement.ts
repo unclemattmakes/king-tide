@@ -27,6 +27,16 @@ export type PlaceAtOptions = {
   pickedAssetId: string
 }
 
+/** A unique `<assetId>_line_<n>` id within the track (the propLine id is the
+ *  jitter seed, so it must be stable + distinct). */
+function uniquePropLineId(draft: Track, assetId: string): string {
+  const base = `${assetId}_line`
+  const existing = new Set((draft.propLines ?? []).map((l) => l.id))
+  let n = 0
+  while (existing.has(`${base}_${n}`)) n++
+  return `${base}_${n}`
+}
+
 /**
  * Mutate `draft` to add a new entity at `hit` based on `tool`. Returns the
  * selection to focus on the new entity, or null if the tool didn't apply
@@ -130,6 +140,24 @@ export function placeAt(opts: PlaceAtOptions): EntitySel {
     })
     return { kind: 'prop', index: draft.props.length - 1 }
   }
+  if (tool === 'propLine') {
+    if (!pickedAssetId) return null
+    if (!Array.isArray(draft.propLines)) draft.propLines = []
+    const idx = draft.propLines.length
+    // A short 2-anchor line at the click; the author drags the anchors + tunes
+    // spacing. Even arc-length spacing by default.
+    draft.propLines.push({
+      id: uniquePropLineId(draft, pickedAssetId),
+      assetId: pickedAssetId,
+      anchors: [
+        { x: hit.x, y: hit.y, z: hit.z },
+        { x: hit.x + 20, y: hit.y, z: hit.z },
+      ],
+      spacingMode: 'arcLength',
+      spacingM: 6,
+    })
+    return { kind: 'propLine', index: idx }
+  }
   if (tool === 'spline') {
     const main = draft.aiSplines.find((s) => s.id === 'main')
     if (!main) return null
@@ -179,6 +207,16 @@ export function deleteSelected(draft: Track, sel: EntitySel): boolean {
   }
   if (sel.kind === 'prop') {
     draft.props.splice(sel.index, 1)
+    return true
+  }
+  if (sel.kind === 'propLine') {
+    draft.propLines?.splice(sel.index, 1)
+    return true
+  }
+  if (sel.kind === 'propLineAnchor') {
+    const line = draft.propLines?.[sel.lineIndex]
+    // Keep ≥2 anchors so the curve stays a curve.
+    if (line && line.anchors.length > 2) line.anchors.splice(sel.anchorIndex, 1)
     return true
   }
   // spline

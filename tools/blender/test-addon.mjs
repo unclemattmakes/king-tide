@@ -34,6 +34,11 @@ const TEST_SCRIPTS = [
   // modules; registration test passed, every operator blew up on first
   // click).
   path.join(SCRIPT_DIR, 'test_addon_imports.py'),
+  // PropLine cross-language drift — the Python expansion port must reproduce
+  // the JS golden so the Blender authoring preview spawns exactly what the
+  // game does. (bpy-free; also runs under plain CPython via
+  // `python tools/blender/test_propline_expand.py`.)
+  path.join(SCRIPT_DIR, 'test_propline_expand.py'),
 ]
 
 function log(msg) {
