@@ -103,7 +103,9 @@ canonical per-track design docs under [docs/tracks/](docs/tracks/README.md), whi
 supersede the bible's stat blocks where they disagree.
 
 **Authoring pipelines**
-- Tracks — build-from-scratch pass workflow:
+- Tracks — **start at [level-making](docs/level-making.md)** (newcomer hub: reading
+  order, the build pipeline end-to-end, and the Blender↔editor export-ownership
+  contract). Build-from-scratch pass workflow:
   [level-design-playbook](docs/level-design-playbook.md) (canonical). Underlying
   tools: Blender geometry [blender-pipeline-guide](docs/blender-pipeline-guide.md)
   + in-app editor for gameplay data [track-editor-guide](docs/track-editor-guide.md).

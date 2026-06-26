@@ -11,6 +11,8 @@
 > audio, beat timing, wave-zone tuning, and emitter configs. This folder
 > is the reference for **what each track is now that anti-grav is cut**,
 > and for the **prop manifest** (unique-per-track + common-to-all).
+>
+> New to level-making? Start at the hub: [level-making](../level-making.md).
 
 ## The design constraint: no anti-grav moments
 

@@ -1,15 +1,25 @@
 # Hoverbike — Track Art Direction v1
 
+> **⚠ Lineup/cup structure: defer to [tracks/README.md](./tracks/README.md)
+> (the Harbor Cup restructure).** The 13-track v1 list below is historical: the
+> cups were restructured (Harbor Cup), **The Maw** + **Hatteras Light** are
+> parked to the B-list, and the Reef opener is **Mexico City**, not South Beach
+> Sunken. The current proof-of-thesis is the **Reef Cup** (Mayday Bay → Mexico
+> City → Cape Town Drift). Treat this doc as **material-state / palette intent**
+> per track, **not** the current cup structure — and note its v1 tone is still
+> pending a dedicated ripple pass.
+>
 > Per-track application of [art-direction.md](./art-direction.md) — the "clean
 > stylized toy" register, the **built / broken / blooming** material-state rule,
 > the waterline rule, and the palette families. For each of the 13 v1 tracks it
 > answers: *what's the material-state ratio here, which palette family, how does
 > the waterline read, and how do you make the hero set-piece land at 40 m/s?*
 >
-> **Defers to:** [track-themes.md](./track-themes.md) for locked per-track
-> palette + lore (not overridden here), and [tracks/](./tracks/README.md) for
-> layout + the unique-prop manifest. This doc is the **dressing brief** that sits
-> between them — read it alongside the per-track doc before an art pass, with
+> **Defers to:** [tracks/](./tracks/README.md) for the canonical lineup + layout
+> + the unique-prop manifest (it supersedes this doc on lineup/cup structure),
+> and [track-themes.md](./track-themes.md) for locked per-track palette + lore
+> (not overridden here). This doc is the **dressing brief** that sits between
+> them — read it alongside the per-track doc before an art pass, with
 > [track-art-pass-playbook.md](./track-art-pass-playbook.md) for the *how*.
 
 ---

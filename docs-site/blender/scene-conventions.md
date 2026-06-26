@@ -20,6 +20,8 @@ For the panels + operators that author these conventions for you, see
 |---|---|---|---|
 | Track surface (drivable) | any name; material `mat_track_*` by convention | mesh | `{ kind: "track" }` (default if not set on `mat_track_*`-prefixed meshes) |
 | Decoration (render-only) | any name | mesh | `{ kind: "decoration" }` — opts out of the trimesh collider |
+| Collider mesh (invisible) | any name | mesh | `{ kind: "collider_mesh" }` — collidable but not rendered. A *visible* mesh tagged this way is treated as decoration. |
+| Decal | any name | mesh | `{ kind: "decal" }` — thin projected decal mesh laid over a surface. |
 | Water volume | `water_volume_*` (typically `water_volume_main`) | empty (cube display) | `{ kind: "water", wave_height, wave_freq }` |
 | Wave zone | `wave_zone_NN` (zero-padded) | empty (cube display) | `{ kind: "wave_zone", half_width, half_height, half_depth, height_mult, freq_mult, blend_radius_m, [direction_deg, surge_period_s, surge_amplitude] }` |
 | Checkpoint | `cp_NN` (zero-padded, contiguous from 0) | empty | `{ kind: "checkpoint", index, half_width, height }` |
@@ -39,6 +41,9 @@ For the panels + operators that author these conventions for you, see
 
 Open any of them, copy the patterns. Or start a new track from one with **Hoverbike → Utility → New Map from Template**.
 :::
+
+> **`wave_rider` is reserved.** The `wave_rider` kind exists in the enum for a
+> future feature; it isn't an authoring kind yet, so it's omitted from the matrix.
 
 ## Object kinds — bike mode
 
@@ -174,6 +179,13 @@ conversion is automatic:
 In practice this means: **author with Blender's defaults**, don't manually
 rotate. A start empty's local +Y points down-track in Blender, which
 becomes +Z forward in three.js — exactly the direction the bike accelerates.
+(The addon yaw-corrects these gameplay empties — start / gate / boost / emitter
+— on export so local +Y reads as down-track.)
+
+**Bike geometry is the exception:** bike *meshes* author the nose at Blender
+**−Y** (so it lands at three.js +Z / forward) because the bike root isn't
+yaw-corrected like the gameplay empties above — see `build_bike.py` and the
+"−Y" note in [Modding → Bikes](/modding/bikes).
 :::
 
 A few object kinds have axis conventions that survive the up-axis

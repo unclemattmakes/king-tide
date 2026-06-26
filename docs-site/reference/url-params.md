@@ -2,12 +2,56 @@
 
 The game accepts query-string parameters at the root URL. They compose freely.
 
+### Race / menu
+
 | Param | Values | Default | Effect |
 |---|---|---|---|
 | `track` | `lagoon` \| `cliffside` \| `calibration` \| `test-ring` \| any id under `public/tracks/` | `lagoon` | Picks the track. JSON-driven tracks are loaded from `public/tracks/<id>.json`. |
 | `bike` | `cruiser` \| `racer` \| `stunt` \| any id under `public/assets/bikes/` | `racer` | Picks the player bike variant. |
+| `race` | `1` | off | Boots straight into a race. |
+| `autostart` | `1` | off | Starts the race immediately (skips the pre-race wait). |
+| `cup` | any cup id | off | Boots into the named cup. |
+| `room` | any room id | off | Joins a multiplayer lobby room. Add `&race=1` to skip the lobby and go straight to the race. |
+| `tt` | `1` | off | Time-trial / deterministic mode. |
+| `replay` | replay data | off | Plays back a recorded replay. |
+| `determinism` | `<seed>` | off | Runs with a fixed determinism seed. |
+| `tutorial` | `1` | off | Boots into the tutorial. |
+| `host` | `<server>` | off | Connects to the named multiplayer server. |
+| `back` | `1` | off | Returns to the previous menu/screen. |
+| `ai` | `<n>` | full field | Caps the AI field size to `n` opponents. |
+
+### Authoring
+
+| Param | Values | Default | Effect |
+|---|---|---|---|
 | `edit` | `1` | off | Opens the in-app track editor instead of the racer. Defaults the track to `lagoon-edit` if `track` isn't set. See [Authoring tracks → Editor-driven](/modding/tracks#editor-driven-authoring). |
-| `viewer` | any bike id, or `1` for the first manifest entry | off | Opens the stand-alone bike viewer — a turntable with `OrbitControls` for inspecting one built bike GLB. Skips the entire game boot (no track / physics / AI). See [Authoring bikes → In-game bike viewer](/modding/bikes#in-game-bike-viewer). |
+
+### Dev scenes
+
+| Param | Values | Default | Effect |
+|---|---|---|---|
+| `viewer` | any bike id, or `1` for the first manifest entry | off | Opens the stand-alone bike viewer — a turntable with `OrbitControls` for inspecting one built bike GLB. Skips the entire game boot (no track / physics / AI). See [Authoring bikes](/modding/bikes). |
+| `propviewer` | `<id>` | off | Opens the prop studio viewer for one prop. |
+| `calibrate` | `1` | off | Opens the rider-pose calibration scene. |
+| `rideredit` | `1` | off | Opens the rider editor. |
+| `waveriders` | `1` | off | Opens the wave-rider validation scene. |
+| `waterlab` | `1` | off | Opens the water lab. |
+| `watertune` | `<slug>` | off | Opens water tuning for the named track. |
+| `podium` | `1` | off | Opens the podium ceremony scene. |
+
+### Tidal / level
+
+| Param | Values | Default | Effect |
+|---|---|---|---|
+| `tide` | `<amp>[,period[,phase]]` | off | King-Tide tidal-height override (amplitude, optional period and phase). |
+
+### Debug
+
+| Param | Values | Default | Effect |
+|---|---|---|---|
+| `wavedots` | `1` | off | Visualises water sample points as dots. |
+| `wire` | `1` | off | Renders the water surface as wireframe. |
+| `clipcollision` | `0` | on | Restores collide-everything (disables the collision-corridor clip). |
 
 ## Examples
 

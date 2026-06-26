@@ -10,6 +10,10 @@ Tracks are the most complex of the three asset categories — they pair gameplay
 
 Mixing them is the common case: you author terrain + roads + tunnels in Blender, click **Export Track to Game**, then jump into the in-app editor to drag individual gates and pickups into place. The .blend owns geometry + the racing line; the editor owns hand-placed gameplay objects.
 
+::: tip New here? Start with the level-making hub
+[Making a level: start here](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md) carries the newcomer reading order, the which-doc-for-whom map, and the export-ownership contract that explains *which* edits Blender owns vs. the editor. Read it first, then come back for the spec / editor mechanics below.
+:::
+
 ::: tip Authoring in Blender?
 The [Blender section](/blender/overview) covers the full pipeline — addon panels, every operator, scene conventions — plus a [blank-scene-to-playable-map tutorial](/blender/your-first-track). The rest of this page covers the spec-driven and editor-driven flows.
 :::
@@ -35,7 +39,7 @@ open http://localhost:5191/?track=sandbar
 ```
 
 ::: warning Existing JSON is preserved by default
-`pnpm gen:tracks` won't overwrite an existing `public/tracks/<id>.json` — once you've tuned a track in the in-app editor, the spec is no longer the source of truth for placement. To force-overwrite, set `HOVERBIKE_FORCE_GAMEPLAY_JSON=1`.
+`pnpm gen:tracks` won't overwrite an existing `public/tracks/<id>.json` — once you've tuned a track in the [in-app editor](#editor-driven-authoring), the spec is no longer the source of truth for placement. To force-overwrite, set `HOVERBIKE_FORCE_GAMEPLAY_JSON=1`.
 :::
 
 ### Spec format
@@ -120,7 +124,7 @@ Set the slab `thickness` to **1 m or more** (default works). M9.27 / M9.28 fixed
 
 ## Editor-driven authoring
 
-For visual / non-axis-aligned tracks, use the in-app editor. It owns gameplay data — gates, AI spline anchors, pickups, boost pads, start pose. Pair with a Blender-authored `environmentGlb` for collidable terrain.
+For visual / non-axis-aligned tracks, use the in-app editor. It owns the **placement** gameplay — gates, pickups, boost pads, props, prop-lines, wave zones (the editor-owned JSON keys). The racing line (`aiSplines`) and the start pose are **Blender-owned**, so shape those in Blender — a Blender re-export overwrites editor spline/start edits. Pair the editor with a Blender-authored `environmentGlb` for collidable terrain.
 
 ```
 http://localhost:5191/?edit=1                      # opens lagoon-edit (default)
@@ -156,6 +160,7 @@ The two procedural tracks (`lagoon`, `cliffside`) are built in code and are **no
 | Scale | `R` | Resize (gates: halfWidth + height; pads: halfWidth + halfDepth) |
 
 - **Gates + Boost Pads** support all three modes.
+- **Wave Zones + Prop Lines** are placeable and editable here too (drop, then move/rotate/scale).
 - **Spline-bound gates** (the default for new gates) translate by *sliding along the spline*. Rotation is locked (derived from the curve tangent); scale still works.
 - **Pickups + Spline anchors** are translate-only.
 
@@ -198,11 +203,10 @@ The runtime AI controller follows a dense polyline of ~100+ points. Authors don'
 
 When a track has anchors, the dense `points` field is regenerated on every save and stored as `[]`.
 
+### AI spline shape is Blender-owned
+
+The editor lets you nudge AI-spline anchors, but `aiSplines` is a **Blender-owned** key in the export round-trip: re-running **Export Track to Game** from the `.blend` **overwrites** any spline-anchor edits you made in the editor. Rule of thumb: **shape the racing line in Blender**, and use the editor for gate / pickup / boost / prop *placement* — those keys are editor-owned and survive a re-export. (Hand-placed gates are editor-owned too; only the spline shape gets stomped.)
+
 ## Limits to know about
 
 - **No diff vs. saved.** The status appears under the Save button, but the underlying file isn't watched for outside changes.
-- **Boost pads have no runtime effect yet.** They render and persist; the sim doesn't react. Wiring the speed-up is its own task.
-- **Numeric input boxes are read-only.** The properties panel shows values but you can't type into them — use the gizmo. Hand-edit the JSON for fine-grained control.
-- **No "unbind from spline" UI.** Hand-edit the JSON to remove `splineT` from a gate.
-
-These are the next things to build.

@@ -37,6 +37,10 @@ missed CJS dep fails loudly at dev start; a missed ESM one just serves unbundled
 
 ## What's a good first PR?
 
+- **Making a level?** Start at [`docs/level-making.md`](docs/level-making.md) — it lays
+  out the reading order, the build pipeline, and the Blender↔editor export contract, then
+  routes you to the published [Your first track](docs-site/blender/your-first-track.md)
+  walkthrough.
 - Look at issues labelled `good first issue` or `help wanted`.
 - The roadmap of Blender automation lives in
   [`docs/blender-wishlist.md`](docs/blender-wishlist.md) — pick an item

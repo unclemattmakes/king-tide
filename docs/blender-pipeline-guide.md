@@ -1,5 +1,10 @@
 # Track authoring pipeline
 
+> **New here?** Start at [level-making](./level-making.md) (the "Making a level:
+> start here" hub) and the published "Your first track" walkthrough for the guided
+> path. **This page is the exhaustive panel/operator reference** — reach for it
+> when you need the full detail on a specific tool.
+
 > **⚠ Anti-grav is cut** (2026-06; parked for a possible DLC). The
 > [Anti-grav surfaces](#anti-grav-surfaces) section and the `antigrav_zone` row
 > in the kind table below document a **parked** authoring tool — **no shipped
@@ -40,7 +45,7 @@ If something errored mid-export, jump to [Troubleshooting](#troubleshooting).
 
 1. Install the addon **once**:
    *Edit → Preferences → Add-ons → Install…* and pick
-   [`tools/blender/hoverbike_addon.py`](../tools/blender/hoverbike_addon.py).
+   [`tools/blender/hoverbike_addon/`](../tools/blender/hoverbike_addon).
    Tick the checkbox to enable.
 2. Open or save your track as `tracks-src/<id>.blend` (the basename of
    the file becomes the in-game track id).
@@ -1045,6 +1050,28 @@ done by eye on a water track or in the `?waveriders=1` scene
 ([`src/game/components/wave-rider.ts`](../src/game/components/wave-rider.ts)
 `deriveWaveRiderTuning`).
 
+<a id="prop-lines"></a>
+### Prop lines
+
+A **prop line** is the parametric "asset along a curve" primitive (Epic 2,
+shipped) — repeat a single prop down a Bezier at a chosen spacing instead of
+hand-placing every instance. Author them in the **Prop Lines** sub-panel
+(`HOVERBIKE_PT_prop_lines`): **Add Prop Line** drops a curve + line definition,
+**Import Prop Lines** pulls the track's existing `propLines[]` in as editable
+curves, and **Write Prop Lines → JSON** persists back to the track JSON. They
+round-trip through the editor-owned `propLines[]` key, so they survive Blender
+re-exports (see the [round-trip rule](#object-kinds-reference)). The same data
+is editable in the in-app editor.
+
+<a id="decals"></a>
+### Decals
+
+A **decal** (`kind = "decal"`) is a thin projected decal mesh — paint markings,
+grime, signage stuck flat to the track surface. Add one with **Add Decal** in the
+**Decals** sub-panel (`HOVERBIKE_PT_track_decals`); it exports as a normal mesh
+node tagged `kind=decal`, distinct from collidable `kind=track` geometry. See the
+[Object kinds reference](#object-kinds-reference).
+
 <a id="floating-gates"></a>
 ### Floating gates
 
@@ -1190,6 +1217,8 @@ scheduler, so scrub interactions are also live.
 | Boost pad | `boost_NN` (zero-padded) | empty | `{ kind: "boost_pad", half_width, half_depth, strength }` |
 | Anti-grav zone | `antigrav_NN` (zero-padded) | empty | `{ kind: "antigrav_zone", half_width, half_height, half_depth }` |
 | Wave zone | `wave_zone_NN` (zero-padded) | empty (cube) | `{ kind: "wave_zone", half_width, half_height, half_depth, height_mult, freq_mult, blend_radius_m, [direction_deg, surge_period_s, surge_amplitude] }` |
+| Collider mesh | any name | mesh | `{ kind: "collider_mesh" }` (invisible collision proxy; a *visible* mesh is treated as decoration) |
+| Decal | `decal_NN` (zero-padded) | mesh | `{ kind: "decal" }` (thin projected decal mesh — markings/posters; non-collidable, distinct from `kind=track`) |
 | Horizon ring | `horizon_ring` (singular) | mesh | `{ kind: "horizon" }` |
 | Particle emitter | `emitter_NN` | empty | `{ kind: "emitter", atlas_cell, emit_rate, lifetime_s, velocity_cone_deg, speed_min, speed_max, size_start, size_end, color_start, color_end, gravity, max_particles }` |
 

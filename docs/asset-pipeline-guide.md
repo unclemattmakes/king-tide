@@ -5,7 +5,8 @@ in the running game. For track-specific authoring (gates, splines,
 pickups), see [blender-pipeline-guide.md](./blender-pipeline-guide.md)
 — that flow remains canonical for tracks. For the v1 production plan
 and per-track set-piece sequencing, see
-[v1-asset-pipeline-plan.md](./v1-asset-pipeline-plan.md).
+[v1-asset-pipeline-plan.md](./v1-asset-pipeline-plan.md). New to
+level-making? Start at the hub: [level-making](./level-making.md).
 
 ## TL;DR
 
@@ -163,8 +164,10 @@ remains the higher-level entry point — that file references an
 
 ### Edit a bike directly (one-click flow)
 
-1. Install the addon once: *Edit → Preferences → Add-ons → Install…*
-   pick `tools/blender/hoverbike_addon.py`, tick the checkbox.
+1. Install the addon once with `pnpm install:blender-addon` — it symlinks
+   the `tools/blender/hoverbike_addon/` package into Blender's addons dir;
+   enable **Hoverbike** under *Edit → Preferences → Add-ons*. (The addon is a
+   package directory, not a single `.py` file.)
 2. Open `bikes-src/<id>.blend` (e.g. `bikes-src/racer.blend`).
 3. Edit. Move `bike_fairing`, sculpt `bike_body`, drag `socket_seat`,
    recolour materials — whatever the variant needs. Each variant is
@@ -320,11 +323,10 @@ explicit rotation on the root.
 least once. The editor reads `public/assets/manifest.json`; if no
 prop GLBs have been built, the dropdown shows the "no assets" hint.
 
-**CI fails on a fresh PR.** The
-[`.github/workflows/asset-pipeline.yml`](../.github/workflows/asset-pipeline.yml)
-job runs `pnpm gen:all` on PRs that touch `specs/` or
-`tools/blender/`. If it fails, the run log shows the exact validation
-or Blender error.
+**The asset build fails on a fresh PR.** A change under `specs/` or
+`tools/blender/` must keep `pnpm gen:all` green — run it locally (CI for
+this repo is unreliable, so the local gate is the gate). The error log
+shows the exact validation or Blender failure.
 
 ## See also
 

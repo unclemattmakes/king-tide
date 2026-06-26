@@ -87,6 +87,10 @@ In `?edit=1`, the *+Asset* dropdown is populated from `manifest.json`. Pick a pr
 
 The runtime preloads every referenced GLB at boot via `prop-loader.ts`. Missing assets log a warning and render nothing — they don't crash the scene.
 
+::: tip Axes: three.js here, Blender in specs
+The `position`, `rotation`, and `size` of a placed prop are in **three.js axes** (`x, y, z` = right, up, forward), the same as the rest of the track JSON. Your prop *spec*, by contrast, is authored in **Blender axes** (Blender is Z-up). So `geometry.scale` in the spec and `size` in the placement entry are not the same coordinate frame — keep the two straight when you nudge values by hand.
+:::
+
 ## Categories at a glance
 
 | Category | Typical props |
@@ -98,3 +102,10 @@ The runtime preloads every referenced GLB at boot via `prop-loader.ts`. Missing 
 | `decor` | Catch-all for everything that's atmospheric, not gameplay-relevant |
 
 The category drives the editor's grouping. Keep it tight — you'll be picking from this dropdown a lot.
+
+## Beyond kit props
+
+Hand-authored kit props are the floor, not the ceiling. Two ways to go further:
+
+- **Prop-lines** — a parametric "asset along a curve": scatter a prop down a spline at a given spacing instead of placing each one by hand. They're a shipped feature, placed and edited in the in-app editor alongside regular props. See [editor-driven authoring](/modding/tracks#editor-driven-authoring).
+- **AI-generated props** — for level-scale prop sets, the local AI pipeline (concept → 3D mesh → conditioned, library-ready prop) does the heavy lifting. See the [AI prop pipeline](https://github.com/occ-matt/hoverbike/blob/main/docs/ai-prop-pipeline.md) doc, or run the `/make-props` skill to drive it over a whole level.

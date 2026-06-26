@@ -11,6 +11,14 @@
 > configs, hero-camera framing). When the prose here says "anti-grav,"
 > read the matching `tracks/<id>.md` for what ships instead.
 >
+> **Lineup/cup structure: defer to [tracks/README.md](./tracks/README.md)
+> (the Harbor Cup).** This doc's cup groupings — the §1.3 reordering, the
+> §1.1 single-lap reformat, and the per-track `Cup:` lines — predate the
+> Harbor Cup restructure and no longer reflect the shipping cup layout;
+> read `tracks/README.md` for which tracks sit in which cup. The
+> beat/timing, wave-zone, particle, audio, and camera content here is
+> unaffected and still authoritative.
+>
 > Implementation companion to [track-themes.md](./track-themes.md) (the
 > content bible) and [../research/track-flow-analysis.md](../research/track-flow-analysis.md)
 > (the cross-game flow analysis). This doc takes each v1 track from
