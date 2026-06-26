@@ -230,19 +230,37 @@ click **+ Prop Line**; the next ground click drops a 2-anchor line. Drag the
 and tune the params in the properties panel:
 
 - **Spacing** — `arcLength` (even metres) or `count` (exact N).
-- **Offset / Normal** — lateral + vertical offset from the curve.
-- **Scale**, **Align to tangent** + **Yaw°**, **Closed loop**.
+- **Offset / Normal** — lateral + vertical offset from the curve. (When **Seat
+  to terrain** is on, the Normal row becomes **Height m** — height above the
+  ground rather than above the curve.)
+- **Seat to terrain** — resolve each instance's height against the loaded
+  terrain (terrain height + the Height value) instead of the flat curve Y, so a
+  row on uneven ground follows the hills instead of floating / sinking.
+  Instances over open water (no terrain under them) stay at the curve Y. The
+  editor preview seats against the same baked heightmap the game uses, so it's
+  WYSIWYG; Blender's *Import PropLines* raycasts the imported terrain.
+- **Bind to spline** — instead of hand-authored anchors, take the source from a
+  stretch of the **main racing line**: the **t0 / t1** sliders pick the
+  parameter range (full range = the whole loop; a partial range = an open arc;
+  t0 > t1 wraps the start/finish seam). Use for "buoys along the inside of turn
+  3 only". The anchor handles are hidden while bound — edit the stretch with the
+  sliders. Unbinding restores editable anchors.
+- **Scale**, **Align to tangent** + **Yaw°**, **Closed loop** (anchor lines
+  only — a bound line's closedness comes from its slice).
 - **Jitter** — seeded per-instance position / yaw / scale randomness (the
   line's id is the seed; the scatter is deterministic).
 - **Flags** — surface, waterline opt-out, float-on-waves (DOF).
-- **+ anchor** appends a control point; Delete removes the selected anchor (or
-  the whole line).
+- **+ anchor** appends a control point (anchor lines only); Delete removes the
+  selected anchor (or the whole line).
 
 Prop lines are **editor-canonical** (round-trip like `props[]`) and expand to
 ordinary asset props at load. The expansion is deterministic and **identical in
 the editor, the runtime, and Blender** (`propline_placements.py` → *Import /
 Write PropLines*), locked by a cross-language drift test — so you can author a
-line in either tool and the other sees the same instances.
+line in either tool and the other sees the same instances. (Terrain **seating**
+is the one exception: it depends on the loaded terrain, which differs per tool,
+so it runs as a per-tool post-pass over the same expanded instances rather than
+inside the locked expansion.)
 
 **Floating props bob live in the editor.** Any prop with **Float on waves**
 (or a wave-rider asset like the buoy) bobs and tilts on the real water

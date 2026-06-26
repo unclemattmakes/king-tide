@@ -13,8 +13,11 @@ import * as THREE from 'three'
 import { AI_GRID_SLOTS } from '@/boot/grid-offsets'
 import { buildPropGeometry } from '@/engine/render/props-geometry'
 import type { Vec3 } from '@/engine/sim/physics/vec'
-import { sampleCatmullRom } from '@/game/tracks/catmull-rom'
-import { expandPropLine } from '@/game/tracks/prop-lines'
+import {
+  expandPropLine,
+  resolvePropLineSource,
+  seatPropLineInstances,
+} from '@/game/tracks/prop-lines'
 import type {
   AntiGravZone,
   BoostPad,
@@ -321,20 +324,18 @@ export function makeSplineCurve(points: { x: number; y: number; z: number }[]): 
 
 // ── Prop-line helpers (parametric "asset along a curve") ─────────────────────
 
-/** The Catmull-Rom curve of a prop-line, drawn from its anchors. Distinct
- *  amber hue so it never reads as the blue AI spline. */
-export function makePropLineCurve(line: PropLine): THREE.Line {
-  const pts = sampleCatmullRom(line.anchors, {
-    divisionsPerSegment: 12,
-    closed: line.closed ?? false,
-    tension: 0.5,
-  })
+/** The source curve of a prop-line, drawn from its anchors OR — for a
+ *  spline-bound line — the sliced racing-line polyline. Distinct amber hue so
+ *  it never reads as the blue AI spline. */
+export function makePropLineCurve(line: PropLine, mainSplinePoints?: readonly Vec3[]): THREE.Line {
+  const src = resolvePropLineSource(line, mainSplinePoints)
+  const pts = src?.points ?? []
+  const closed = src?.closed ?? false
   const geom = new THREE.BufferGeometry()
   if (pts.length < 2) {
     geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3))
     return new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0xffaa44 }))
   }
-  const closed = line.closed ?? false
   const n = pts.length + (closed ? 1 : 0)
   const arr = new Float32Array(n * 3)
   for (let i = 0; i < pts.length; i++) {
@@ -377,10 +378,26 @@ export function makePropLineAnchorHelper(anchor: Vec3, selected: boolean): THREE
 /** Non-interactive preview of a prop-line's expanded instances: one small
  *  teal box per instance at the runtime pose (a nose triangle shows facing),
  *  so the author sees exactly where + how the assets land. Capped so a huge
- *  count can't tank the editor. */
-export function makePropLinePreview(line: PropLine): THREE.Group {
+ *  count can't tank the editor.
+ *
+ *  `opts.mainSplinePoints` resolves a spline-bound line (`bind`);
+ *  `opts.sampleTerrainHeight` seats a `seatToTerrain` line onto the loaded
+ *  terrain exactly like the runtime, so the preview is WYSIWYG. */
+export function makePropLinePreview(
+  line: PropLine,
+  opts?: {
+    mainSplinePoints?: readonly Vec3[] | undefined
+    sampleTerrainHeight?: ((x: number, z: number) => number | null) | undefined
+  },
+): THREE.Group {
   const g = new THREE.Group()
-  const instances = expandPropLine(line)
+  const instances = expandPropLine(line, { mainSplinePoints: opts?.mainSplinePoints })
+  if (line.seatToTerrain && opts?.sampleTerrainHeight) {
+    // Mark + seat like the runtime boot pass so the preview shows the seated Y.
+    const offset = line.normalOffsetM ?? 0
+    for (const inst of instances) inst.seatToTerrainOffsetM = offset
+    seatPropLineInstances(instances, opts.sampleTerrainHeight)
+  }
   const CAP = 400
   const shown = instances.slice(0, CAP)
   const boxMat = new THREE.MeshBasicMaterial({

@@ -465,6 +465,16 @@ export type Prop = {
    *  re-serializes the `propLines` source instead), and the editor treats them
    *  as a non-editable preview. Absent on authored props. */
   fromPropLine?: boolean
+  /** Runtime-only marker on a `fromPropLine` instance whose source line opted
+   *  into terrain seating (`PropLine.seatToTerrain`). Holds the metres to add
+   *  ABOVE the sampled terrain height (the line's `normalOffsetM`). The boot
+   *  seat-pass (`seatPropLineInstances`) reads it: `position.y = terrainY +
+   *  this` at each instance XZ, leaving instances over open water at their
+   *  curve Y. Never serialized, never set on authored props. Distinct from the
+   *  deterministic expansion — the seat depends on terrain, which differs per
+   *  tool (runtime heightmap vs editor/Blender raycast), so it is applied as a
+   *  post-pass rather than baked into `expandPropLine`. */
+  seatToTerrainOffsetM?: number
 }
 
 /**
@@ -486,9 +496,31 @@ export type PropLine = {
   /** Asset-manifest id to instance (same namespace as `Prop.assetId`). */
   assetId: string
   /** Catmull-Rom control points in three.js world space (≥2). Identical
-   *  representation to `AISpline.anchors` — NOT Bézier handles. */
+   *  representation to `AISpline.anchors` — NOT Bézier handles. Ignored (and
+   *  may be empty) when `bind` is set — a bound line takes its source polyline
+   *  from the racing line instead. */
   anchors: Vec3[]
-  /** Whether the curve loops back to the first anchor. Default false. */
+  /** Optional bind to the main AI spline: instead of hand-authored `anchors`,
+   *  the source polyline is the `main` spline's dense points sliced to the
+   *  parameter range `[t0, t1)` (absent t0/t1 → the full closed loop). Use for
+   *  "buoys along the inside of turn 3 only". Because the spline points are
+   *  derived identically across the editor, runtime, and Blender (same
+   *  `sampleCatmullRom` over the AI-spline anchors), a bound expansion stays
+   *  cross-language deterministic. Exactly one of {`anchors`, `bind`} resolves
+   *  to a source; `bind` wins when both are present. */
+  bind?: {
+    /** Which spline to bind to. Only `'main'` is supported today; absent =
+     *  `'main'`. */
+    spline?: 'main'
+    /** Start parameter along the closed loop, 0..1. Default 0. */
+    t0?: number
+    /** End parameter, 0..1. Default 1. `t0`/`t1` absent → the full loop (a
+     *  closed source). A partial range is an open arc. `t0 > t1` wraps across
+     *  the start/finish seam. */
+    t1?: number
+  }
+  /** Whether the curve loops back to the first anchor. Default false. Ignored
+   *  for bound lines (the slice decides: full loop = closed, partial = open). */
   closed?: boolean
   /** How instance count is decided. Default 'arcLength'. */
   spacingMode?: 'count' | 'arcLength'
@@ -499,9 +531,18 @@ export type PropLine = {
   spacingM?: number
   /** Lateral offset perpendicular to the curve tangent, metres (left = +). */
   offsetM?: number
-  /** Vertical offset added to the sampled curve Y, metres. (Terrain seating
-   *  is baked into this by the authoring tools; the runtime does not raycast.) */
+  /** Vertical offset added to the sampled curve Y, metres. When `seatToTerrain`
+   *  is set this is instead the height ABOVE the resolved terrain. */
   normalOffsetM?: number
+  /** Seat each expanded instance onto the terrain surface: at boot the
+   *  instance Y is resolved to `terrainHeight(xz) + normalOffsetM` against the
+   *  baked terrain heightmap instead of `curveY + normalOffsetM`, so a row on
+   *  uneven ground follows the hills instead of floating / sinking. Instances
+   *  whose XZ has no terrain (open water) keep their curve Y. The seat is a
+   *  post-pass (the heightmap doesn't exist when `expandPropLine` runs), so it
+   *  does NOT change the deterministic expansion; the editor + Blender previews
+   *  raycast their own loaded terrain for WYSIWYG. Default false. */
+  seatToTerrain?: boolean
   /** Yaw each instance to the curve tangent. Default true. */
   alignToTangent?: boolean
   /** Constant yaw (deg) — used alone when alignToTangent=false, or added on

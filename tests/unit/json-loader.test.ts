@@ -233,6 +233,71 @@ describe('buildTrackFromJson', () => {
     expect(rebuilt.props.filter((p) => p.fromPropLine)).toEqual(expanded)
   })
 
+  it('propLines: seatToTerrain round-trips + marks instances with the seat offset', () => {
+    const raw = baseTrack()
+    raw.propLines = [
+      {
+        id: 'cliff_palms',
+        assetId: 'palm',
+        anchors: [
+          { x: 0, y: 5, z: 0 },
+          { x: 30, y: 1, z: 0 },
+        ],
+        spacingMode: 'count',
+        count: 4,
+        normalOffsetM: 1.5,
+        seatToTerrain: true,
+      },
+    ]
+    const track = buildTrackFromJson(raw)
+    const expanded = track.props.filter((p) => p.fromPropLine)
+    expect(expanded).toHaveLength(4)
+    // Each instance is tagged with the offset-above-terrain (= normalOffsetM) so
+    // the boot seat-pass can resolve its Y; expansion still placed them at curve Y.
+    for (const p of expanded) expect(p.seatToTerrainOffsetM).toBe(1.5)
+
+    // The flag round-trips; the runtime-only instance marker is never serialized.
+    const back = trackToJson(track)
+    expect(back.propLines?.[0]?.seatToTerrain).toBe(true)
+    expect(
+      (back.props ?? []).some(
+        (p) => (p as { seatToTerrainOffsetM?: number }).seatToTerrainOffsetM !== undefined,
+      ),
+    ).toBe(false)
+    expect(buildTrackFromJson(back).propLines).toEqual(track.propLines)
+  })
+
+  it('propLines: bind round-trips + expands along the main spline (anchors optional)', () => {
+    const raw = baseTrack()
+    raw.propLines = [
+      {
+        id: 'inner_buoys',
+        assetId: 'buoy',
+        anchors: [], // bound line — no authored anchors
+        bind: { t0: 0, t1: 1 },
+        spacingMode: 'count',
+        count: 4,
+      },
+    ]
+    const track = buildTrackFromJson(raw)
+    const expanded = track.props.filter((p) => p.fromPropLine)
+    expect(expanded).toHaveLength(4)
+    // Came from the spline (main.points span z=0..10), not the empty anchors.
+    expect(expanded.some((p) => p.position.z > 0)).toBe(true)
+
+    const back = trackToJson(track)
+    expect(back.propLines?.[0]?.bind).toEqual({ t0: 0, t1: 1 })
+    const rebuilt = buildTrackFromJson(back)
+    expect(rebuilt.propLines).toEqual(track.propLines)
+    expect(rebuilt.props.filter((p) => p.fromPropLine)).toEqual(expanded)
+  })
+
+  it('propLines: rejects a line with neither anchors nor bind', () => {
+    const raw = baseTrack()
+    raw.propLines = [{ id: 'x', assetId: 'palm', anchors: [] }]
+    expect(() => buildTrackFromJson(raw)).toThrow(/needs anchors/)
+  })
+
   it('rejects missing required fields', () => {
     expect(() => buildTrackFromJson({})).toThrow(/missing required field "id"/)
     expect(() => buildTrackFromJson({ id: 'x' })).toThrow(/missing required field "name"/)

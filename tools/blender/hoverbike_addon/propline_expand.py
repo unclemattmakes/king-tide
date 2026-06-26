@@ -170,21 +170,76 @@ def prop_line_count(line: dict, total_arc_len: float) -> int:
     return max(1, round(total_arc_len / max(1e-3, line.get("spacingM", 1))))
 
 
+# ── Source resolution (anchors OR a slice of the bound main spline) ──────────
+def _clamp01(t: float) -> float:
+    if not (t > 0):
+        return 0.0
+    if t > 1:
+        return 1.0
+    return t
+
+
+def slice_main_spline_for_bind(bind: dict, main_points: list | None):
+    """Mirror of ``sliceMainSplineForBind`` in prop-lines.ts. Integer-only index
+    math (``math.floor``) so the slice is byte-identical to JS."""
+    if not main_points or len(main_points) < 2:
+        return None
+    M = len(main_points)
+    t0_raw = bind.get("t0")
+    t1_raw = bind.get("t1")
+    t0 = _clamp01(t0_raw if t0_raw is not None else 0.0)
+    t1 = _clamp01(t1_raw if t1_raw is not None else 1.0)
+    if t0 == 0 and t1 == 1:
+        return {"points": [{"x": p["x"], "y": p["y"], "z": p["z"]} for p in main_points], "closed": True}
+    i0 = min(int(math.floor(t0 * M)), M - 1)
+    i1 = min(int(math.floor(t1 * M)), M - 1)
+    points = []
+    i = i0
+    while True:
+        p = main_points[i]
+        points.append({"x": p["x"], "y": p["y"], "z": p["z"]})
+        if i == i1:
+            break
+        i = (i + 1) % M
+    return {"points": points, "closed": False}
+
+
+def resolve_prop_line_source(line: dict, main_spline_points: list | None):
+    """Mirror of ``resolvePropLineSource`` — the dense source polyline + closed
+    flag a line expands along (anchors, or a slice of the bound main spline).
+
+    Use ``is not None`` (NOT truthiness): a full-loop bind is the empty dict
+    ``{}``, which is truthy in JS but FALSY in Python — checking truthiness here
+    would silently drop full-loop binds and diverge from the runtime."""
+    if line.get("bind") is not None:
+        return slice_main_spline_for_bind(line["bind"], main_spline_points)
+    anchors = line.get("anchors") or []
+    if len(anchors) < 2:
+        return None
+    closed = bool(line.get("closed", False))
+    points = sample_catmull_rom(anchors, DIVISIONS_PER_SEGMENT, closed, TENSION)
+    return {"points": points, "closed": closed}
+
+
 def _round_half_to_even_to_js(x: float) -> int:
     """JS ``Math.round`` rounds .5 toward +Infinity; Python ``round`` is
     banker's rounding. Match JS so the count agrees."""
     return math.floor(x + 0.5)
 
 
-def expand_prop_line(line: dict) -> list:
+def expand_prop_line(line: dict, main_spline_points: list | None = None) -> list:
     """Expand one PropLine dict (three.js space) into a list of prop dicts:
     ``{assetId, position:{x,y,z}, rotation:{x,y,z,w}, size, ...}``.
-    Mirrors ``expandPropLine`` in prop-lines.ts exactly."""
-    anchors = line.get("anchors") or []
-    if len(anchors) < 2:
+    Mirrors ``expandPropLine`` in prop-lines.ts exactly.
+
+    ``main_spline_points`` supplies the racing line for a spline-bound line
+    (``bind``); the SAME points must be threaded in by every caller for the
+    bound expansion to stay cross-language identical. Ignored for anchor lines."""
+    src = resolve_prop_line_source(line, main_spline_points)
+    if not src:
         return []
-    closed = bool(line.get("closed", False))
-    P = sample_catmull_rom(anchors, DIVISIONS_PER_SEGMENT, closed, TENSION)
+    closed = src["closed"]
+    P = src["points"]
     if len(P) < 2:
         return []
     cum, seg_count = _arc_lengths(P, closed)
@@ -255,8 +310,8 @@ def expand_prop_line(line: dict) -> list:
     return out
 
 
-def expand_prop_lines(lines: list) -> list:
+def expand_prop_lines(lines: list, main_spline_points: list | None = None) -> list:
     out = []
     for line in lines:
-        out.extend(expand_prop_line(line))
+        out.extend(expand_prop_line(line, main_spline_points))
     return out

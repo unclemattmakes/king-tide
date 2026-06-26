@@ -1,11 +1,14 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
+import { sampleTerrainHeightAtXZ, type TerrainHeightmap } from '@/engine/render/terrain-heightmap'
+import type { Vec3 } from '@/engine/sim/physics/vec'
 import type { WaveFieldState } from '@/engine/sim/water/wave-field'
 import type { PropManifestEntry } from '@/game/assets/manifest'
 import { nearestT, pointAtT, tangentAtT } from '@/game/tracks/catmull-rom'
 import { DEFAULT_GATE_SPACING_M, resampleByArcLength } from '@/game/tracks/gate-placement'
-import type { Track } from '@/game/tracks/types'
+import { resolvePropLineSource } from '@/game/tracks/prop-lines'
+import type { PropLine, Track } from '@/game/tracks/types'
 import { createEditorLiveWater } from './editor-live-water'
 import {
   createEditorPanel,
@@ -98,6 +101,11 @@ export type EditorOptions = {
    *  (wave-rider) props bob/tilt on the surface for placement preview.
    *  Optional so headless / test wiring still works. */
   waveField?: WaveFieldState
+  /** Baked terrain heightmap (from the editor boot, when an environment GLB
+   *  loaded). Used to seat `seatToTerrain` prop-line previews onto the same
+   *  terrain the runtime uses, so the editor preview is WYSIWYG. Absent →
+   *  seated lines stay at their curve Y in the preview. */
+  terrainHeightmap?: TerrainHeightmap | null
 }
 
 export type EditorHandle = {
@@ -164,6 +172,8 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   // Same pattern for the start-on-spline t slider — one undo entry per
   // drag rather than one per slider tick.
   let startTDragSnapshotted = false
+  // Same coalescing for a spline-bound prop-line's t0/t1 sliders.
+  let propLineBindTDragSnapshotted = false
 
   // ── Undo stack ──────────────────────────────────────────────────────────
   const undo = createUndoStack(draft, () => {
@@ -172,8 +182,26 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
     renderPanel()
   })
 
+  // ── Terrain seating sampler ─────────────────────────────────────────────
+  // Same baked heightmap the runtime seat-pass uses, so a `seatToTerrain`
+  // prop-line previews at the exact Y it ships at. Absent in headless wiring or
+  // when no env GLB loaded → seated previews stay at curve Y.
+  const heightmap = opts.terrainHeightmap ?? null
+  const sampleTerrainHeight = heightmap
+    ? (x: number, z: number) => sampleTerrainHeightAtXZ(heightmap, x, z)
+    : undefined
+
+  // Dense points of the main racing line — the source a spline-bound (`bind`)
+  // prop-line slices, and the seed when materialising anchors on unbind.
+  const mainPoints = () => draft.aiSplines.find((s) => s.id === 'main')?.points
+
   // ── Helpers scene ───────────────────────────────────────────────────────
-  const helpersScene = createHelpersScene({ scene, draft, getSel: () => sel })
+  const helpersScene = createHelpersScene({
+    scene,
+    draft,
+    getSel: () => sel,
+    ...(sampleTerrainHeight ? { sampleTerrainHeight } : {}),
+  })
 
   // ── Wave-rider float preview ────────────────────────────────────────────
   // Floating props (per-instance `waveRider`, or wave-rider assets like the
@@ -520,8 +548,52 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
         const line = draft.propLines?.[idx]
         if (!line) return
         undo.push()
-        applyPropLineFlag(line, field, value)
+        // `bind` is special: it swaps the source between hand-authored anchors
+        // and a slice of the main racing line, and needs the spline context +
+        // an anchor-materialise on unbind (so the line stays a valid, savable
+        // source). The rest of the flags are pure field writes (field-edits.ts).
+        if (field === 'bind') {
+          if (value === true) {
+            // Guard: binding needs a main spline to slice.
+            if (!mainPoints() || (mainPoints()?.length ?? 0) < 2) {
+              undo.tryUndo()
+              panelHandle.setStatus('Bind: no main spline', '#f88')
+              return
+            }
+            if (!line.bind) line.bind = { t0: 0, t1: 1 }
+          } else if (line.bind) {
+            // Unbinding: if the line carries no editable anchors, seed them from
+            // the current bound source so the curve doesn't vanish + the saved
+            // JSON stays valid (anchors[≥2] or bind).
+            if (line.anchors.length < 2) {
+              line.anchors = materialiseAnchorsFromBind(line)
+            }
+            delete line.bind
+          }
+        } else {
+          applyPropLineFlag(line, field, value)
+        }
         rebuildHelpers()
+        renderPanel()
+      },
+      onPropLineBindTChange: (which, t) => {
+        const idx =
+          sel?.kind === 'propLine' ? sel.index : sel?.kind === 'propLineAnchor' ? sel.lineIndex : -1
+        const line = draft.propLines?.[idx]
+        if (!line?.bind) return
+        const clamped = Math.min(1, Math.max(0, t))
+        if (Math.abs((line.bind[which] ?? (which === 't0' ? 0 : 1)) - clamped) < 1e-5) return
+        if (!propLineBindTDragSnapshotted) {
+          undo.push()
+          propLineBindTDragSnapshotted = true
+        }
+        line.bind[which] = clamped
+        // Re-expand + redraw just this line's preview/curve live.
+        helpersScene.refreshPropLine(idx)
+        renderPanelLight()
+      },
+      onPropLineBindTCommit: () => {
+        propLineBindTDragSnapshotted = false
         renderPanel()
       },
       onPropLineAddAnchor: () => {
@@ -550,6 +622,26 @@ export function installTrackEditor(opts: EditorOptions): EditorHandle {
   }
   function renderPanelLight(): void {
     panelHandle.renderLight()
+  }
+
+  /** Seed editable anchors from a bound line's resolved source polyline, so
+   *  unbinding a line that was authored anchor-less leaves a real, savable
+   *  curve (≥2 anchors) roughly where the bound slice was. */
+  function materialiseAnchorsFromBind(line: PropLine): Vec3[] {
+    const src = resolvePropLineSource(line, mainPoints())
+    const pts = src?.points ?? []
+    if (pts.length < 2) {
+      const a = line.anchors[0] ?? { x: 0, y: 0, z: 0 }
+      return [{ ...a }, { x: a.x + 20, y: a.y, z: a.z }]
+    }
+    const count = Math.min(5, pts.length)
+    const out: Vec3[] = []
+    for (let i = 0; i < count; i++) {
+      const idx = Math.round((i / (count - 1)) * (pts.length - 1))
+      const p = pts[idx] as Vec3
+      out.push({ x: p.x, y: p.y, z: p.z })
+    }
+    return out
   }
 
   function confirmDiscard(action: string): boolean {

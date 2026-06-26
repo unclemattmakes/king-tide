@@ -169,8 +169,13 @@ export type EditorPanelCallbacks = {
   onGateUnbindFromSpline(): void
   /** Non-numeric edit on the selected prop-line (or its anchor's line):
    *  `assetId`/`spacingMode`/`surface`/`waveRiderDof` (string), `closed`/
-   *  `alignToTangent`/`waterline`/`waveRider` (bool). */
+   *  `alignToTangent`/`waterline`/`waveRider`/`seatToTerrain`/`bind` (bool). */
   onPropLineFlag(field: string, value: string | boolean | null): void
+  /** Live-edit a spline-bound prop-line's `t0`/`t1` from a panel slider.
+   *  Streams every tick; the receiver coalesces undo across one drag. */
+  onPropLineBindTChange(which: 't0' | 't1', t: number): void
+  /** Fires on slider mouseup so the receiver closes the undo-coalescing window. */
+  onPropLineBindTCommit(): void
   /** Append a new anchor to the selected prop-line's curve. */
   onPropLineAddAnchor(): void
   /** Whether the currently-selected entity supports a given gizmo mode.
@@ -420,11 +425,16 @@ export function createEditorPanel(opts: {
     sections.push(
       outlinerSection(
         'Prop Lines',
-        (draft.propLines ?? []).map((l, i) => ({
-          k: `propline:${i}`,
-          label: `${escapeHtml(l.id)}  ${escapeHtml(l.assetId)} ×${l.anchors.length}a`,
-          sel: { kind: 'propLine', index: i } as EntitySel,
-        })),
+        (draft.propLines ?? []).map((l, i) => {
+          const src = l.bind
+            ? `⤳ t${(l.bind.t0 ?? 0).toFixed(2)}–${(l.bind.t1 ?? 1).toFixed(2)}`
+            : `×${l.anchors.length}a`
+          return {
+            k: `propline:${i}`,
+            label: `${escapeHtml(l.id)}  ${escapeHtml(l.assetId)} ${src}`,
+            sel: { kind: 'propLine', index: i } as EntitySel,
+          }
+        }),
       ),
     )
     sections.push(
@@ -732,11 +742,38 @@ export function createEditorPanel(opts: {
     if (!line) return '(missing)'
     const isCount = (line.spacingMode ?? 'arcLength') === 'count'
     const assetIds = propAssets.map((a) => a.id)
+    const mainSpline = draft.aiSplines.find((s) => s.id === 'main')
+    const mainPts = mainSpline?.points
+    const hasMainSpline = (mainPts?.length ?? 0) >= 2
+    const isBound = line.bind != null
+    const isSeated = line.seatToTerrain === true
     const rows: string[] = [`<div><b>${escapeHtml(line.id)}</b></div>`]
     rows.push(
       assetIds.length > 0
         ? selectRow('Asset', 'data-proplineflag', 'assetId', assetIds, line.assetId)
         : `<div>asset: <b>${escapeHtml(line.assetId)}</b></div>`,
+    )
+    // ── Source: anchors (default) vs spline-bind ──
+    if (hasMainSpline || isBound) {
+      rows.push(boolRow('Bind to spline', 'data-proplineflag', 'bind', isBound))
+    }
+    if (isBound) {
+      const t0 = line.bind?.t0 ?? 0
+      const t1 = line.bind?.t1 ?? 1
+      rows.push(
+        `<label style="display:flex;align-items:center;gap:6px;margin-top:3px">
+           <span style="width:24px;color:#9bb">t0</span>
+           <input id="ed-propline-t0" type="range" min="0" max="1" step="0.001" value="${t0}" style="flex:1" />
+           <span id="ed-propline-t0-val" style="width:42px;text-align:right;color:#cdf">${t0.toFixed(3)}</span>
+         </label>`,
+        `<label style="display:flex;align-items:center;gap:6px;margin-top:3px">
+           <span style="width:24px;color:#9bb">t1</span>
+           <input id="ed-propline-t1" type="range" min="0" max="1" step="0.001" value="${t1}" style="flex:1" />
+           <span id="ed-propline-t1-val" style="width:42px;text-align:right;color:#cdf">${t1.toFixed(3)}</span>
+         </label>`,
+      )
+    }
+    rows.push(
       selectRow(
         'Spacing',
         'data-proplineflag',
@@ -751,7 +788,14 @@ export function createEditorPanel(opts: {
             step: 0.5,
           }),
       numRow('Offset m', 'data-numedit', 'offsetM', line.offsetM ?? 0, { step: 0.5 }),
-      numRow('Normal m', 'data-numedit', 'normalOffsetM', line.normalOffsetM ?? 0, { step: 0.25 }),
+      numRow(
+        isSeated ? 'Height m' : 'Normal m',
+        'data-numedit',
+        'normalOffsetM',
+        line.normalOffsetM ?? 0,
+        { step: 0.25 },
+      ),
+      boolRow('Seat to terrain', 'data-proplineflag', 'seatToTerrain', isSeated),
       numRow('Scale', 'data-numedit', 'scale', line.scale ?? 1, { min: 0.05, step: 0.1 }),
       boolRow(
         'Align to tangent',
@@ -760,7 +804,12 @@ export function createEditorPanel(opts: {
         line.alignToTangent !== false,
       ),
       numRow('Yaw°', 'data-numedit', 'yawDeg', line.yawDeg ?? 0, { step: 5 }),
-      boolRow('Closed loop', 'data-proplineflag', 'closed', line.closed === true),
+    )
+    // Closed-loop is anchor-only — for a bound line the slice decides closedness.
+    if (!isBound) {
+      rows.push(boolRow('Closed loop', 'data-proplineflag', 'closed', line.closed === true))
+    }
+    rows.push(
       `<div style="color:#9bb;margin-top:5px">Jitter</div>`,
       numRow('Pos m', 'data-numedit', 'jitter.posM', line.jitter?.posM ?? 0, {
         min: 0,
@@ -802,16 +851,23 @@ export function createEditorPanel(opts: {
     }
     let count = 0
     try {
-      count = expandPropLine(line).length
+      count = expandPropLine(line, { mainSplinePoints: mainPts }).length
     } catch {
       count = 0
     }
-    rows.push(
-      `<button type="button" id="ed-propline-add-anchor" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;margin-top:6px">+ anchor</button>`,
-      note(
-        `${count} instance(s) along ${line.anchors.length} anchors. Drag the amber anchors to shape; Delete removes the line/anchor.`,
-      ),
-    )
+    if (!isBound) {
+      rows.push(
+        `<button type="button" id="ed-propline-add-anchor" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;margin-top:6px">+ anchor</button>`,
+      )
+    }
+    const along = isBound
+      ? `the racing line t=${(line.bind?.t0 ?? 0).toFixed(2)}–${(line.bind?.t1 ?? 1).toFixed(2)}`
+      : `${line.anchors.length} anchors`
+    const shapeHint = isBound
+      ? 'Drag the t0/t1 sliders to slide the stretch; Delete removes the line.'
+      : 'Drag the amber anchors to shape; Delete removes the line/anchor.'
+    const seatHint = isSeated ? ' Seated to terrain (Height m above ground).' : ''
+    rows.push(note(`${count} instance(s) along ${along}.${seatHint} ${shapeHint}`))
     return rows.join('')
   }
 
@@ -1018,6 +1074,22 @@ export function createEditorPanel(opts: {
     panel.querySelector('#ed-propline-add-anchor')?.addEventListener('click', () => {
       callbacks.onPropLineAddAnchor()
     })
+    // Spline-bound prop-line t0/t1 sliders (mirror the start-on-spline slider).
+    for (const which of ['t0', 't1'] as const) {
+      const slider = panel.querySelector<HTMLInputElement>(`#ed-propline-${which}`)
+      if (!slider) continue
+      const label = panel.querySelector<HTMLElement>(`#ed-propline-${which}-val`)
+      slider.addEventListener('input', () => {
+        const v = parseFloat(slider.value)
+        if (Number.isFinite(v)) {
+          if (label) label.textContent = v.toFixed(3)
+          callbacks.onPropLineBindTChange(which, v)
+        }
+      })
+      slider.addEventListener('change', () => {
+        callbacks.onPropLineBindTCommit()
+      })
+    }
   }
 
   return { render, renderLight, setStatus, dispose }

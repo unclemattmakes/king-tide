@@ -39,10 +39,13 @@ def main() -> int:
     failures = []
     total = 0
     for ci, case in enumerate(cases):
-        got = propline_expand.expand_prop_line(case)
+        # Each case is { line, mainSplinePoints? }. A spline-bound case carries the
+        # racing line so the slice is exercised; anchor cases omit it.
+        line = case["line"]
+        got = propline_expand.expand_prop_line(line, case.get("mainSplinePoints"))
         exp = expected[ci]
         if len(got) != len(exp):
-            failures.append(f"case {ci} ({case['id']}): count {len(got)} != golden {len(exp)}")
+            failures.append(f"case {ci} ({line['id']}): count {len(got)} != golden {len(exp)}")
             continue
         for i, (g, e) in enumerate(zip(got, exp)):
             total += 1

@@ -732,6 +732,7 @@ export async function bootRace(appEl: HTMLElement) {
       horizonRing,
       waterMesh,
       waveField,
+      terrainHeightmap,
       backend,
       backendEl,
     })

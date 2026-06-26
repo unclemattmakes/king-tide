@@ -28,6 +28,7 @@ import os
 import re
 
 import bpy
+import mathutils
 
 # The expansion math is the bpy-free port shared with the drift test + runtime.
 from . import propline_expand
@@ -45,6 +46,10 @@ P_SPACING_M = "hb_spacing_m"
 P_OFFSET_M = "hb_offset_m"
 P_NORMAL_OFFSET_M = "hb_normal_offset_m"
 P_ALIGN_TANGENT = "hb_align_tangent"
+P_SEAT_TERRAIN = "hb_seat_terrain"
+P_BIND = "hb_bind"
+P_BIND_T0 = "hb_bind_t0"
+P_BIND_T1 = "hb_bind_t1"
 P_YAW_DEG = "hb_yaw_deg"
 P_SCALE = "hb_scale"
 P_SURFACE = "hb_surface"
@@ -104,6 +109,53 @@ def _three_from_blender(v):
 
 def _r(x: float, ndigits: int) -> float:
     return round(x, ndigits) + 0.0
+
+
+# ── main-spline derivation (for spline-bound lines) ──────────────────────────
+def _main_spline_points(data: dict):
+    """Dense points of the track's main AI spline, in three space — the source a
+    spline-bound (`bind`) prop-line slices. Derived identically to the JSON
+    loader (sample the anchors via the shared Catmull-Rom port), so a bound
+    expansion stays cross-language deterministic. Returns None if absent."""
+    splines = data.get("aiSplines") or []
+    main = next((s for s in splines if s.get("id") == "main"), None)
+    if main is None:
+        return None
+    anchors = main.get("anchors")
+    if anchors and len(anchors) >= 2:
+        # json-loader: sampleCatmullRom(anchors, { divisionsPerSegment: 12, closed: true })
+        # (default tension 0.5) → mirror exactly.
+        return propline_expand.sample_catmull_rom(anchors, 12, True, 0.5)
+    pts = main.get("points")
+    if pts and len(pts) >= 2:
+        return pts
+    return None
+
+
+# ── terrain raycast (for seatToTerrain previews) ─────────────────────────────
+def _terrain_raycast_z(scene, depsgraph, bx: float, by: float):
+    """Cast straight down through the scene at Blender XY (bx, by) and return the
+    first terrain hit Z, skipping our own prop-line preview instances + prop
+    meshes. None when nothing is hit (no terrain imported / off the map) — the
+    caller then leaves the instance at its curve Y. The author must have the
+    track's environment GLB in the .blend for this to bite; it degrades to a
+    no-op otherwise."""
+    direction = mathutils.Vector((0.0, 0.0, -1.0))
+    z = 100000.0
+    for _ in range(8):
+        hit, loc, _normal, _idx, obj, _mat = scene.ray_cast(
+            depsgraph, mathutils.Vector((bx, by, z)), direction
+        )
+        if not hit:
+            return None
+        name = obj.name if obj else ""
+        mesh_name = getattr(getattr(obj, "data", None), "name", "") or ""
+        if name.startswith(CURVE_PREFIX) or mesh_name.startswith(MESH_PREFIX):
+            # Our own geometry — drop below this hit and keep looking for terrain.
+            z = loc.z - 0.01
+            continue
+        return loc.z
+    return None
 
 
 # ── propLines[] JSON splice (preserves the rest of the file verbatim) ─────────
@@ -242,6 +294,15 @@ def _stamp_params(obj, line: dict) -> None:
     obj[P_OFFSET_M] = float(line.get("offsetM", 0.0) or 0.0)
     obj[P_NORMAL_OFFSET_M] = float(line.get("normalOffsetM", 0.0) or 0.0)
     obj[P_ALIGN_TANGENT] = bool(line.get("alignToTangent", True))
+    obj[P_SEAT_TERRAIN] = bool(line.get("seatToTerrain", False))
+    # `is not None`, NOT truthiness — a full-loop bind is `{}` (falsy in Python).
+    bind = line.get("bind")
+    obj[P_BIND] = bind is not None
+    b = bind if bind is not None else {}
+    t0 = b.get("t0")
+    t1 = b.get("t1")
+    obj[P_BIND_T0] = float(t0 if t0 is not None else 0.0)
+    obj[P_BIND_T1] = float(t1 if t1 is not None else 1.0)
     obj[P_YAW_DEG] = float(line.get("yawDeg", 0.0) or 0.0)
     obj[P_SCALE] = float(line.get("scale", 1.0) or 1.0)
     obj[P_SURFACE] = line.get("surface", "")
@@ -260,8 +321,11 @@ def _stamp_params(obj, line: dict) -> None:
 def _line_from_curve(obj) -> dict:
     """Read a propLine_* curve object back into a PropLine dict (three space)."""
     line_id = obj.name[len(CURVE_PREFIX) :] if obj.name.startswith(CURVE_PREFIX) else obj.name
+    is_bind = bool(obj.get(P_BIND))
     anchors = []
-    if obj.type == "CURVE" and obj.data.splines:
+    # Bound lines take their source from the racing line (t0/t1), NOT the curve
+    # control points (which are just a derived visualization of the slice).
+    if not is_bind and obj.type == "CURVE" and obj.data.splines:
         spline = obj.data.splines[0]
         pts = spline.points if spline.type == "POLY" else spline.bezier_points
         for p in pts:
@@ -271,6 +335,10 @@ def _line_from_curve(obj) -> dict:
             tx, ty, tz = _three_from_blender(world)
             anchors.append({"x": _r(tx, 4), "y": _r(ty, 4), "z": _r(tz, 4)})
     line: dict = {"id": line_id, "assetId": obj.get(ASSET_ID_KEY, "prop"), "anchors": anchors}
+    if is_bind:
+        t0 = float(obj.get(P_BIND_T0, 0.0))
+        t1 = float(obj.get(P_BIND_T1, 1.0))
+        line["bind"] = {"t0": _r(t0, 4), "t1": _r(t1, 4)}
     mode = obj.get(P_SPACING_MODE, "arcLength")
     if mode == "count":
         line["spacingMode"] = "count"
@@ -286,6 +354,8 @@ def _line_from_curve(obj) -> dict:
         line["normalOffsetM"] = _r(float(obj[P_NORMAL_OFFSET_M]), 3)
     if obj.get(P_ALIGN_TANGENT, True) is False:
         line["alignToTangent"] = False
+    if obj.get(P_SEAT_TERRAIN):
+        line["seatToTerrain"] = True
     if float(obj.get(P_YAW_DEG, 0.0) or 0.0):
         line["yawDeg"] = _r(float(obj[P_YAW_DEG]), 3)
     if float(obj.get(P_SCALE, 1.0) or 1.0) != 1.0:
@@ -312,9 +382,11 @@ def _line_from_curve(obj) -> dict:
     return line
 
 
-def _build_curve(line: dict):
-    """Create/replace the ``propLine_<id>`` POLY curve from a PropLine's
-    anchors (three → Blender)."""
+def _build_curve(line: dict, main_points: list | None = None):
+    """Create/replace the ``propLine_<id>`` POLY curve (three → Blender). For an
+    anchor line the control points ARE the editable anchors; for a spline-bound
+    line they're the sliced racing-line polyline (a derived visualization — the
+    bind is edited via the t0/t1 custom props, not the curve points)."""
     name = f"{CURVE_PREFIX}{line['id']}"
     old = bpy.data.objects.get(name)
     if old is not None:
@@ -322,27 +394,48 @@ def _build_curve(line: dict):
     data = bpy.data.curves.new(name, type="CURVE")
     data.dimensions = "3D"
     spline = data.splines.new("POLY")
-    anchors = line.get("anchors") or []
-    spline.points.add(max(0, len(anchors) - 1))
-    for i, a in enumerate(anchors):
-        bx, by, bz = _blender_from_three(a["x"], a["y"], a["z"])
-        spline.points[i].co = (bx, by, bz, 1.0)
+    if line.get("bind") is not None:  # `{}` (full loop) is falsy in Python
+        src = propline_expand.resolve_prop_line_source(line, main_points)
+        pts = (src or {}).get("points", [])
+    else:
+        pts = line.get("anchors") or []
+    if pts:
+        spline.points.add(max(0, len(pts) - 1))
+        for i, a in enumerate(pts):
+            bx, by, bz = _blender_from_three(a["x"], a["y"], a["z"])
+            spline.points[i].co = (bx, by, bz, 1.0)
     obj = bpy.data.objects.new(name, data)
     _stamp_params(obj, line)
     bpy.context.scene.collection.objects.link(obj)
     return obj
 
 
-def _spawn_preview(repo_root: str, line: dict, coll: bpy.types.Collection) -> int:
-    """Drop shared-GLB instances at the deterministic expanded poses."""
+def _spawn_preview(
+    repo_root: str,
+    line: dict,
+    coll: bpy.types.Collection,
+    main_points: list | None = None,
+    scene=None,
+    depsgraph=None,
+) -> int:
+    """Drop shared-GLB instances at the deterministic expanded poses. Spline-bound
+    lines slice ``main_points``; ``seatToTerrain`` lines raycast the scene terrain
+    (excluding our own previews) so the Blender preview matches the runtime seat."""
     mesh = _import_glb_mesh(repo_root, line["assetId"])
     if mesh is None:
         return 0
+    seat = bool(line.get("seatToTerrain")) and scene is not None and depsgraph is not None
+    normal_offset = float(line.get("normalOffsetM", 0.0) or 0.0)
     n = 0
-    for inst in propline_expand.expand_prop_line(line):
+    for inst in propline_expand.expand_prop_line(line, main_points):
         ob = bpy.data.objects.new(f"{CURVE_PREFIX}{line['id']}_inst{n}", mesh)
         pos = inst["position"]
         bx, by, bz = _blender_from_three(pos["x"], pos["y"], pos["z"])
+        if seat:
+            tz = _terrain_raycast_z(scene, depsgraph, bx, by)
+            if tz is not None:
+                # Blender Z == three Y, so terrain-Z + offset == terrainY + offset.
+                bz = tz + normal_offset
         ob.location = (bx, by, bz)
         rot = inst["rotation"]
         # three quat (x,y,z,w) → Blender (w, x, -z, y).
@@ -379,7 +472,8 @@ class HOVERBIKE_OT_import_prop_lines(bpy.types.Operator):
             self.report({"ERROR"}, f"no track JSON: {json_path}")
             return {"CANCELLED"}
         with open(json_path, "r", encoding="utf-8") as f:
-            lines = json.load(f).get("propLines", []) or []
+            data = json.load(f)
+        lines = data.get("propLines", []) or []
         if not lines:
             self.report({"WARNING"}, "no propLines in track JSON")
             return {"CANCELLED"}
@@ -387,10 +481,16 @@ class HOVERBIKE_OT_import_prop_lines(bpy.types.Operator):
         _ensure_object_mode()
         coll = _ensure_preview_collection()
         _clear_preview(coll)
+        # Racing line for any spline-bound lines + a depsgraph snapshot for any
+        # terrain-seated lines (captured before we add curves/instances so the
+        # raycast sees the imported terrain, not our own previews).
+        main_points = _main_spline_points(data)
+        depsgraph = context.evaluated_depsgraph_get()
+        scene = context.scene
         instances = 0
         for line in lines:
-            _build_curve(line)
-            instances += _spawn_preview(repo_root, line, coll)
+            _build_curve(line, main_points)
+            instances += _spawn_preview(repo_root, line, coll, main_points, scene, depsgraph)
         self.report({"INFO"}, f"imported {len(lines)} prop-line(s), {instances} preview instance(s)")
         return {"FINISHED"}
 

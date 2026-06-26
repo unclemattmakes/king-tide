@@ -9,12 +9,23 @@
  * expansion is built only from operations that are reproducible in JS AND in
  * the Python port (`tools/blender/hoverbike_addon/propline_placements.py`):
  *
- *   1. Curve: `sampleCatmullRom` with the FROZEN constants below.
+ *   1. Source: either `sampleCatmullRom(anchors)` with the FROZEN constants
+ *      below, or — for a spline-bound line (`bind`) — an integer-index slice of
+ *      the main racing line's points (`sliceMainSplineForBind`). The main
+ *      points are themselves derived identically across tools (same
+ *      `sampleCatmullRom` over the AI-spline anchors), so a bound expansion
+ *      stays cross-language deterministic as long as every caller threads in
+ *      the SAME `mainSplinePoints`.
  *   2. Spacing: a shared arc-length walk (no Three, no Date/random).
  *   3. Jitter: a per-instance seed = `fnv1a32(id) XOR (i * KNUTH)` feeding
  *      `mulberry32` (our sim RNG), with a FIXED draw order. Integer-only seed
  *      math keeps the seed bit-identical across V8 and CPython; the only
  *      transcendentals (sin/cos/atan2) agree to far below 1 µm at metre scale.
+ *
+ * Terrain seating (`seatToTerrain`) is deliberately NOT part of this — it
+ * depends on the loaded terrain, which differs per tool, so it runs as a
+ * post-pass (`seatPropLineInstances`) over the expanded instances rather than
+ * inside the deterministic expansion.
  *
  * Three-free (runs inside the Three-free `buildTrackFromJson`).
  */
@@ -107,19 +118,92 @@ export function propLineCount(line: PropLine, totalArcLen: number): number {
   return Math.max(1, Math.round(totalArcLen / Math.max(1e-3, line.spacingM ?? 1)))
 }
 
+/** Resolved dense source polyline a line expands along, plus whether it loops.
+ *  Either the Catmull-Rom sampling of the line's `anchors`, or a slice of the
+ *  bound main-spline points. */
+export type PropLineSource = { points: Vec3[]; closed: boolean }
+
+function clamp01(t: number): number {
+  if (!(t > 0)) return 0
+  if (t > 1) return 1
+  return t
+}
+
 /**
- * Expand one PropLine into its deterministic list of asset {@link Prop}s
- * (tagged `fromPropLine`). Returns [] for a degenerate curve (&lt;2 anchors or
- * zero length).
+ * Slice the bound main-spline points to the `bind` parameter range into a
+ * dense source polyline. Integer-only index math (`Math.floor`) so the Python
+ * port matches exactly. Returns null when the spline is unusable.
+ *
+ *   - full loop (t0=0, t1=1, or both absent) → the whole closed main spline
+ *   - partial range → an open arc, indices `[floor(t0·M) .. floor(t1·M)]`
+ *     inclusive, walked forward with wrap (so `t0 > t1` crosses the seam)
  */
-export function expandPropLine(line: PropLine): Prop[] {
-  if (!Array.isArray(line.anchors) || line.anchors.length < 2) return []
+export function sliceMainSplineForBind(
+  bind: NonNullable<PropLine['bind']>,
+  mainPoints: readonly Vec3[] | undefined,
+): PropLineSource | null {
+  if (!mainPoints || mainPoints.length < 2) return null
+  const M = mainPoints.length
+  const t0 = clamp01(bind.t0 ?? 0)
+  const t1 = clamp01(bind.t1 ?? 1)
+  if (t0 === 0 && t1 === 1) {
+    // Whole closed loop — even placement around it, no seam duplicate.
+    return { points: mainPoints.map((p) => ({ x: p.x, y: p.y, z: p.z })), closed: true }
+  }
+  const i0 = Math.min(Math.floor(t0 * M), M - 1)
+  const i1 = Math.min(Math.floor(t1 * M), M - 1)
+  const points: Vec3[] = []
+  let i = i0
+  // Walk forward (wrapping) i0 → i1 inclusive. A single-point slice (t0≈t1)
+  // yields [] downstream (P.length < 2).
+  for (;;) {
+    const p = mainPoints[i] as Vec3
+    points.push({ x: p.x, y: p.y, z: p.z })
+    if (i === i1) break
+    i = (i + 1) % M
+  }
+  return { points, closed: false }
+}
+
+/**
+ * Resolve the dense source polyline a line expands along: a slice of the bound
+ * main spline when `line.bind` is set, otherwise the Catmull-Rom sampling of
+ * `line.anchors`. Returns null for a degenerate source (&lt;2 anchors, or a
+ * bind with no/short main spline).
+ */
+export function resolvePropLineSource(
+  line: PropLine,
+  mainSplinePoints?: readonly Vec3[],
+): PropLineSource | null {
+  if (line.bind) return sliceMainSplineForBind(line.bind, mainSplinePoints)
+  if (!Array.isArray(line.anchors) || line.anchors.length < 2) return null
   const closed = line.closed ?? false
-  const P = sampleCatmullRom(line.anchors, {
+  const points = sampleCatmullRom(line.anchors, {
     divisionsPerSegment: PROPLINE_DIVISIONS_PER_SEGMENT,
     closed,
     tension: PROPLINE_TENSION,
   })
+  return { points, closed }
+}
+
+/**
+ * Expand one PropLine into its deterministic list of asset {@link Prop}s
+ * (tagged `fromPropLine`). Returns [] for a degenerate source (&lt;2 anchors,
+ * zero length, or an unresolvable bind).
+ *
+ * `opts.mainSplinePoints` supplies the racing line for a spline-bound line
+ * (`line.bind`); the SAME points must be threaded in by every caller (runtime,
+ * editor, Blender) for the bound expansion to stay cross-language identical.
+ * Ignored for anchor-authored lines.
+ */
+export function expandPropLine(
+  line: PropLine,
+  opts?: { mainSplinePoints?: readonly Vec3[] | undefined },
+): Prop[] {
+  const src = resolvePropLineSource(line, opts?.mainSplinePoints)
+  if (!src) return []
+  const closed = src.closed
+  const P = src.points
   if (P.length < 2) return []
   const { cum, segCount } = arcLengths(P, closed)
   const total = cum[segCount] as number
@@ -180,11 +264,39 @@ export function expandPropLine(line: PropLine): Prop[] {
   return props
 }
 
-/** Expand every line in order into a flat list of tagged props. */
-export function expandPropLines(lines: readonly PropLine[]): Prop[] {
+/** Expand every line in order into a flat list of tagged props. `mainSplinePoints`
+ *  is forwarded to each line so spline-bound lines (`bind`) resolve. */
+export function expandPropLines(
+  lines: readonly PropLine[],
+  mainSplinePoints?: readonly Vec3[],
+): Prop[] {
   const out: Prop[] = []
   for (const line of lines) {
-    for (const p of expandPropLine(line)) out.push(p)
+    for (const p of expandPropLine(line, { mainSplinePoints })) out.push(p)
   }
   return out
+}
+
+/**
+ * Seat already-expanded prop-line instances onto terrain. Mutates the Y of
+ * every prop carrying a `seatToTerrainOffsetM` marker (set when its source line
+ * has `seatToTerrain`) to `sample(x, z) + offset`; instances whose XZ has no
+ * terrain (`sample` returns null — open water / outside the heightmap) keep
+ * their curve Y.
+ *
+ * Pure + Three-free: the caller supplies the height sampler so all three tools
+ * seat the same instances against their own terrain representation (runtime:
+ * the baked heightmap; editor/Blender: a terrain raycast) — WYSIWYG without
+ * baking a per-instance Y array into the compact, parametric JSON. Deterministic
+ * given a deterministic sampler.
+ */
+export function seatPropLineInstances(
+  props: readonly Prop[],
+  sample: (x: number, z: number) => number | null,
+): void {
+  for (const p of props) {
+    if (p.seatToTerrainOffsetM === undefined) continue
+    const h = sample(p.position.x, p.position.z)
+    if (h !== null && Number.isFinite(h)) p.position.y = h + p.seatToTerrainOffsetM
+  }
 }
