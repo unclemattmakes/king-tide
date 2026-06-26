@@ -627,6 +627,13 @@ export type WaterConfig = {
    *  button, applied at boot on top of the defaults + the machine-local
    *  per-slug working store. Unknown / legacy keys are ignored by the loader. */
   look?: import('@/engine/water-debug-storage').WaterLookOverrides
+  /** King-tide: a slow vertical swing of the mean water height across a race,
+   *  exposing low-water routes and drowning them (and floating beached props)
+   *  at high water. Absent (or amplitude 0) = a still sea, byte-identical to
+   *  pre-tide behaviour. Type + controller live in
+   *  `engine/sim/water/tide.ts`; the runtime drives `waveField.baseY` +
+   *  `waterMesh.mesh.position.y` from it each frame. */
+  tide?: import('@/engine/sim/water/tide').TideConfig
 }
 
 /**

@@ -958,6 +958,18 @@ function readOptionalWater(raw: unknown): WaterConfig | null {
     }
     out.spectrum = spectrum
   }
+  // King-tide (P-tide). Strict like swellSets: required amplitudeM + periodS,
+  // optional phase; a malformed block is an authoring error and throws. Absent
+  // = a still sea (every existing track). Controller: engine/sim/water/tide.ts.
+  const tideRaw = (raw as { tide?: unknown }).tide
+  if (tideRaw !== undefined && tideRaw !== null) {
+    if (!isObject(tideRaw)) throw new Error('track-json: water.tide must be an object')
+    out.tide = {
+      amplitudeM: requireNumber(tideRaw, 'amplitudeM'),
+      periodS: requireNumber(tideRaw, 'periodS'),
+    }
+    if ('phase' in tideRaw) out.tide.phase = requireNumber(tideRaw, 'phase')
+  }
   // Per-track painterly-look overrides (water-defaults pass). SPARSE +
   // TOLERANT: an object of look-knob → number; only recognised keys with
   // finite numbers are kept, anything else (unknown/legacy key, non-number)

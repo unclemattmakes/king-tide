@@ -834,7 +834,19 @@ export async function bootRace(appEl: HTMLElement) {
     // Rigged props with `animated:true` (e.g. the swimming great white) are
     // hosted here, skeleton-cloned + mixer-driven, ticked from the game loop.
     animatedProps = createAnimatedPropsSystem(scene, track.props, propAssets, { camera })
-    waveRiderSys = createWaveRiderSystem(sim, phys, waveField)
+    // King-tide beaching: only wired when the track authors a tide, so the
+    // receding sea grounds floats on exposed terrain. Omitted for still-water
+    // tracks → wave-riders always float, byte-identical to before.
+    const beachProbe =
+      track.water?.tide && terrainHeightmap
+        ? (x: number, z: number): number | null => sampleTerrainHeightAtXZ(terrainHeightmap, x, z)
+        : undefined
+    waveRiderSys = createWaveRiderSystem(
+      sim,
+      phys,
+      waveField,
+      beachProbe ? { sampleTerrainY: beachProbe } : {},
+    )
     const waveRiderAssetBindings = createPropColliders(phys, track.props, propAssets, sim, {
       baseY: waveField.baseY,
     })

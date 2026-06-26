@@ -66,6 +66,7 @@ import { MeshStandardNodeMaterial } from 'three/webgpu'
 import type { TerrainShaderConfig } from '@/game/tracks/types'
 import { BRUSH_TEX_TILE, brushHeightTriplanar, brushScaleWeights } from './brush-strokes'
 import { registerTerrainBrush, type TerrainBrushHandle } from './brush-tuning-service'
+import { registerTerrainWaterLevel } from './terrain-water-level-service'
 
 type ColorStop = { pos: number; color: [number, number, number] }
 
@@ -184,6 +185,11 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   const variation = config.variation ?? 0.3
   const wetBand = config.wetBand ?? 2.0
   const waterLevel = config.waterLevel ?? 0
+  // The waterline anchor lives in a UNIFORM so a moving King-tide carries the
+  // wet band + waterline trio + underwater tint with it (set live via
+  // terrain-water-level-service). Defaults to the track's `water.height`, so a
+  // still-water track is identical to the old baked `float(waterLevel)`.
+  const waterLevelUniform = uniform(waterLevel)
   const pathTint = config.pathTint ?? [0.3, 0.24, 0.18]
   // SOTA-pass extras (M-coloration). Each is a no-op at its default so
   // existing tracks keep their stock look without re-export.
@@ -311,7 +317,7 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
   // water surface (`waterLevel`) rather than y=0, so raised/sunken-water
   // tracks darken at their actual shoreline. Full at the waterline, zero
   // beyond `wetBand` m above/below it.
-  const yRelWater = positionWorld.y.sub(float(waterLevel))
+  const yRelWater = positionWorld.y.sub(waterLevelUniform)
   const wet = smoothstep(float(wetBand), float(0.0), abs(yRelWater))
   const withWet = mix(saturated, saturated.mul(vec3(0.72, 0.76, 0.86)), wet)
 
@@ -418,6 +424,9 @@ export function buildTerrainMaterial(config: TerrainShaderConfig = {}): MeshStan
     },
   }
   mat.userData.terrainBrushHandle = brushHandle
+  // King-tide handle: the runtime pushes the live sea level to this uniform via
+  // terrain-water-level-service so the painted shoreline tracks the tide.
+  mat.userData.terrainWaterLevelUniform = waterLevelUniform
 
   // Clamp final colour so any combined gain (saturation lift × macro
   // bias × brightness pulse × brush) never blows past linear-1 and wrecks
@@ -500,6 +509,9 @@ export function applyTerrainShaderToScene(
     // Register the brush-uniform handle so the dev Brush tuner can re-dial it live.
     const handle = (next.userData as { terrainBrushHandle?: TerrainBrushHandle }).terrainBrushHandle
     if (handle) registerTerrainBrush(handle)
+    const wlUniform = (next.userData as { terrainWaterLevelUniform?: { value: number } })
+      .terrainWaterLevelUniform
+    if (wlUniform) registerTerrainWaterLevel(wlUniform)
     // Dispose the original glTF material to free its baseColor texture etc.
     const dispose = (m: THREE.Material) => {
       try {

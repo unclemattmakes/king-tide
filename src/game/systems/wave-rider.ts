@@ -43,11 +43,22 @@ export type WaveRiderSystem = {
  *  still allowing dramatic knocks. */
 const MAX_TILT = (75 * Math.PI) / 180
 
+export type WaveRiderSystemOpts = {
+  /** King-tide beaching probe: max terrain Y at an XZ, or null where there's
+   *  no terrain (open water). When the receding tide drops the water below the
+   *  terrain at a float's anchor, it rests on the exposed ground (a beached
+   *  buoy → static obstacle/ramp) instead of floating. Pure closure (the sim
+   *  layer stays Three-free); omit it to disable beaching (still water). */
+  sampleTerrainY?: (x: number, z: number) => number | null
+}
+
 export function createWaveRiderSystem(
   sim: SimWorld,
   phys: PhysicsWorld,
   waveField: WaveFieldState,
+  opts: WaveRiderSystemOpts = {},
 ): WaveRiderSystem {
+  const sampleTerrainY = opts.sampleTerrainY
   function step(dt: number): void {
     const entities = query(sim, [WaveRiderTag])
     for (const eid of entities) {
@@ -58,11 +69,25 @@ export function createWaveRiderSystem(
       if (!rb) continue
 
       const surface = sampleSurface(waveField, wr.anchorX, wr.anchorZ)
+      // King-tide beaching: if the (receding) water sits below the terrain at
+      // this anchor, the float rests on the exposed ground and sits flat — no
+      // wave lean and no vertical bob; hit-driven tilt (the spring below) still
+      // applies so a beached buoy can still be knocked.
+      let restY = surface.y
+      let grounded = false
+      if (sampleTerrainY) {
+        const terrainY = sampleTerrainY(wr.anchorX, wr.anchorZ)
+        if (terrainY !== null && terrainY > surface.y) {
+          restY = terrainY
+          grounded = true
+        }
+      }
       // Wave-normal tilt → horizontal lean vector. Normal is unit;
       // (nx, nz) is the horizontal projection of "where the surface
-      // top is pointing", small-angle equal to the lean direction.
-      const waveLeanX = surface.nx * wr.tuning.normalFollow
-      const waveLeanZ = surface.nz * wr.tuning.normalFollow
+      // top is pointing", small-angle equal to the lean direction. Zeroed
+      // while beached — a grounded buoy doesn't follow the swell.
+      const waveLeanX = grounded ? 0 : surface.nx * wr.tuning.normalFollow
+      const waveLeanZ = grounded ? 0 : surface.nz * wr.tuning.normalFollow
 
       // ---- Spring step (vertical) -----------------------------------
       const t = wr.tuning
@@ -115,7 +140,7 @@ export function createWaveRiderSystem(
       const qz = fw * yz + fx * yy - fy * yx + fz * yw
       const qw = fw * yw - fx * yx - fy * yy - fz * yz
 
-      const finalY = surface.y + t.floatOffsetY + wr.perturbY
+      const finalY = restY + t.floatOffsetY + (grounded ? 0 : wr.perturbY)
       rb.setNextKinematicTranslation({ x: wr.anchorX, y: finalY, z: wr.anchorZ })
       rb.setNextKinematicRotation({ x: qx, y: qy, z: qz, w: qw })
 

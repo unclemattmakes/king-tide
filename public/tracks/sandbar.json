@@ -3,8 +3,14 @@
   "name": "sandbar",
   "lapsToFinish": 3,
   "environmentGlb": "/assets/tracks/sandbar.glb",
+  "floatGates": true,
   "water": {
     "height": -1.5,
+    "tide": {
+      "amplitudeM": 3.0,
+      "periodS": 120.0,
+      "phase": 0.0
+    },
     "look": {
       "contourStrength": 0
     }
@@ -1630,6 +1636,26 @@
         "z": 0.0,
         "w": 0.45145178736701885
       }
+    },
+    {
+      "position": { "x": 84.0, "y": -1.5, "z": 104.0 },
+      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 }
+    },
+    {
+      "position": { "x": 89.0, "y": -1.5, "z": 107.0 },
+      "rotation": { "x": 0.0, "y": 0.34202, "z": 0.0, "w": 0.93969 }
+    },
+    {
+      "position": { "x": 82.0, "y": -1.5, "z": 110.0 },
+      "rotation": { "x": 0.0, "y": -0.25882, "z": 0.0, "w": 0.96593 }
+    },
+    {
+      "position": { "x": 78.0, "y": -1.5, "z": 106.0 },
+      "rotation": { "x": 0.0, "y": 0.57358, "z": 0.0, "w": 0.81915 }
+    },
+    {
+      "position": { "x": 87.0, "y": -1.5, "z": 113.0 },
+      "rotation": { "x": 0.0, "y": 0.81915, "z": 0.0, "w": 0.57358 }
     }
   ],
   "props": [
