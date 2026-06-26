@@ -10,6 +10,7 @@
 
 import { SurfaceType } from '@/engine/sim/surface-types'
 import type { PropManifestEntry } from '@/game/assets/manifest'
+import { expandPropLine } from '@/game/tracks/prop-lines'
 import { SKY_COLOR_GRADES, SKY_TONE_MAPPINGS, type Track } from '@/game/tracks/types'
 import { propSizeHint } from './editor-helpers'
 
@@ -33,6 +34,7 @@ export type PlaceTool =
   | 'antiGrav'
   | 'waveZone'
   | 'spline'
+  | 'propLine'
   | 'box'
   | 'sphere'
   | 'cylinder'
@@ -48,6 +50,8 @@ export type EntitySel =
   | { kind: 'waveZone'; index: number }
   | { kind: 'spline'; splineIndex: number; pointIndex: number }
   | { kind: 'prop'; index: number }
+  | { kind: 'propLine'; index: number }
+  | { kind: 'propLineAnchor'; lineIndex: number; anchorIndex: number }
   | { kind: 'start' }
   | null
 
@@ -71,6 +75,8 @@ export function entityKey(s: NonNullable<EntitySel>): string {
   if (s.kind === 'start') return 'start'
   if (s.kind === 'antiGrav') return `antigrav:${s.index}`
   if (s.kind === 'waveZone') return `wavezone:${s.index}`
+  if (s.kind === 'propLine') return `propline:${s.index}`
+  if (s.kind === 'propLineAnchor') return `proplineanchor:${s.lineIndex}:${s.anchorIndex}`
   return `${s.kind}:${s.index}`
 }
 
@@ -83,6 +89,11 @@ export function parseEntityKey(k: string): EntitySel {
   if (k.startsWith('pad:')) return { kind: 'pad', index: Number(k.slice(4)) }
   if (k.startsWith('antigrav:')) return { kind: 'antiGrav', index: Number(k.slice(9)) }
   if (k.startsWith('wavezone:')) return { kind: 'waveZone', index: Number(k.slice(9)) }
+  if (k.startsWith('proplineanchor:')) {
+    const [, li, ai] = k.split(':')
+    return { kind: 'propLineAnchor', lineIndex: Number(li), anchorIndex: Number(ai) }
+  }
+  if (k.startsWith('propline:')) return { kind: 'propLine', index: Number(k.slice(9)) }
   if (k.startsWith('prop:')) return { kind: 'prop', index: Number(k.slice(5)) }
   if (k.startsWith('spline:')) {
     const [, si, pi] = k.split(':')
@@ -156,6 +167,12 @@ export type EditorPanelCallbacks = {
   /** Unbind the selected gate from the AI spline (delete its `splineT`),
    *  mirroring the player-start unbind. */
   onGateUnbindFromSpline(): void
+  /** Non-numeric edit on the selected prop-line (or its anchor's line):
+   *  `assetId`/`spacingMode`/`surface`/`waveRiderDof` (string), `closed`/
+   *  `alignToTangent`/`waterline`/`waveRider` (bool). */
+  onPropLineFlag(field: string, value: string | boolean | null): void
+  /** Append a new anchor to the selected prop-line's curve. */
+  onPropLineAddAnchor(): void
   /** Whether the currently-selected entity supports a given gizmo mode.
    *  Used to disable / grey out mode buttons that wouldn't apply. */
   selSupportsMode(m: GizmoMode): boolean
@@ -368,6 +385,7 @@ export function createEditorPanel(opts: {
        <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
          <select id="ed-asset-pick" style="background:#234;color:#dde;border:1px solid #456;padding:3px 4px;border-radius:3px;font:inherit;flex:1;min-width:0">${opts}</select>
          ${placeBtn('asset', '+ Place')}
+         ${placeBtn('propLine', '+ Prop Line')}
        </div>`
   }
 
@@ -396,6 +414,16 @@ export function createEditorPanel(opts: {
           k: `prop:${i}`,
           label: `${PROP_LABELS[p.type]}_${i}  (${p.position.x.toFixed(0)}, ${p.position.z.toFixed(0)})`,
           sel: { kind: 'prop', index: i } as EntitySel,
+        })),
+      ),
+    )
+    sections.push(
+      outlinerSection(
+        'Prop Lines',
+        (draft.propLines ?? []).map((l, i) => ({
+          k: `propline:${i}`,
+          label: `${escapeHtml(l.id)}  ${escapeHtml(l.assetId)} ×${l.anchors.length}a`,
+          sel: { kind: 'propLine', index: i } as EntitySel,
         })),
       ),
     )
@@ -502,6 +530,12 @@ export function createEditorPanel(opts: {
     if (sel.kind === 'pad') return padPropsHtml(sel.index)
     if (sel.kind === 'antiGrav') return antiGravPropsHtml(sel.index)
     if (sel.kind === 'waveZone') return waveZonePropsHtml(sel.index)
+    if (sel.kind === 'propLine') return propLinePropsHtml(sel.index)
+    if (sel.kind === 'propLineAnchor') {
+      const a = draft.propLines?.[sel.lineIndex]?.anchors[sel.anchorIndex]
+      if (!a) return '(missing)'
+      return `<div><b>${escapeHtml(draft.propLines?.[sel.lineIndex]?.id ?? '')} · anchor ${sel.anchorIndex}</b></div>${vec3Row('pos', 'data-numedit', 'pos', a)}${note('drag to reshape the curve; the instances re-flow live.')}`
+    }
     const sp = draft.aiSplines[sel.splineIndex]
     if (!sp) return '(missing)'
     const arr = sp.anchors ?? sp.points
@@ -688,6 +722,94 @@ export function createEditorPanel(opts: {
     rows.push(
       note(
         'Scales global wave amplitude/frequency inside the box (live: buoyancy + water shader + AI). Max 8 zones/track.',
+      ),
+    )
+    return rows.join('')
+  }
+
+  function propLinePropsHtml(index: number): string {
+    const line = draft.propLines?.[index]
+    if (!line) return '(missing)'
+    const isCount = (line.spacingMode ?? 'arcLength') === 'count'
+    const assetIds = propAssets.map((a) => a.id)
+    const rows: string[] = [`<div><b>${escapeHtml(line.id)}</b></div>`]
+    rows.push(
+      assetIds.length > 0
+        ? selectRow('Asset', 'data-proplineflag', 'assetId', assetIds, line.assetId)
+        : `<div>asset: <b>${escapeHtml(line.assetId)}</b></div>`,
+      selectRow(
+        'Spacing',
+        'data-proplineflag',
+        'spacingMode',
+        ['arcLength', 'count'],
+        line.spacingMode ?? 'arcLength',
+      ),
+      isCount
+        ? numRow('Count', 'data-numedit', 'count', line.count ?? 1, { min: 1, max: 1000, step: 1 })
+        : numRow('Spacing m', 'data-numedit', 'spacingM', line.spacingM ?? 6, {
+            min: 0.25,
+            step: 0.5,
+          }),
+      numRow('Offset m', 'data-numedit', 'offsetM', line.offsetM ?? 0, { step: 0.5 }),
+      numRow('Normal m', 'data-numedit', 'normalOffsetM', line.normalOffsetM ?? 0, { step: 0.25 }),
+      numRow('Scale', 'data-numedit', 'scale', line.scale ?? 1, { min: 0.05, step: 0.1 }),
+      boolRow(
+        'Align to tangent',
+        'data-proplineflag',
+        'alignToTangent',
+        line.alignToTangent !== false,
+      ),
+      numRow('Yaw°', 'data-numedit', 'yawDeg', line.yawDeg ?? 0, { step: 5 }),
+      boolRow('Closed loop', 'data-proplineflag', 'closed', line.closed === true),
+      `<div style="color:#9bb;margin-top:5px">Jitter</div>`,
+      numRow('Pos m', 'data-numedit', 'jitter.posM', line.jitter?.posM ?? 0, {
+        min: 0,
+        step: 0.25,
+      }),
+      numRow('Yaw°', 'data-numedit', 'jitter.yawDeg', line.jitter?.yawDeg ?? 0, {
+        min: 0,
+        step: 5,
+      }),
+      numRow('Scale min', 'data-numedit', 'jitter.scaleMin', line.jitter?.scaleMin ?? 1, {
+        min: 0.05,
+        step: 0.05,
+      }),
+      numRow('Scale max', 'data-numedit', 'jitter.scaleMax', line.jitter?.scaleMax ?? 1, {
+        min: 0.05,
+        step: 0.05,
+      }),
+      `<div style="color:#9bb;margin-top:5px">Flags</div>`,
+      selectRow(
+        'Surface',
+        'data-proplineflag',
+        'surface',
+        SURFACE_VALUES,
+        line.surface ?? 'default',
+      ),
+      boolRow('Waterline bands', 'data-proplineflag', 'waterline', line.waterline !== false),
+      boolRow('Float on waves', 'data-proplineflag', 'waveRider', line.waveRider != null),
+    )
+    if (line.waveRider != null) {
+      rows.push(
+        selectRow(
+          '  ↳ DOF',
+          'data-proplineflag',
+          'waveRiderDof',
+          WAVE_RIDER_DOFS,
+          line.waveRider.dof ?? 'locked',
+        ),
+      )
+    }
+    let count = 0
+    try {
+      count = expandPropLine(line).length
+    } catch {
+      count = 0
+    }
+    rows.push(
+      `<button type="button" id="ed-propline-add-anchor" style="background:#234;color:#dde;border:1px solid #456;padding:4px 6px;border-radius:3px;cursor:pointer;font:inherit;margin-top:6px">+ anchor</button>`,
+      note(
+        `${count} instance(s) along ${line.anchors.length} anchors. Drag the amber anchors to shape; Delete removes the line/anchor.`,
       ),
     )
     return rows.join('')
@@ -880,6 +1002,21 @@ export function createEditorPanel(opts: {
       el.addEventListener('click', () =>
         callbacks.onPropFlagEdit(el.dataset.propflagClear as string, null),
       )
+    })
+    // Prop-line flags (asset / spacing mode / surface / dof selects + closed /
+    // align / waterline / waveRider checkboxes).
+    panel.querySelectorAll<HTMLElement>('[data-proplineflag]').forEach((el) => {
+      const field = el.dataset.proplineflag as string
+      el.addEventListener('change', () => {
+        if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+          callbacks.onPropLineFlag(field, el.checked)
+        } else if (el instanceof HTMLSelectElement) {
+          callbacks.onPropLineFlag(field, el.value)
+        }
+      })
+    })
+    panel.querySelector('#ed-propline-add-anchor')?.addEventListener('click', () => {
+      callbacks.onPropLineAddAnchor()
     })
   }
 

@@ -221,6 +221,29 @@ Per-prop **flags** live in a selected prop's properties: `color`
 waves** (`waveRider` + DOF), and — for asset props — `animated` /
 `clip` / `loop`.
 
+### Prop lines (instance an asset along a curve)
+
+A **prop line** is a non-destructive "row of an asset along a Catmull-Rom
+curve" — palm rows, dock pilings, buoy chains, lamp posts. Pick an asset and
+click **+ Prop Line**; the next ground click drops a 2-anchor line. Drag the
+**amber anchors** to shape the curve (the teal instance preview re-flows live),
+and tune the params in the properties panel:
+
+- **Spacing** — `arcLength` (even metres) or `count` (exact N).
+- **Offset / Normal** — lateral + vertical offset from the curve.
+- **Scale**, **Align to tangent** + **Yaw°**, **Closed loop**.
+- **Jitter** — seeded per-instance position / yaw / scale randomness (the
+  line's id is the seed; the scatter is deterministic).
+- **Flags** — surface, waterline opt-out, float-on-waves (DOF).
+- **+ anchor** appends a control point; Delete removes the selected anchor (or
+  the whole line).
+
+Prop lines are **editor-canonical** (round-trip like `props[]`) and expand to
+ordinary asset props at load. The expansion is deterministic and **identical in
+the editor, the runtime, and Blender** (`propline_placements.py` → *Import /
+Write PropLines*), locked by a cross-language drift test — so you can author a
+line in either tool and the other sees the same instances.
+
 **Floating props bob live in the editor.** Any prop with **Float on waves**
 (or a wave-rider asset like the buoy) bobs and tilts on the real water
 surface so you can see its resting height and motion while placing it —

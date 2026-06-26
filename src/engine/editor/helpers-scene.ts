@@ -24,6 +24,9 @@ import {
   makePadHelper,
   makePickupHelper,
   makePropHelper,
+  makePropLineAnchorHelper,
+  makePropLineCurve,
+  makePropLinePreview,
   makeSplineCurve,
   makeStartHelper,
   makeWaveZoneHelper,
@@ -49,6 +52,10 @@ export type HelpersScene = {
    *  it's curve-bound) to the draft's current values. Used after the
    *  curve resamples during anchor drag. */
   refreshBoundGateHelpers(): void
+  /** Rebuild a single prop-line's curve + instance preview in place. Used
+   *  during a prop-line-anchor drag (cheap; the anchors themselves move via
+   *  the gizmo). */
+  refreshPropLine(lineIndex: number): void
   /** Returns true when the given target matches the current selection
    *  passed to the most recent `rebuild()`. Used by the helper factories'
    *  initial-tint flag. */
@@ -69,6 +76,10 @@ export function createHelpersScene(opts: {
   scene.add(helpersGroup)
   const helpers = new Map<string, THREE.Group>()
   let splinePolyline: THREE.Line | null = null
+  // Per-prop-line non-selectable visuals (curve + instance preview), indexed
+  // by line. The draggable anchors live in `helpers` keyed `proplineanchor:…`.
+  const propLineCurves: (THREE.Line | null)[] = []
+  const propLinePreviews: (THREE.Group | null)[] = []
 
   function isSel(sel: EntitySel, target: NonNullable<EntitySel>): boolean {
     if (!sel) return false
@@ -76,8 +87,28 @@ export function createHelpersScene(opts: {
     if (sel.kind === 'spline' && target.kind === 'spline') {
       return sel.pointIndex === target.pointIndex && sel.splineIndex === target.splineIndex
     }
+    if (sel.kind === 'propLineAnchor' && target.kind === 'propLineAnchor') {
+      return sel.lineIndex === target.lineIndex && sel.anchorIndex === target.anchorIndex
+    }
     if (sel.kind === 'start' && target.kind === 'start') return true
     return (sel as { index: number }).index === (target as { index: number }).index
+  }
+
+  function clearPropLines(): void {
+    for (const c of propLineCurves) {
+      if (c) {
+        helpersGroup.remove(c)
+        disposeObj(c)
+      }
+    }
+    for (const p of propLinePreviews) {
+      if (p) {
+        helpersGroup.remove(p)
+        disposeObj(p)
+      }
+    }
+    propLineCurves.length = 0
+    propLinePreviews.length = 0
   }
 
   function rebuild(): void {
@@ -93,6 +124,7 @@ export function createHelpersScene(opts: {
       disposeObj(splinePolyline)
       splinePolyline = null
     }
+    clearPropLines()
 
     {
       const k = 'start'
@@ -159,6 +191,46 @@ export function createHelpersScene(opts: {
       splinePolyline = makeSplineCurve(main.points)
       helpersGroup.add(splinePolyline)
     }
+
+    // ── Prop lines: instance preview + curve + draggable anchors ──────────
+    const propLines = draft.propLines ?? []
+    for (const [li, line] of propLines.entries()) {
+      const preview = makePropLinePreview(line)
+      helpersGroup.add(preview)
+      propLinePreviews[li] = preview
+      const curve = makePropLineCurve(line)
+      helpersGroup.add(curve)
+      propLineCurves[li] = curve
+      for (const [ai, anchor] of line.anchors.entries()) {
+        const k = `proplineanchor:${li}:${ai}`
+        const selected = isSel(sel, { kind: 'propLineAnchor', lineIndex: li, anchorIndex: ai })
+        const h = makePropLineAnchorHelper(anchor, selected)
+        h.userData.entityKey = k
+        helpers.set(k, h)
+        helpersGroup.add(h)
+      }
+    }
+  }
+
+  function refreshPropLine(lineIndex: number): void {
+    const line = (draft.propLines ?? [])[lineIndex]
+    if (!line) return
+    const oldCurve = propLineCurves[lineIndex]
+    if (oldCurve) {
+      helpersGroup.remove(oldCurve)
+      disposeObj(oldCurve)
+    }
+    const oldPreview = propLinePreviews[lineIndex]
+    if (oldPreview) {
+      helpersGroup.remove(oldPreview)
+      disposeObj(oldPreview)
+    }
+    const preview = makePropLinePreview(line)
+    helpersGroup.add(preview)
+    propLinePreviews[lineIndex] = preview
+    const curve = makePropLineCurve(line)
+    helpersGroup.add(curve)
+    propLineCurves[lineIndex] = curve
   }
 
   function refreshTints(sel: EntitySel): void {
@@ -230,6 +302,7 @@ export function createHelpersScene(opts: {
       disposeObj(splinePolyline)
       splinePolyline = null
     }
+    clearPropLines()
     scene.remove(helpersGroup)
   }
 
@@ -240,6 +313,7 @@ export function createHelpersScene(opts: {
     refreshTints,
     refreshSplineCurveMesh,
     refreshBoundGateHelpers,
+    refreshPropLine,
     isSel,
     dispose,
   }

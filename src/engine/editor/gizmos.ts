@@ -33,6 +33,7 @@ export type EntityKind =
   | 'waveZone'
   | 'pickup'
   | 'prop'
+  | 'propLineAnchor'
   | 'start'
   | 'spline'
 
@@ -41,6 +42,8 @@ export function entityKindFromKey(k: string): EntityKind {
   if (k.startsWith('pad')) return 'pad'
   if (k.startsWith('antigrav')) return 'antiGrav'
   if (k.startsWith('wavezone')) return 'waveZone'
+  // Must precede the 'prop' check — `proplineanchor:…` also starts with "prop".
+  if (k.startsWith('proplineanchor')) return 'propLineAnchor'
   if (k.startsWith('pickup')) return 'pickup'
   if (k.startsWith('prop')) return 'prop'
   if (k === 'start') return 'start'
@@ -57,7 +60,7 @@ export function entityKindFromKey(k: string): EntityKind {
  *   + Z (halfDepth); props scale on all three axes.
  */
 export function configureGizmoAxes(tc: TransformControls, kind: EntityKind, mode: GizmoMode): void {
-  if (kind === 'pickup' || kind === 'spline') {
+  if (kind === 'pickup' || kind === 'spline' || kind === 'propLineAnchor') {
     // Translate-only entities. Show all three axes for translation.
     tc.showX = true
     tc.showY = true
@@ -105,7 +108,11 @@ export function configureGizmoAxes(tc: TransformControls, kind: EntityKind, mode
  *  rotate is disabled for those. */
 export function selSupportsMode(draft: Track, sel: EntitySel, m: GizmoMode): boolean {
   if (!sel) return true
-  if (sel.kind === 'pickup' || sel.kind === 'spline') return m === 'translate'
+  // The prop-line container has no gizmo (edit it via its anchors + params).
+  if (sel.kind === 'propLine') return false
+  if (sel.kind === 'pickup' || sel.kind === 'spline' || sel.kind === 'propLineAnchor') {
+    return m === 'translate'
+  }
   if (sel.kind === 'gate') {
     const cp = draft.checkpoints[sel.index]
     if (cp && typeof cp.splineT === 'number' && m === 'rotate') return false
@@ -130,7 +137,7 @@ export function writeHelperPoseToDraft(
   draft: Track,
   h: THREE.Object3D,
   s: NonNullable<EntitySel>,
-): { splineMoved: boolean } {
+): { splineMoved: boolean; propLineMoved?: number } {
   if (s.kind === 'gate') {
     const cp = draft.checkpoints[s.index]
     if (!cp) return { splineMoved: false }
@@ -221,6 +228,16 @@ export function writeHelperPoseToDraft(
     p.y = h.position.y
     p.z = h.position.z
     return { splineMoved: true }
+  }
+  if (s.kind === 'propLineAnchor') {
+    const line = (draft.propLines ?? [])[s.lineIndex]
+    const a = line?.anchors[s.anchorIndex]
+    if (!a) return { splineMoved: false }
+    a.x = h.position.x
+    a.y = h.position.y
+    a.z = h.position.z
+    // Signal the caller to re-expand + re-draw this line's preview live.
+    return { splineMoved: false, propLineMoved: s.lineIndex }
   }
   if (s.kind === 'prop') {
     const p = draft.props[s.index]

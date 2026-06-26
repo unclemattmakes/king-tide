@@ -12,7 +12,7 @@
  */
 
 import { SurfaceType, type SurfaceTypeValue } from '@/engine/sim/surface-types'
-import type { Prop, Track, WaveRiderDof } from '@/game/tracks/types'
+import type { Prop, PropLine, Track, WaveRiderDof } from '@/game/tracks/types'
 import type { EntitySel } from './editor-ui'
 
 const DEG2RAD = Math.PI / 180
@@ -134,6 +134,76 @@ export function applyNumEdit(
       if (p) setVec3(p, 'pos', field, value)
       return
     }
+    case 'propLineAnchor': {
+      const a = draft.propLines?.[sel.lineIndex]?.anchors[sel.anchorIndex]
+      if (a) setVec3(a, 'pos', field, value)
+      return
+    }
+    case 'propLine': {
+      const line = draft.propLines?.[sel.index]
+      if (!line) return
+      if (field === 'count') line.count = Math.max(1, Math.round(value))
+      else if (field === 'spacingM') line.spacingM = clamp(value, 0.25, 500)
+      else if (field === 'offsetM') line.offsetM = value
+      else if (field === 'normalOffsetM') line.normalOffsetM = value
+      else if (field === 'yawDeg') line.yawDeg = value
+      else if (field === 'scale') line.scale = clamp(value, 0.01, 100)
+      else if (field.startsWith('jitter.')) {
+        if (!line.jitter) line.jitter = {}
+        const j = line.jitter
+        if (field === 'jitter.posM') j.posM = Math.max(0, value)
+        else if (field === 'jitter.yawDeg') j.yawDeg = Math.max(0, value)
+        else if (field === 'jitter.scaleMin') j.scaleMin = clamp(value, 0.01, 100)
+        else if (field === 'jitter.scaleMax') j.scaleMax = clamp(value, 0.01, 100)
+      }
+      return
+    }
+  }
+}
+
+/**
+ * Apply a non-numeric edit to a prop-line: `assetId` (string), `spacingMode`
+ * ('count'|'arcLength'), `surface` (string|null), `closed`/`alignToTangent`/
+ * `waterline`/`waveRider` (bool), `waveRiderDof` (string).
+ */
+export function applyPropLineFlag(
+  line: PropLine,
+  field: string,
+  value: string | boolean | null,
+): void {
+  switch (field) {
+    case 'assetId':
+      if (typeof value === 'string' && value) line.assetId = value
+      return
+    case 'spacingMode':
+      line.spacingMode = value === 'count' ? 'count' : 'arcLength'
+      return
+    case 'closed':
+      if (value === true) line.closed = true
+      else delete line.closed
+      return
+    case 'alignToTangent':
+      // Default is ON; persist only the opt-out.
+      if (value === false) line.alignToTangent = false
+      else delete line.alignToTangent
+      return
+    case 'surface':
+      if (value === 'default' || value == null || !SURFACE_SET.has(String(value)))
+        delete line.surface
+      else line.surface = value as SurfaceTypeValue
+      return
+    case 'waterline':
+      if (value === false) line.waterline = false
+      else delete line.waterline
+      return
+    case 'waveRider':
+      if (value === true) line.waveRider = line.waveRider ?? { dof: 'locked' }
+      else delete line.waveRider
+      return
+    case 'waveRiderDof':
+      if (line.waveRider && (value === 'locked' || value === 'yaw'))
+        line.waveRider.dof = value as WaveRiderDof
+      return
   }
 }
 
