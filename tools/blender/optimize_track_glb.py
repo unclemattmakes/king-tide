@@ -29,6 +29,17 @@ Run headless (does NOT touch an open GUI session):
 
 (in-place is fine — keep a .bak copy for the A/B; the perf harness compares
 old vs new via two boots.)
+
+Sibling pass — material dedupe (the BOOT-time half of the diet): after the
+joins, collapse baseColor-only decoration material families into per-vertex
+`_VINYLTINT`-tinted shared materials, so the deferred scenery warm compiles
+~one pipeline-group per family instead of one per colour:
+
+  node tools/optimize-track-glb-materials.mjs public/assets/tracks/<id>.glb
+
+That pass lives outside this script on purpose: it's pure glTF JSON+buffer
+surgery (no bpy), so the merged geometry bytes round-trip untouched instead
+of being re-encoded through another import/export.
 """
 
 import re
