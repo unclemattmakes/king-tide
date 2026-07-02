@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// optimize-track-glb-materials.mjs — collapse a track GLB's near-duplicate
-// decoration materials into per-vertex-tinted shared materials (the Mexico
-// City content diet, part 2 — the boot-time half).
+// optimize-track-glb-materials.mjs — collapse a track OR prop GLB's
+// near-duplicate flat-colour materials into per-vertex-tinted shared materials
+// (the Mexico City content diet, part 2 — the boot-time half).
 //
 // Why: three's WebGPU pipeline cache keys per material INSTANCE, so the
 // progressive scenery warm (src/boot/progressive-warm.ts) pays ~one pipeline
@@ -16,7 +16,22 @@
 // pipelines. Mexico City ships 39 such materials ≈ 39 warm groups ≈ 7 s of
 // loading screen.
 //
-// What it does, per `kind=decoration` primitive whose material is in a
+// Prop GLBs (tools/blender/build_prop.py output: a `kind=prop` root empty over
+// an untagged visual mesh + `kind=collider` empties) get the same treatment —
+// auto-detected per file (see detectGlbMode), with a prop-shaped eligibility
+// mirror: their consumer is `createPropsMesh` (src/engine/render/props-mesh.ts),
+// which vinyl-converts EVERY visual sub-mesh and honours the same
+// `extras.vinylTintAttribute` marker, so the allowlist becomes "untagged (+
+// decoration) nodes" and collider empties fall out naturally. Two prop lanes
+// render the RAW GLB material and would show the canonical's white instead of
+// the baked tint, so files headed for them are refused wholesale:
+// wave-riders (`wave_rider_archetype` root extras → wave-rider-render) and
+// animated props (GLB ships animation clips → animated-props). Skinned
+// primitives are likewise never rewritten. A multi-material single-family prop
+// (mxc/trajinera: 9 flat colours) collapses to ONE material; single-material
+// props are naturally untouched (no ≥2 family).
+//
+// What it does, per eligible primitive whose material is in a
 // mergeable family (≥2 materials identical up to baseColorFactor.rgb and
 // runtime-ignored params):
 //
@@ -59,6 +74,7 @@
 //
 // Usage:
 //   node tools/optimize-track-glb-materials.mjs <in.glb> [out.glb] [--dry-run]
+//   (track or prop GLB — the mode is auto-detected and printed)
 //
 // In-place (out omitted or equal to in) writes a `<in>.pre-mat-dedupe.bak`
 // backup first — kept, never overwritten, so the true original survives
@@ -133,15 +149,60 @@ export const TINT_ATTRIBUTE = '_VINYLTINT'
 /** Material-extras marker the runtime look pass keys on. */
 export const TINT_EXTRA_KEY = 'vinylTintAttribute'
 
-/** Node kinds whose primitives may be rewritten (values from ExportedKind,
- *  src/engine/asset-kinds.ts). Deliberately an ALLOWLIST, not the inverse of
- *  the runtime's skip set: `decoration` detail pieces and `track` landmark
- *  hulls/ramps are the two kinds shipped track GLBs carry that provably take
- *  the runtime vinyl look (gameplay reads their GEOMETRY — heightmap,
- *  colliders — never their materials; the terrain mesh is excluded twice
- *  over, by its `terrain` node name and its owned `mat_terrain*` material).
- *  Extend deliberately if a new kind should join the collapse. */
-const MERGEABLE_KINDS = new Set(['decoration', 'track'])
+/** Sentinel for a node that carries no `extras.kind`. */
+const NO_KIND = '(none)'
+
+/** Node kinds whose primitives may be rewritten, per file mode (values from
+ *  ExportedKind, src/engine/asset-kinds.ts). Deliberately ALLOWLISTS, not the
+ *  inverse of the runtime's skip sets. Extend deliberately if a new kind
+ *  should join the collapse.
+ *
+ *  - `track`: `decoration` detail pieces and `track` landmark hulls/ramps are
+ *    the two kinds shipped track GLBs carry that provably take the runtime
+ *    vinyl look (gameplay reads their GEOMETRY — heightmap, colliders — never
+ *    their materials; the terrain mesh is excluded twice over, by its
+ *    `terrain` node name and its owned `mat_terrain*` material).
+ *  - `prop`: the build_prop.py contract parents ONE untagged visual mesh
+ *    under the `kind=prop` root empty — `createPropsMesh` vinyl-converts
+ *    every non-collider sub-mesh, so untagged is the eligible shape
+ *    (`decoration` allowed too for hand-assembled multi-part props).
+ *    `kind=collider` empties carry no mesh and fall out via the allowlist
+ *    either way. */
+const MERGEABLE_KINDS_BY_MODE = {
+  track: new Set(['decoration', 'track']),
+  prop: new Set([NO_KIND, 'decoration']),
+}
+
+/** Kinds only a TRACK GLB carries — used to auto-detect the file mode. */
+const TRACKISH_KINDS = new Set([
+  'track',
+  'decoration',
+  'water',
+  'ai_spline',
+  'checkpoint',
+  'horizon',
+])
+
+/**
+ * Auto-detect whether a GLB is a prop file (build_prop.py: a `kind=prop` root
+ * empty, no track-structural kinds) or a track file (everything else,
+ * including kind-less files — where the track allowlist merges nothing).
+ * A file carrying BOTH is outside either contract — refuse loudly rather
+ * than guess.
+ */
+export function detectGlbMode(json) {
+  let prop = false
+  let trackish = false
+  for (const n of json.nodes ?? []) {
+    const k = n.extras?.kind
+    if (k === 'prop') prop = true
+    else if (TRACKISH_KINDS.has(k)) trackish = true
+  }
+  if (prop && trackish) {
+    throw new Error('GLB carries both prop and track kinds — not a shape this tool supports')
+  }
+  return prop ? 'prop' : 'track'
+}
 
 /** Materials another runtime look-pass owns by name — never touched
  *  (mirrors ownedByAnotherPass in painterly-vinyl-material.ts). */
@@ -190,10 +251,11 @@ function tintOf(mat) {
 
 /**
  * Rewrite `json`/`bin` in place-ish (returns fresh json + bin buffers):
- * family-merge decoration materials, bake `_VINYLTINT`, prune unused
- * materials. Returns { json, bin, report }.
+ * family-merge eligible materials, bake `_VINYLTINT`, prune unused
+ * materials. Returns { json, bin, report }. `mode` picks the eligibility
+ * mirror (see MERGEABLE_KINDS_BY_MODE); omitted → auto-detected.
  */
-export function dedupeTrackGlbMaterials(json, bin) {
+export function dedupeTrackGlbMaterials(json, bin, mode = detectGlbMode(json)) {
   const gltf = structuredClone(json)
   if (!gltf.accessors) gltf.accessors = []
   if (!gltf.bufferViews) gltf.bufferViews = []
@@ -202,13 +264,43 @@ export function dedupeTrackGlbMaterials(json, bin) {
   const nodes = gltf.nodes ?? []
   const accessors = gltf.accessors
   const bufferViews = gltf.bufferViews
+  const mergeableKinds = MERGEABLE_KINDS_BY_MODE[mode]
+  if (!mergeableKinds) throw new Error(`unknown mode "${mode}"`)
 
   if ((gltf.buffers ?? []).length > 1) {
     throw new Error('multi-buffer glTF not supported (GLB tracks are single-buffer)')
   }
 
-  // A mesh is eligible only when EVERY node that instances it is a plain
-  // decoration node (touching a shared mesh would restyle the other user too).
+  const report = {
+    materialsBefore: materials.length,
+    materialsAfter: materials.length,
+    families: [],
+    primsTinted: 0,
+    tintBytes: 0,
+    warnings: [],
+  }
+
+  // Prop files whose materials feed a RAW-material render lane must not be
+  // rewritten at all — those lanes never read the tint marker, so a white
+  // canonical would render white (see header): wave-riders
+  // (wave-rider-render instances mesh.material as-is) and animated props
+  // (animated-props shares the loader cache's materials untouched, and a
+  // clip-carrying GLB can be placed animated per-placement).
+  if (mode === 'prop') {
+    const waveRider = nodes.some(
+      (n) => n.extras?.kind === 'prop' && n.extras?.wave_rider_archetype !== undefined,
+    )
+    const animated = (gltf.animations ?? []).length > 0
+    if (waveRider || animated) {
+      report.warnings.push(
+        `prop GLB skipped: ${waveRider ? 'wave-rider' : 'animated'} props render raw materials (no tint lane)`,
+      )
+      return { json: gltf, bin: bin ?? Buffer.alloc(0), report }
+    }
+  }
+
+  // A mesh is eligible only when EVERY node that instances it is in the
+  // mode's allowlist (touching a shared mesh would restyle the other user too).
   const meshKinds = new Map() // meshIdx -> Set(kind)
   const meshNodeNames = new Map()
   for (const n of nodes) {
@@ -217,13 +309,13 @@ export function dedupeTrackGlbMaterials(json, bin) {
       meshKinds.set(n.mesh, new Set())
       meshNodeNames.set(n.mesh, [])
     }
-    meshKinds.get(n.mesh).add(n.extras?.kind ?? '(none)')
+    meshKinds.get(n.mesh).add(n.extras?.kind ?? NO_KIND)
     meshNodeNames.get(n.mesh).push(n.name ?? '')
   }
   const meshEligible = (mi) => {
     const kinds = meshKinds.get(mi)
     if (!kinds || kinds.size === 0) return false // unreferenced mesh — leave alone
-    for (const k of kinds) if (!MERGEABLE_KINDS.has(k)) return false
+    for (const k of kinds) if (!mergeableKinds.has(k)) return false
     // Mirror the runtime's terrain-name guard (it skips obj.name 'terrain*').
     for (const nm of meshNodeNames.get(mi)) if (/^terrain/.test(nm)) return false
     return true
@@ -236,6 +328,9 @@ export function dedupeTrackGlbMaterials(json, bin) {
     for (const prim of meshes[mi].primitives ?? []) {
       if (prim.material === undefined) continue
       if (prim.attributes?.POSITION === undefined) continue
+      // Skinned prims are hosted by lanes that render/clone the raw material
+      // (animated-props / skeleton clones) — never rewrite them.
+      if (prim.attributes.JOINTS_0 !== undefined) continue
       const mat = materials[prim.material]
       if (!mat || OWNED_MATERIAL.test(mat.name ?? '')) continue
       if (!eligiblePrimsByMat.has(prim.material)) eligiblePrimsByMat.set(prim.material, [])
@@ -251,16 +346,8 @@ export function dedupeTrackGlbMaterials(json, bin) {
     families.get(key).push(matIdx)
   }
 
-  const report = {
-    materialsBefore: materials.length,
-    materialsAfter: materials.length,
-    families: [],
-    primsTinted: 0,
-    tintBytes: 0,
-    warnings: [],
-  }
-
   // Bake: one canonical white material per multi-member family.
+  const canonPrefix = mode === 'prop' ? 'mat_prop_tint_' : 'mat_deco_tint_'
   const tintBlobs = []
   let tintCursor = 0
   const remap = new Map() // old matIdx -> canonical matIdx (only for merged)
@@ -268,7 +355,7 @@ export function dedupeTrackGlbMaterials(json, bin) {
     if (members.length < 2) continue
     const canonIdx = materials.length
     const first = structuredClone(materials[members[0]])
-    first.name = `mat_deco_tint_${report.families.length}`
+    first.name = `${canonPrefix}${report.families.length}`
     first.pbrMetallicRoughness = {
       ...(first.pbrMetallicRoughness ?? {}),
       baseColorFactor: [1, 1, 1, first.pbrMetallicRoughness?.baseColorFactor?.[3] ?? 1],
@@ -406,22 +493,24 @@ export function validateGlb(buf) {
 }
 
 /**
- * Estimate the progressive-warm pipeline-group count over decoration prims:
+ * Estimate the progressive-warm pipeline-group count over eligible prims:
  * unique (material, attribute-set ∪ COLOR_0, indexed-ness). The runtime
  * stamps a neutral COLOR_0 on every vinyl mesh that lacks one
  * (ensureNeutralVertexColor), so it's folded into the layout here.
  */
-export function estimateWarmGroups(json) {
+export function estimateWarmGroups(json, mode = detectGlbMode(json)) {
+  const mergeableKinds = MERGEABLE_KINDS_BY_MODE[mode]
+  if (!mergeableKinds) throw new Error(`unknown mode "${mode}"`)
   const groups = new Set()
   const kinds = new Map()
   for (const n of json.nodes ?? []) {
     if (n.mesh === undefined) continue
     if (!kinds.has(n.mesh)) kinds.set(n.mesh, new Set())
-    kinds.get(n.mesh).add(n.extras?.kind ?? '(none)')
+    kinds.get(n.mesh).add(n.extras?.kind ?? NO_KIND)
   }
   json.meshes?.forEach((mesh, mi) => {
     const ks = kinds.get(mi)
-    if (!ks || [...ks].some((k) => !MERGEABLE_KINDS.has(k))) return
+    if (!ks || [...ks].some((k) => !mergeableKinds.has(k))) return
     for (const prim of mesh.primitives ?? []) {
       if (prim.material === undefined) continue
       const mat = json.materials?.[prim.material]
@@ -454,9 +543,11 @@ function main() {
 
   const input = readFileSync(srcAbs)
   const { json, bin } = parseGlb(input)
-  const groupsBefore = estimateWarmGroups(json)
-  const { json: outJson, bin: outBin, report } = dedupeTrackGlbMaterials(json, bin)
-  const groupsAfter = estimateWarmGroups(outJson)
+  const mode = detectGlbMode(json)
+  console.log(`[mat-dedupe] mode: ${mode}`)
+  const groupsBefore = estimateWarmGroups(json, mode)
+  const { json: outJson, bin: outBin, report } = dedupeTrackGlbMaterials(json, bin, mode)
+  const groupsAfter = estimateWarmGroups(outJson, mode)
 
   for (const fam of report.families) {
     console.log(
@@ -470,7 +561,7 @@ function main() {
   console.log(
     `[mat-dedupe] materials ${report.materialsBefore} -> ${report.materialsAfter} · ` +
       `${report.primsTinted} prims tinted (+${(report.tintBytes / 1024).toFixed(1)} KiB) · ` +
-      `estimated decoration warm-groups ${groupsBefore} -> ${groupsAfter}`,
+      `estimated eligible warm-groups ${groupsBefore} -> ${groupsAfter}`,
   )
 
   if (dryRun) {

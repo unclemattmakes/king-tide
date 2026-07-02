@@ -17,9 +17,11 @@ export type GltfJson = {
     componentType: number
     count: number
     type: string
+    normalized?: boolean
   }>
   materials?: Array<Record<string, unknown> & { name?: string; extras?: Record<string, unknown> }>
   meshes?: Array<{
+    name?: string
     primitives?: Array<{
       attributes?: Record<string, number>
       indices?: number
@@ -27,9 +29,17 @@ export type GltfJson = {
       mode?: number
     }>
   }>
-  nodes?: Array<{ name?: string; mesh?: number; extras?: { kind?: string } }>
+  nodes?: Array<{
+    name?: string
+    mesh?: number
+    extras?: { kind?: string; wave_rider_archetype?: string }
+  }>
+  animations?: unknown[]
   [k: string]: unknown
 }
+
+/** File shape the eligibility mirror targets — auto-detected per GLB. */
+export type GlbMode = 'track' | 'prop'
 
 export type DedupeReport = {
   materialsBefore: number
@@ -50,9 +60,11 @@ export declare const TINT_EXTRA_KEY: 'vinylTintAttribute'
 export declare function parseGlb(buf: Buffer): { json: GltfJson; bin: Buffer | null }
 export declare function buildGlb(json: GltfJson, bin: Buffer | null): Buffer
 export declare function familyKey(mat: Record<string, unknown>): string
+export declare function detectGlbMode(json: GltfJson): GlbMode
 export declare function dedupeTrackGlbMaterials(
   json: GltfJson,
   bin: Buffer | null,
+  mode?: GlbMode,
 ): { json: GltfJson; bin: Buffer; report: DedupeReport }
 export declare function validateGlb(buf: Buffer): GltfJson
-export declare function estimateWarmGroups(json: GltfJson): number
+export declare function estimateWarmGroups(json: GltfJson, mode?: GlbMode): number
