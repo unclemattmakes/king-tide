@@ -108,8 +108,11 @@ test.describe('track screenshot sweep', () => {
       await page.setViewportSize({ width: SHOT_W, height: SHOT_H })
       const bootUrl = `/?autostart=1&track=${id}${EXTRA_QS ? `&${EXTRA_QS}` : ''}`
       console.log(`track-shots:${id}:url=${bootUrl}`)
+      // Generous ready timeout: on the intro path a dressed track holds the
+      // loader for the deferred-scenery warm (Mexico City sat right at the
+      // 20 s default before the material dedupe), so give boot real headroom.
       await page.goto(bootUrl)
-      await waitForReady(page)
+      await waitForReady(page, { timeout: 60_000 })
 
       const backend = await page.evaluate(() => window.__hover!.backend())
       console.log(`track-shots:${id}:backend=${backend}`)

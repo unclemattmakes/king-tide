@@ -398,14 +398,11 @@ const PUMP_SPEED_CAP_FRAC = 1.3
 const CAMERA_WATER_CLEARANCE = 0.6
 
 /** Longest the countdown waits on the progressive scenery warm after the
- *  intro finishes. For the single-player intro path the warm is normally
- *  already complete here — boot holds the loading screen until it finishes
- *  before the cinematic even starts (race-boot.ts → INTRO_WARM_LOADER_CAP_MS),
- *  so this post-intro hold is usually a no-op safety net that only bites when
- *  that loader cap was exceeded on a very heavy track / slow GPU. On big
- *  dressed tracks (Mexico City: ~155 vinyl materials) the warm can legitimately
- *  outlive any reasonable grid wait — the cap keeps the race startable no
- *  matter what, trading the tail back for a prompt start. */
+ *  intro finishes. The single-player intro path no longer defers scenery at
+ *  all (race-boot.ts `deferScenery` — the dressed scene compiles under the
+ *  loading screen), so today this hold is a pure no-op safety net kept for
+ *  any future cinematic-with-deferred-warm path. The cap keeps the race
+ *  startable no matter what, trading the tail back for a prompt start. */
 const SCENERY_WARM_HOLD_CAP_MS = 6_000
 
 function applyPumpImpulse(
@@ -1430,19 +1427,16 @@ export function startGameLoop(opts: GameLoopOpts): void {
       // sites are idempotent because `armCountdown` early-outs if the
       // countdown is already running.
       //
-      // Scenery-warm hold (secondary catch): boot already keeps the loading
-      // screen up until the warm completes before the cinematic starts, so by
-      // the time the intro finishes `sceneryWarmed()` is normally already true
-      // and this passes through on the first done-frame — the countdown arms
-      // immediately. It only actually waits here when boot's loader cap
-      // (INTRO_WARM_LOADER_CAP_MS) was exceeded on a very heavy track / slow
-      // GPU and the warm spilled past the loader; in that case we still hold —
-      // capped — so the remaining per-material node-build frame dips land while
-      // the player idles on the grid rather than in the opening seconds of the
-      // race. Only reachable when a cinematic actually played: intro mode 'off'
-      // (multiplayer, `?skipintro=1`, user setting) constructs the director
-      // already done, so `introArmed` starts true and this branch — hold
-      // included — never runs there.
+      // Scenery-warm hold (safety net): the intro path never defers scenery
+      // any more (race-boot.ts `deferScenery` keys on introMode — the whole
+      // dressed scene compiles under the loading screen), so `sceneryWarmed()`
+      // is true by construction here and this passes through on the first
+      // done-frame — the countdown arms immediately. The capped hold stays as
+      // the guard for any future path that plays a cinematic with a deferred
+      // warm still streaming. Only reachable when a cinematic actually played:
+      // intro mode 'off' (multiplayer, `?skipintro=1`, user setting)
+      // constructs the director already done, so `introArmed` starts true and
+      // this branch — hold included — never runs there.
       if (introHoldStartedAt === null) {
         introHoldStartedAt = performance.now()
         teardownIntroSkipUi()

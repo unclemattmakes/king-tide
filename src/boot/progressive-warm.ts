@@ -30,6 +30,7 @@
  * reveal.
  */
 import type * as THREE from 'three'
+import { bootStat } from './boot-trace'
 
 /**
  * Compiles one object's GPU pipelines + resources asynchronously under the
@@ -48,11 +49,13 @@ export type RevealOptions = {
   /** How many pipeline-groups to compile concurrently on the compiled path.
    *  Default 1 — one group per frame, the gentle background pace used while the
    *  game loop is live (so a reveal never bursts compiles into a racing frame).
-   *  Bump it well above 1 ONLY when revealing under the loading screen (no
-   *  gameplay to protect): on a heavy track the serial reveal is ~26 s, and
-   *  compiling groups in parallel collapses that to ~15 s at 8 / ~13 s at 16
-   *  (measured, Mexico City — diminishing returns past ~8 as the GPU pipeline
-   *  queue saturates). Clamped to ≥1. */
+   *  Raising it only helps when nothing interactive is running — but note the
+   *  wall-clock is dominated by a one-time stall on the FIRST compile call
+   *  (~8–12 s on an iGPU: createRenderPipelineAsync resolves behind the boot
+   *  pre-warm's driver-side pipeline backlog, regardless of group count), which
+   *  is why the intro path now skips deferral entirely (race-boot.ts
+   *  `deferScenery`) instead of revealing under the loader at high concurrency.
+   *  Clamped to ≥1. */
   concurrency?: number
   /** Called once every mesh is back. */
   onDone?: () => void
@@ -189,6 +192,10 @@ async function revealCompiled(
   const nextFrame = (): Promise<void> => new Promise((resolve) => raf(() => resolve()))
   const CONC = Math.max(1, Math.floor(concurrency))
   const groups = groupForWarm(meshes)
+  // The warm's wall-clock scales with the group count (~one pipeline compile
+  // per group) — surface it next to deferredScenery/vinylMaterials so a boot
+  // trace shows whether a content change actually collapsed groups.
+  bootStat('warmGroups', groups.length)
   for (let i = 0; i < groups.length; i += CONC) {
     const batch = groups.slice(i, i + CONC)
     const pending: Array<{ group: THREE.Mesh[]; compiled: Promise<void> | null }> = []

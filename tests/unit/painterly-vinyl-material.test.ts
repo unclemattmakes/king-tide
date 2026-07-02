@@ -208,6 +208,68 @@ describe('applyVinylMaterialToScene — size-shared materials', () => {
   })
 })
 
+describe('applyVinylMaterialToScene — deduped-material tint lane', () => {
+  /** A canonical material as the track-GLB dedupe tool ships it: white, with
+   *  the glTF extras marker GLTFLoader lands on userData. */
+  function markedMaterial(): THREE.MeshStandardMaterial {
+    const m = new THREE.MeshStandardMaterial({ color: 0xffffff })
+    m.userData.vinylTintAttribute = '_VINYLTINT'
+    return m
+  }
+
+  it('converts a marked material once and preserves baked per-vertex tint', () => {
+    const src = markedMaterial()
+    const root = new THREE.Group()
+    const withAttr = meshOfSize(4, src)
+    const n = withAttr.geometry.getAttribute('position').count
+    const baked = new Float32Array(n * 3)
+    for (let i = 0; i < n; i++) {
+      baked[i * 3] = 0.8
+      baked[i * 3 + 1] = 0.1
+      baked[i * 3 + 2] = 0.2
+    }
+    // GLTFLoader lowercases custom attribute names: _VINYLTINT → _vinyltint.
+    withAttr.geometry.setAttribute('_vinyltint', new THREE.BufferAttribute(baked, 3))
+    const missing = meshOfSize(4, src)
+    root.add(withAttr, missing)
+
+    const count = applyVinylMaterialToScene(root)
+
+    expect(count).toBe(1)
+    expect(withAttr.material).toBe(missing.material)
+    expect((withAttr.material as THREE.Material).name.startsWith('mat_vinyl')).toBe(true)
+    const kept = withAttr.geometry.getAttribute('_vinyltint')
+    expect(kept.getX(0)).toBeCloseTo(0.8, 5)
+    expect(kept.getZ(0)).toBeCloseTo(0.2, 5)
+  })
+
+  it('stamps a neutral white tint on a marked-material mesh missing the attribute', () => {
+    const src = markedMaterial()
+    const root = new THREE.Group()
+    const missing = meshOfSize(4, src)
+    root.add(missing)
+    applyVinylMaterialToScene(root)
+
+    // Absent attributes read 0 under TSL — the guard must stamp white so the
+    // mesh renders the material colour, not black.
+    const guard = missing.geometry.getAttribute('_vinyltint')
+    expect(guard).toBeDefined()
+    expect(guard.itemSize).toBe(3)
+    expect(guard.count).toBe(missing.geometry.getAttribute('position').count)
+    expect(guard.getX(0)).toBe(1)
+    expect(guard.getY(0)).toBe(1)
+    expect(guard.getZ(0)).toBe(1)
+  })
+
+  it('leaves unmarked materials on the flat-colour path (no tint attribute)', () => {
+    const mesh = meshOfSize(4, new THREE.MeshStandardMaterial())
+    const root = new THREE.Group()
+    root.add(mesh)
+    applyVinylMaterialToScene(root)
+    expect(mesh.geometry.getAttribute('_vinyltint')).toBeUndefined()
+  })
+})
+
 describe('createPropsMesh — shared vinyl across asset sizes', () => {
   function fakeAsset(propId: string, size: number, material: THREE.Material): LoadedProp {
     const root = new THREE.Group()

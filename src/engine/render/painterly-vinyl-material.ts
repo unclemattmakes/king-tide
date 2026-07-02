@@ -727,6 +727,39 @@ function ensureNeutralVertexColor(geom: THREE.BufferGeometry): void {
   geom.setAttribute('color', new THREE.BufferAttribute(data, 4))
 }
 
+/** glTF-extras key the track-GLB material-dedupe tool
+ *  (tools/optimize-track-glb-materials.mjs) stamps on its canonical shared
+ *  materials: the glTF name of the per-vertex linear-RGB base-tint attribute
+ *  (`_VINYLTINT`) baked from each merged material's baseColorFactor. Whole
+ *  same-look decoration families then share ONE material — one pipeline
+ *  compile in the scenery warm — while every building keeps its colour.
+ *  GLTFLoader copies material extras onto `material.userData` and lowercases
+ *  custom attribute names, so the marker value maps to the three-side
+ *  geometry attribute via `.toLowerCase()` (`_vinyltint`). */
+const VINYL_TINT_EXTRA = 'vinylTintAttribute'
+
+/** The three-side attribute name a marked material's tint rides on, or null
+ *  for the normal flat-colour path. */
+function vinylTintAttribute(m: THREE.Material | null | undefined): string | null {
+  if (!m) return null
+  const v = (m.userData as Record<string, unknown> | undefined)?.[VINYL_TINT_EXTRA]
+  return typeof v === 'string' && v.length > 0 ? v.toLowerCase() : null
+}
+
+/** Stamp a neutral white tint on a geometry missing the marked attribute, so
+ *  a mesh that reaches a tint-reading vinyl twin without baked data renders
+ *  the material's (white) colour instead of black — an absent attribute reads
+ *  0 under TSL. The dedupe tool guarantees the attribute on every primitive
+ *  inside the track GLB; this guards meshes assembled outside it. (A clone of
+ *  a converted mesh shares its geometry by reference, so clones keep working
+ *  without re-detection.) */
+function ensureNeutralTintAttribute(geom: THREE.BufferGeometry, name: string): void {
+  if (geom.getAttribute(name)) return
+  const n = geom.getAttribute('position')?.count ?? 0
+  if (!n) return
+  geom.setAttribute(name, new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3))
+}
+
 export type VinylSceneOptions = {
   /** Real sea level for the (opt-in) waterline bands on set-pieces. */
   waterLevel?: number
@@ -857,10 +890,17 @@ export function applyVinylMaterialToScene(
     const geom = obj.geometry as THREE.BufferGeometry
     if (edgeWear > 0) stampConvexityColor0(geom)
     else ensureNeutralVertexColor(geom)
+    // Deduped-material tint lane: a canonical material from the GLB dedupe
+    // tool names its per-vertex tint attribute in userData (glTF extras).
+    for (const m of Array.isArray(mat) ? mat : [mat]) {
+      const tintAttr = vinylTintAttribute(m)
+      if (tintAttr) ensureNeutralTintAttribute(geom, tintAttr)
+    }
     const convert = (m: THREE.Material): THREE.Material => {
       if (ownedByAnotherPass(m)) return m
       const hit = cache.get(m)
       if (hit) return hit
+      const tintAttr = vinylTintAttribute(m)
       const v = buildVinylMaterial(m, {
         sizePerObject: true,
         waterLevel: opts.waterLevel ?? 0,
@@ -868,6 +908,7 @@ export function applyVinylMaterialToScene(
         ...(opts.brush !== undefined ? { brush: opts.brush } : {}),
         ...(opts.brushScale !== undefined ? { brushScale: opts.brushScale } : {}),
         ...(opts.brushPropSizeCap !== undefined ? { brushPropSizeCap: opts.brushPropSizeCap } : {}),
+        ...(tintAttr ? { tintAttribute: tintAttr } : {}),
         edgeWear,
         brushObjectSpace,
       })

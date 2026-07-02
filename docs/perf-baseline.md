@@ -323,6 +323,58 @@ there's no 6–12 m band left to gate. The depth **pass** is still the big lever
   not reproduce on this dev GPU, so the *pass-off* trade should be measured
   against a prod build, not tuned locally.
 
+**2026-07-01 — intro-path boot time: track-GLB material dedupe + no-defer-on-
+intro (mexico-city 16.4 s → 6.3 s, sandbar 18.1 s → ~7 s).** Boot-trace
+attribution (`tests/e2e/boot-timing-intro.spec.ts`, headed, this box) showed
+the intro loader dominated by the deferred-scenery warm: 77 pipeline-groups /
+139 deferred meshes / 78 vinyl materials on mexico-city ≈ 11.8 s median under
+the loader hold. Two fixes landed together:
+
+| mexico-city intro boot (median of 3) | total | scenery warm | warm groups |
+|---|---|---|---|
+| baseline | 16 442 ms | 11 821 ms | 77 |
+| + GLB material dedupe (content) | 19 766 ms* | 13 250 ms* | 26 |
+| + intro path skips deferral (flow) | **6 282 ms** | — (in pre-warm) | — |
+
+\* same-day ambient load inflated every phase in that middle run; the real
+finding is groups 77→26 with the warm barely moving — see below.
+
+- **Content half** ([tools/optimize-track-glb-materials.mjs](../tools/optimize-track-glb-materials.mjs)):
+  the Texcoco "model-everything" pass shipped 39 flat-colour decoration/
+  landmark materials that differ only in `baseColorFactor` (plus runtime-
+  ignored metallic/roughness/KHR specular — the vinyl twin forces its own
+  matte finish). The tool bakes each one's rgb into a per-vertex `_VINYLTINT`
+  float VEC3 (NOT COLOR_0 — its channels are the reserved sway/AO/phase/
+  convexity contract) and repoints the prims at one white canonical stamped
+  with `extras.vinylTintAttribute`, which `applyVinylMaterialToScene` reads to
+  build the twin with `tintAttribute`. mexico-city: 41→2 materials, 114 prims
+  tinted (+222 KiB), zero visual delta (posed A/B pairs:
+  `artifacts/mat-dedupe/`). Geometry bytes round-trip untouched (pure glTF
+  surgery — the Blender join pass in `optimize_track_glb.py` stays the
+  draw-call half).
+- **Flow half** (race-boot.ts `deferScenery`): with groups 77→26 the warm
+  barely moved — instrumentation showed the FIRST
+  `createRenderPipelineAsync` of the reveal stalls **~8–12 s behind the
+  essential set's driver-side pipeline backlog regardless of group count**
+  (sandbar pays the same stall: 18.1 s intro boots). Meanwhile `?progwarm=0`
+  compiled the whole (deduped) scene inside a ~3 s eager pre-warm render. So
+  the intro path now skips deferral entirely — the loader already holds for a
+  dressed scene, and the whole-scene warm is strictly cheaper than awaiting
+  the per-group backlog. No-intro modes keep the deferral + concurrency-1
+  streaming (never bursts a compile into a racing frame).
+- Trade to playtest: the driver drains the pipeline backlog during the first
+  seconds of the (non-interactive) cinematic — mexico worst frame ~410 ms,
+  sandbar ~1.7–2.1 s once, then clean. The old path wasn't smooth either
+  (worst 1 001 ms measured) and cost 9–11 s more loader. If the sandbar
+  hitch reads badly in playtest, a capped `onSubmittedWorkDone` hold after
+  the pre-warm is the candidate smoother.
+- The dedupe also cut the whole-scene compile roughly in half (78→39 vinyl
+  materials) — which is exactly what makes the no-defer path affordable; the
+  remaining ~24 prop-side materials (trajinera alone ships 9 tint-family
+  mergeable ones) are the next content lever.
+- GLB is R2-hosted: deduped file is live locally with a
+  `.pre-mat-dedupe.bak` sibling; `pnpm assets:push` after playtest sign-off.
+
 ## Quality presets (the "various devices" ladder)
 
 The per-knob levers above are composed into three tiers + an `auto` in
