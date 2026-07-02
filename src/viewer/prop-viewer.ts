@@ -14,7 +14,12 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { assetUrl } from '../engine/asset-url'
-import { buildVinylMaterial, type VinylOptions } from '../engine/render/painterly-vinyl-material'
+import {
+  buildVinylMaterial,
+  ensureNeutralTintAttribute,
+  type VinylOptions,
+  vinylTintAttribute,
+} from '../engine/render/painterly-vinyl-material'
 import { createRenderer } from '../engine/render/renderer'
 import { cloneLoadedProp, type LoadedProp, loadProp } from '../game/assets/prop-loader'
 
@@ -124,6 +129,19 @@ export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Pro
   const ui = makeUI(parent, backend, thumbMode)
 
   // ── Material handling ──────────────────────────────────────────────────────
+  /** Vinyl twin for one source material, honouring the dedupe tool's
+   *  tint-canonical marker — a marked material's albedo lives in a baked
+   *  per-vertex attribute (the flat colour is white), so the twin must read
+   *  it or the prop renders white (see painterly-vinyl-material.ts). Spreads
+   *  `vinylOpts` at call time so the live sliders keep applying. */
+  function buildVinylFor(original: THREE.Material): THREE.Material {
+    const tintAttr = vinylTintAttribute(original)
+    return buildVinylMaterial(
+      original,
+      tintAttr ? { ...vinylOpts, tintAttribute: tintAttr } : vinylOpts,
+    )
+  }
+
   function applyMode(): void {
     for (const mm of meshMats) mm.mesh.material = mode === 'vinyl' ? mm.vinyl : mm.original
   }
@@ -131,7 +149,7 @@ export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Pro
   function rebuildVinyl(): void {
     for (const mm of meshMats) {
       mm.vinyl.dispose()
-      mm.vinyl = buildVinylMaterial(mm.original, vinylOpts)
+      mm.vinyl = buildVinylFor(mm.original)
     }
     applyMode()
   }
@@ -209,7 +227,11 @@ export async function bootPropViewer(parent: HTMLElement, opts: ViewerOpts): Pro
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
       const original = mats[0] as THREE.Material
       if (!original) return
-      meshMats.push({ mesh, original, vinyl: buildVinylMaterial(original, vinylOpts) })
+      // Guard the tint lane: an absent baked attribute reads 0 (black) — the
+      // GLB guarantees it, this covers geometry assembled outside the tool.
+      const tintAttr = vinylTintAttribute(original)
+      if (tintAttr) ensureNeutralTintAttribute(mesh.geometry as THREE.BufferGeometry, tintAttr)
+      meshMats.push({ mesh, original, vinyl: buildVinylFor(original) })
     })
     scene.add(node)
     frameNode()

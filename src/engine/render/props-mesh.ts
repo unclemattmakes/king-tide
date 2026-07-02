@@ -4,7 +4,12 @@ import type { Prop, PropType } from '@/game/tracks/types'
 import { ExportedKind } from '../asset-kinds'
 import { VINYL_BRUSH_DEFAULTS } from './brush-tuning-service'
 import { stampConvexityColor0 } from './edge-wear-convexity'
-import { buildVinylMaterial, stampVinylObjectSize } from './painterly-vinyl-material'
+import {
+  buildVinylMaterial,
+  ensureNeutralTintAttribute,
+  stampVinylObjectSize,
+  vinylTintAttribute,
+} from './painterly-vinyl-material'
 import { buildPropGeometry } from './props-geometry'
 import { gateShadowCaster, resolveShadowCastMinRadius } from './shadow-caster-gate'
 
@@ -89,8 +94,38 @@ function collectPrototypeSubmeshes(loaded: LoadedProp): PrototypeSubmesh[] {
  *  the instance. Material COUNT is the shader pre-warm lever (one main-thread
  *  node-build + codegen per material). Reset per `createPropsMesh` call (per track
  *  load) so the track's sea level baked into the waterline material can't go stale
- *  across tracks; the waterline-on flag splits the rare asset that opts out. */
-let vinylMaterialCache = new Map<THREE.Material, Map<boolean, THREE.Material>>()
+ *  across tracks; the waterline-on flag splits the rare asset that opts out.
+ *  String keys are the tint-canonical structural lane (see vinylCacheKey) —
+ *  byte-equivalent canonicals from different prop GLBs share one twin. */
+let vinylMaterialCache = new Map<THREE.Material | string, Map<boolean, THREE.Material>>()
+
+/** Cache key for a vinyl twin. Normally the source material INSTANCE — but a
+ *  tint-canonical material (the GLB dedupe tool's white
+ *  `extras.vinylTintAttribute` carrier) with no texture maps is fully
+ *  described by the scalar props the twin copies: its albedo comes from the
+ *  baked per-vertex attribute (the flat colour is never read), so
+ *  byte-equivalent canonicals from DIFFERENT prop files (mxc/trajinera +
+ *  jacaranda + ahuehuete each ship one) collapse onto ONE twin — one pipeline
+ *  compile for every deduped scatter prop on the track. Textured or unmarked
+ *  materials keep instance identity (texture identity is per-file; a flat
+ *  colour lives on the material). The key spans every COPIED_PROPS field the
+ *  tint lane can still observe (normalScale is moot without normalMap). */
+function vinylCacheKey(m: THREE.Material, tintAttr: string | null): THREE.Material | string {
+  const std = m as Partial<THREE.MeshStandardMaterial> & THREE.Material
+  if (!tintAttr || std.map || std.normalMap || std.emissiveMap || std.alphaMap) return m
+  return [
+    'tint',
+    tintAttr,
+    std.side ?? THREE.FrontSide,
+    std.transparent ? 1 : 0,
+    std.opacity ?? 1,
+    std.alphaTest ?? 0,
+    (std.depthWrite ?? true) ? 1 : 0,
+    (std.depthTest ?? true) ? 1 : 0,
+    std.emissive?.getHex() ?? 0,
+    std.emissiveIntensity ?? 1,
+  ].join('|')
+}
 
 /** Default waterline-trio strength for props. The trio is world-height gated, so
  *  only props crossing the sea line actually show bands; opt out per prop via
@@ -114,10 +149,15 @@ function vinylizeMaterial(
   waterlineOn: boolean,
 ): THREE.Material | THREE.Material[] {
   const one = (m: THREE.Material): THREE.Material => {
-    let byFlag = vinylMaterialCache.get(m)
+    // Tint-canonical lane: the GLB dedupe tool bakes per-vertex albedo and
+    // marks the material with the attribute name — the twin MUST read it
+    // (the canonical's flat colour is white; see painterly-vinyl-material.ts).
+    const tintAttr = vinylTintAttribute(m)
+    const key = vinylCacheKey(m, tintAttr)
+    let byFlag = vinylMaterialCache.get(key)
     if (!byFlag) {
       byFlag = new Map()
-      vinylMaterialCache.set(m, byFlag)
+      vinylMaterialCache.set(key, byFlag)
     }
     let v = byFlag.get(waterlineOn)
     if (!v) {
@@ -125,6 +165,7 @@ function vinylizeMaterial(
         sizePerObject: true,
         waterLevel,
         waterline: waterlineOn ? PROP_WATERLINE : 0,
+        ...(tintAttr ? { tintAttribute: tintAttr } : {}),
       })
       byFlag.set(waterlineOn, v)
     }
@@ -252,6 +293,14 @@ export function createPropsMesh(
       // on every channel under TSL (AO darken + full edge bleach). Stamp welded
       // convexity so a missing channel becomes correct edge-wear data instead.
       stampConvexityColor0(sm.geometry)
+      // Same guard for the tint lane: a marked material's twin reads the baked
+      // per-vertex albedo, and an absent attribute reads 0 (black). The dedupe
+      // tool guarantees it inside the GLB; this covers geometry assembled
+      // outside it (mirrors applyVinylMaterialToScene).
+      for (const m of Array.isArray(sm.material) ? sm.material : [sm.material]) {
+        const tintAttr = vinylTintAttribute(m)
+        if (tintAttr) ensureNeutralTintAttribute(sm.geometry, tintAttr)
+      }
       const inst = new THREE.InstancedMesh(
         sm.geometry,
         vinylizeMaterial(sm.material, waterLevel, bucketWaterlineOn),
