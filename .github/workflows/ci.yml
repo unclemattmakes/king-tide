@@ -24,7 +24,7 @@ jobs:
       # (the bundle's missing assets are fetched at runtime via
       # VITE_ASSET_BASE_URL); asset-dependent checks run in the `e2e` /
       # `determinism` jobs, which hydrate from R2.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
           version: 10
@@ -77,7 +77,7 @@ jobs:
       # context is NOT available in `if` conditions, but `env` is.
       RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
           version: 10
@@ -134,7 +134,7 @@ jobs:
       # See the e2e job: secret mapped to env so step `if:` can read it.
       RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
           version: 10
@@ -187,7 +187,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
           version: 10
