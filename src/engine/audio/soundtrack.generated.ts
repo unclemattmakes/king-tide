@@ -16,6 +16,7 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC BY-SA 4.0",
     licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
     sourceUrl: "https://freemusicarchive.org/music/Artificial_Intelligence_in_Texas_1163/the-ai-in-texas-anthology-1985-2020/suddenly-it-occurs-to-me-theres-no-ocean-here/",
+    scenes: ["level:mexico-city"],
   },
   {
     file: "atomicos-rad-racer.opus",
@@ -24,6 +25,7 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC BY-SA 4.0",
     licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
     sourceUrl: "https://freemusicarchive.org/music/Atomicos/Surf_Music_Month_Challenge/08_Rad_Racer",
+    scenes: ["level:cape-town-drift"],
   },
   {
     file: "avantist-tidalwave.opus",
@@ -49,6 +51,7 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC BY-SA 4.0",
     licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
     sourceUrl: "https://freemusicarchive.org/music/Blue_Wave_Theory/Superstorm/frisbeat",
+    scenes: ["level:sandbar"],
   },
   {
     file: "blue-wave-theory-get-your-kicks-on-future-86.opus",
@@ -57,6 +60,7 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC BY-SA 4.0",
     licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
     sourceUrl: "https://freemusicarchive.org/music/Blue_Wave_Theory/Superstorm/get-your-kicks-on-future-86-1/",
+    scenes: ["level:cape-town-drift"],
   },
   {
     file: "blue-wave-theory-road-hazard.opus",
@@ -65,6 +69,7 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC BY-SA 4.0",
     licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
     sourceUrl: "https://freemusicarchive.org/music/Blue_Wave_Theory/Surf_Music_Month_Challenge/Blue_Wave_Theory_-_Road_Hazard",
+    scenes: ["level:cape-town-drift"],
   },
   {
     file: "checkie-brown-hawaii-5-0-cb-203.opus",
@@ -73,6 +78,7 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC BY-NC-SA 4.0",
     licenseUrl: "https://creativecommons.org/licenses/by-nc-sa/4.0/",
     sourceUrl: "https://freemusicarchive.org/music/Checkie_Brown_1005/checkie-brown-elevator-2/hawaii-5-0-cb-203/",
+    scenes: ["level:sandbar"],
   },
   {
     file: "crowander-beach-party.opus",
@@ -89,6 +95,7 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC BY-NC 4.0",
     licenseUrl: "https://creativecommons.org/licenses/by-nc/4.0/",
     sourceUrl: "https://freemusicarchive.org/music/crowander/from-the-garage-funkrock/whisky",
+    scenes: ["level:mexico-city"],
   },
   {
     file: "holiznacc0-western-showdown.opus",
@@ -115,6 +122,7 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC BY 4.0",
     licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
     sourceUrl: "https://freemusicarchive.org/music/the-what-now/smells-like-the-bronx-in-here-the-lamaas-collection/bum-lyfe/",
+    scenes: ["level:mexico-city"],
   },
   {
     file: "vlad-annenkov-sunny-positive-surf-rock-sandy-shores.opus",
@@ -123,5 +131,6 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC BY 4.0",
     licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
     sourceUrl: "https://freemusicarchive.org/music/vlad-annenkov/single/sunny-positive-surf-rock-sandy-shoresmp3/",
+    scenes: ["level:sandbar"],
   },
 ]
