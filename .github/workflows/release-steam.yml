@@ -55,7 +55,7 @@ jobs:
     environment: steam-release
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6

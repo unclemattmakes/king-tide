@@ -40,7 +40,7 @@ jobs:
       RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6
@@ -126,7 +126,7 @@ jobs:
       RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
