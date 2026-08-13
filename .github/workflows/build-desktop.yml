@@ -144,7 +144,7 @@ jobs:
       # is absent on that leg, hence fail_on_unmatched_files: false.
       - name: Attach to Release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             hoverbike-linux.tar.gz
