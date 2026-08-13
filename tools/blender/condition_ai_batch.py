@@ -20,7 +20,16 @@ Invoked by tools/make_level_props.py as::
         -- --spec <run>/_condition_spec.json
 
 Spec entry fields: input, prop_id, family, target_tris, target_height,
-collider, tint, smooth, keep_material, output.
+collider, tint, smooth, keep_material, output, pre_rotate_deg.
+
+``pre_rotate_deg: [x, y, z]`` (degrees) rotates the imported mesh BEFORE
+conditioning. Needed for sources authored lying flat on the ground (e.g.
+the Pirate Kit anchor): ``target_height`` normalises the UP axis, so a
+flat-authored prop otherwise becomes a giant pancake — the catalogued
+`cc0/anchor` / `cc0/debris_pile` mis-scale bug. Existing transforms are
+applied first, so the rotation composes with the importer's own axis
+conversion instead of overwriting it (which is why ``source_up`` can't
+express this for glTF inputs).
 
 ``keep_material: true`` preserves the source pack's ``baseColorTexture`` + UVs
 (rename-only) instead of stripping for a flat ``tint`` — the multi-tone lane for
@@ -42,9 +51,23 @@ if _REPO_ROOT not in sys.path:
 
 from tools.blender.common import export_glb, reset_scene  # noqa: E402
 from tools.blender.condition_ai_mesh import (  # noqa: E402
+    _apply_transforms,
     _import_any,
     condition_object,
 )
+
+
+def _pre_rotate(obj: bpy.types.Object, degrees_xyz) -> None:
+    """Compose an authoring-fix rotation onto the imported object. Apply the
+    importer's own transform first so the extra rotation is in world terms.
+    glTF imports arrive in QUATERNION rotation mode, where assigning
+    ``rotation_euler`` is silently ignored — force XYZ euler mode first."""
+    import math
+
+    _apply_transforms(obj)
+    obj.rotation_mode = "XYZ"
+    obj.rotation_euler = tuple(math.radians(a) for a in degrees_xyz)
+    _apply_transforms(obj)
 
 
 def _spec_path() -> str:
@@ -64,6 +87,8 @@ def main() -> None:
         try:
             reset_scene()
             obj = _import_any(entry["input"])
+            if entry.get("pre_rotate_deg"):
+                _pre_rotate(obj, entry["pre_rotate_deg"])
             condition_object(
                 obj,
                 prop_id=pid,

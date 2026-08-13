@@ -14,7 +14,8 @@
       "tint": "#6b7079",
       "smooth": false,
       "conditioned_glb": "public/assets/props/cc0/anchor.glb",
-      "keep_material": true
+      "keep_material": true,
+      "pre_rotate_deg": [90, 0, 0]
     },
     {
       "prop_id": "barrel",

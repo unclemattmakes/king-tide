@@ -2742,7 +2742,7 @@
     },
     {
       "type": "asset",
-      "assetId": "ai/rubble_chunk",
+      "assetId": "cc0/coastal_rock",
       "position": {
         "x": -75,
         "y": -0.8,
@@ -2755,14 +2755,14 @@
         "w": 0.9393727128473789
       },
       "size": {
-        "x": 1.0,
-        "y": 1.0,
-        "z": 1.0
+        "x": 1.8,
+        "y": 1.8,
+        "z": 1.8
       }
     },
     {
       "type": "asset",
-      "assetId": "ai/rubble_chunk",
+      "assetId": "cc0/coastal_rock",
       "position": {
         "x": 30,
         "y": -0.8,
@@ -2775,9 +2775,9 @@
         "w": 0.5816830894638836
       },
       "size": {
-        "x": 0.9,
-        "y": 0.9,
-        "z": 0.9
+        "x": 1.62,
+        "y": 1.62,
+        "z": 1.62
       }
     },
     {

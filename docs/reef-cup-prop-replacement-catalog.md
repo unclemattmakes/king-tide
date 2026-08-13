@@ -35,7 +35,7 @@
 | Source | Where | Count | State | Register |
 |---|---|---|---|---|
 | **Quaternius CC0** (Pirate, Toon-Shooter, Nature-Crops, Ships, Cute-Fish, Cyberpunk, Animated-Fish) | `public/assets/props/cc0/` | 63 | **ready + wired** (`keep_material` multi-tone; place as `cc0/<id>`) | clean multi-tone "toy" — on-target |
-| **AI-pipeline** | `public/assets/props/ai/` | 13 | **ready + wired** (place as `ai/<id>`) | flat single-tint — reads more placeholder |
+| **AI-pipeline** | `public/assets/props/ai/` | 13 | **RETIRED 2026-08-12** — zero track references remain (Hunyuan license territory clause, see [open-source-plan](open-source-plan.md)); GLBs pending removal from R2 after the deploy that lands the swap | flat single-tint — read as placeholder |
 | **Staged, NOT conditioned** (Downtown-City 153, Textured-Buildings 102, Stylized-Nature 68, Simple-Nature) | `C:\project-content\hoverbike\external\quaternius\extracted\<pack>\` | ~320 | needs conditioning before placement | the missing **buildings** + **blooming foliage** |
 
 Two facts that shape everything below:
@@ -190,8 +190,16 @@ gitignored → R2, so they need **`pnpm assets:push`**.
   library fit). Optionally condition the staged `textured-buildings` pack.
 - **South Beach rooftop clutter** (AC/tanks/antennas) + **lifeguard** (a `cc0`
   house won't read as a lifeguard tower) — deferred.
-- **`cc0/anchor` + `cc0/debris_pile` re-condition** — mis-scaled flat slabs (the
-  only two unusable library props); tracked separately.
+- ~~**`cc0/anchor` re-condition**~~ — **FIXED 2026-08-12.** Root cause: the
+  Pirate Kit source is authored lying flat, and glTF imports arrive in
+  QUATERNION rotation mode where the conditioner's `source_up` euler assignment
+  is silently ignored — so `target_height: 3` normalised the 9 cm *thickness*
+  into a 25×30 m slab. `condition_ai_batch.py` now supports a spec-recorded
+  `pre_rotate_deg` ([90,0,0] for the anchor) that composes with the importer
+  transform; the reconditioned upright anchor (2.46 × 3.0 × 0.3 m) ships and
+  is placed on Mayday Bay. **`cc0/debris_pile`** is still the flat-slab
+  version (same bug class — recondition with `pre_rotate_deg` when needed;
+  nothing places it today).
 - **8-bike AI ride-over check** on Cape Town's container yard. The tilted containers
   sit on/along the race line by design (**82 of 332 within 6 m**) — they're ride-up-and-
   launch-off ramps, not walls (collision is opt-out via `kind` for GLB-baked geometry;
@@ -205,3 +213,19 @@ gitignored → R2, so they need **`pnpm assets:push`**.
 Per the [art-pass playbook](track-art-pass-playbook.md): props are kept **outside
 the AI corridor** (Catmull-Rom + buoy wall) and re-exported so the authored JSON is
 preserved.
+
+### Hunyuan retirement (2026-08-12)
+
+The last four `ai/*` placements were swapped to CC0 equivalents at
+height-parity scales, and the prop-showcase's eight `ai/*` entries deleted
+(their `cc0/*` twins were already in the scene). No track references any
+`ai/*` prop anymore:
+
+| Track | Was | Now |
+|---|---|---|
+| Mayday Bay | `ai/pilot_shack` @0.5 (7.0 m) | **`cc0/house_1`** @1.0 (6.98 m), same spot/rotation |
+| Mayday Bay | `ai/ship_anchor` @0.9 (8.1 m) | **`cc0/anchor`** (reconditioned upright) @2.7 (8.1 m) |
+| Mexico City | `ai/rubble_chunk` ×2 @1.0/0.9 | **`cc0/coastal_rock`** @1.8/1.62 (9.0/8.1 m shoreline boulders — interim until the mxc art language adds real building-rubble) |
+
+Verified: `validate:tracks` ✓ · posed `gen:track-shots` at all four sites
+(consoleErrors=false) ✓ · 8-bike `field-completion` no-jam on both tracks ✓.
