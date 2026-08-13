@@ -36,6 +36,54 @@ export interface SoundtrackEntry {
   license: string
   licenseUrl: string
   sourceUrl: string
+  /** Scene tags baked from the content-dir `playlists.json` by
+   *  `pnpm gen:music`: `'menu'` and/or `'level:<trackId>'`. A song with no
+   *  tags is part of the default pool (plays anywhere not otherwise scoped).
+   *  Absent ⇒ same as empty. See `menuPlaylist` / `levelPlaylist`. */
+  scenes?: string[]
+}
+
+/** Scene tag for the front-end (menu + lobby). */
+export const MENU_SCENE = 'menu'
+
+/** Scene tag for a specific level/track. */
+export function levelScene(trackId: string): string {
+  return `level:${trackId}`
+}
+
+/**
+ * The default pool — songs assigned to no scene. Falls back to the full set
+ * when every song is scoped somewhere, so a scene's playlist is never empty
+ * (silence). Pure; returns a fresh array.
+ */
+export function defaultPool(all: readonly SoundtrackEntry[]): SoundtrackEntry[] {
+  const pool = all.filter((e) => !e.scenes || e.scenes.length === 0)
+  return pool.length > 0 ? pool : [...all]
+}
+
+/**
+ * Playlist for the menu / lobby: songs tagged `'menu'`, or the default pool
+ * when nothing is tagged for the menu (so the front-end always has music and
+ * the no-`playlists.json` case keeps the full-shuffle behaviour). Pure.
+ */
+export function menuPlaylist(all: readonly SoundtrackEntry[]): SoundtrackEntry[] {
+  const tagged = all.filter((e) => e.scenes?.includes(MENU_SCENE))
+  return tagged.length > 0 ? tagged : defaultPool(all)
+}
+
+/**
+ * Playlist for a race on `trackId`: songs tagged `'level:<trackId>'`, or the
+ * default pool when that level has no specific assignment. Pure.
+ *
+ * Note this is the *radio's* playlist. A track whose JSON sets `audio.music`
+ * authors an explicit looping bed instead, and that wins — `setTrackAudio`
+ * pauses the jukebox once the bed's buffer loads (and falls back to the radio
+ * if it 404s). Explicit per-track authoring beats the shuffle by design.
+ */
+export function levelPlaylist(all: readonly SoundtrackEntry[], trackId: string): SoundtrackEntry[] {
+  const tag = levelScene(trackId)
+  const tagged = all.filter((e) => e.scenes?.includes(tag))
+  return tagged.length > 0 ? tagged : defaultPool(all)
 }
 
 /**

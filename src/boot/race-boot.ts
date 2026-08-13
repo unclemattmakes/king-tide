@@ -89,7 +89,7 @@ import { breakingFoam, createWaveCrestSprayDriver } from '@/engine/render/wave-c
 import { createWaveRiderRenderSystem } from '@/engine/render/wave-rider-render'
 import { createWindTrailsSystem } from '@/engine/render/wind-trails'
 import { parseReplay, type ReplayBike, type ReplayFile } from '@/engine/replay/format'
-import { getGhost, setGhost } from '@/engine/replay/ghost-state'
+import { getGhost } from '@/engine/replay/ghost-state'
 import { createReplayRecorder, type ReplayRecorder } from '@/engine/replay/recorder'
 import { getBestLap, recordLapTime } from '@/engine/save-state'
 import { createSimWorld } from '@/engine/sim/ecs/world'
@@ -172,6 +172,24 @@ import { deriveFallbackTheme, getTrackTheme } from '@/game/tracks/theme-catalog'
  * main-thread stall before the menu could paint
  * (docs/boot-overhaul-plan.md).
  */
+/**
+ * The track id implied by the URL alone — i.e. the part of the boot's track
+ * resolution that doesn't need the replay (which is parsed asynchronously
+ * further down). Shared by two callers so they can't drift: the soundtrack
+ * radio, which is installed early — before the replay is known — so its
+ * unlock listeners are attached during the loading screen, and the real
+ * resolution below, which additionally lets a replay pin its recorded track.
+ * A replay just gets the default music pool, which is the intent: the venue
+ * playlist follows the *live* URL, not the recording.
+ */
+function trackIdFromParams(params: URLSearchParams): string {
+  const raw = params.get('track')
+  if (raw && raw.length > 0) return raw
+  if (params.get('edit') === '1') return 'lagoon-edit'
+  if (params.get('bench') === '1') return DEFAULT_BENCH_TRACK
+  return 'lagoon'
+}
+
 export async function bootRace(appEl: HTMLElement) {
   // HUD element handles. May be missing in stripped-down test pages —
   // every consumer null-checks.
@@ -221,7 +239,15 @@ export async function bootRace(appEl: HTMLElement) {
   // strand the player in a windowed view. We piggyback on the audio-unlock
   // gesture because both need a real user gesture by browser policy.
   // Failures (already fullscreen, blocked by sandboxing) are swallowed.
+  //
+  // Scene-scoped playlist: this venue's set, per the content-dir
+  // playlists.json baked into the manifest (falling back to the default pool
+  // when the level has no assignment). Resolved from the URL here rather than
+  // from the `trackId` below because the radio's eager resume can pick a song
+  // immediately — reading it late would start the wrong playlist and swap
+  // mid-note.
   const audio = installSoundtrackRadio({
+    scene: { kind: 'level', trackId: trackIdFromParams(new URLSearchParams(location.search)) },
     onUnlock: () => {
       if (playerSettings.fullscreenPreferred && !document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => {
@@ -349,16 +375,7 @@ export async function bootRace(appEl: HTMLElement) {
   // Replay mode forces the original track id from the recording so the
   // ?track= URL param can't desync the playback from what was captured.
   const editMode = params.get('edit') === '1'
-  const rawTrack = params.get('track')
-  const trackId = activeReplay
-    ? activeReplay.meta.trackId
-    : rawTrack && rawTrack.length > 0
-      ? rawTrack
-      : editMode
-        ? 'lagoon-edit'
-        : benchMode
-          ? DEFAULT_BENCH_TRACK
-          : 'lagoon'
+  const trackId = activeReplay ? activeReplay.meta.trackId : trackIdFromParams(params)
 
   // Bike variant. URL `?bike=cruiser|racer|stunt` picks the player's
   // archetype; AI bikes always use the racer baseline for now. Variant

@@ -3,7 +3,8 @@
 //
 // Source: 14 Creative-Commons track(s), transcoded to Opus @ 112k VBR.
 // Artist/title parsed from the "<artist> - <title>.mp3" source filenames;
-// license + source URL merged from the credits.json sidecar next to them.
+// license + source URL merged from the credits.json sidecar next to them;
+// scene tags from the playlists.json sidecar (absent ⇒ default pool).
 
 import type { SoundtrackEntry } from './soundtrack'
 
@@ -39,6 +40,7 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC BY-SA 4.0",
     licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/",
     sourceUrl: "https://freemusicarchive.org/music/Blue_Wave_Theory/Superstorm/900-turbo",
+    scenes: ["menu"],
   },
   {
     file: "blue-wave-theory-frisbeat.opus",
@@ -95,6 +97,7 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC0 1.0",
     licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/",
     sourceUrl: "https://freemusicarchive.org/music/holiznacc0/left-overs/western-showdown/",
+    scenes: ["level:liberty-drowned"],
   },
   {
     file: "mr-smith-twango.opus",
@@ -103,6 +106,7 @@ export const SOUNDTRACK: readonly SoundtrackEntry[] = [
     license: "CC BY 4.0",
     licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
     sourceUrl: "https://freemusicarchive.org/music/mr-smith/streamliner/twango/",
+    scenes: ["menu"],
   },
   {
     file: "untimely-dosage-bum-lyfe.opus",

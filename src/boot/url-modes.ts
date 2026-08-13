@@ -214,9 +214,10 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     // Soundtrack radio — play music from the menu, not just once a race
     // loads. Installed before the menu renders so the first click/keypress
     // unlocks audio. (The page reloads into the race, which stands up its
-    // own radio for that lifetime.)
+    // own radio for that lifetime.) The menu gets its own scene slice so a
+    // front-end set can differ from what plays in a race.
     const { installSoundtrackRadio } = await import('@/engine/audio/soundtrack-radio')
-    installSoundtrackRadio()
+    installSoundtrackRadio({ scene: { kind: 'menu' } })
 
     // Menu first, attract second. The attract-mode import pulls the whole
     // game module graph (three.js + every render/sim system) — awaiting it
@@ -279,9 +280,9 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     const trackParam = earlyParams.get('track')
 
     // Same soundtrack radio behind the lobby as the menu — keeps music
-    // continuous across the pre-race surfaces.
+    // continuous across the pre-race surfaces, same menu scene slice.
     const { installSoundtrackRadio } = await import('@/engine/audio/soundtrack-radio')
-    installSoundtrackRadio()
+    installSoundtrackRadio({ scene: { kind: 'menu' } })
 
     hideLoadingScreen()
     // Same broadcast attract feed sits behind the lobby — keeps the

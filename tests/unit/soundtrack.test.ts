@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { makeShuffleOrder, reshuffleAvoiding } from '../../src/engine/audio/soundtrack'
+import {
+  defaultPool,
+  levelPlaylist,
+  makeShuffleOrder,
+  menuPlaylist,
+  reshuffleAvoiding,
+  type SoundtrackEntry,
+} from '../../src/engine/audio/soundtrack'
 import { SOUNDTRACK } from '../../src/engine/audio/soundtrack.generated'
 
 /**
@@ -84,5 +91,81 @@ describe('SOUNDTRACK manifest', () => {
     expect(byTitle.has("Suddenly It Occurs To Me There's No Ocean Here")).toBe(true)
     expect(byTitle.has('Hawaii 5-0 (CB 203)')).toBe(true)
     expect(byTitle.has('Sunny Positive Surf Rock (Sandy Shores)')).toBe(true)
+  })
+
+  it('only carries well-formed scene tags', () => {
+    // Guards a playlists.json typo baking a tag no resolver can ever match,
+    // which would silently drop the song out of every scene it meant to join.
+    for (const entry of SOUNDTRACK) {
+      for (const tag of entry.scenes ?? []) {
+        expect(tag === 'menu' || /^level:[a-z0-9-]+$/.test(tag)).toBe(true)
+      }
+    }
+  })
+})
+
+describe('scene playlists', () => {
+  /** Fixture entry — the licence fields are required on `SoundtrackEntry`
+   *  but irrelevant to scene resolution, so fill them once here and let the
+   *  cases below say only what they're actually about. */
+  const entry = (file: string, scenes?: string[]): SoundtrackEntry => ({
+    file,
+    artist: file.slice(0, 1).toUpperCase(),
+    title: file.replace('.opus', ''),
+    license: 'CC0 1.0',
+    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+    sourceUrl: 'https://example.test/',
+    ...(scenes ? { scenes } : {}),
+  })
+
+  const fixture: SoundtrackEntry[] = [
+    entry('a.opus', ['menu']),
+    entry('b.opus', ['menu', 'level:liberty-drowned']),
+    entry('c.opus', ['level:liberty-drowned']),
+    entry('d.opus'), // unscoped → default pool
+    entry('e.opus', []), // empty → default pool
+  ]
+
+  it('defaultPool is the unscoped songs', () => {
+    expect(defaultPool(fixture).map((e) => e.file)).toEqual(['d.opus', 'e.opus'])
+  })
+
+  it('menuPlaylist is the menu-tagged songs', () => {
+    expect(menuPlaylist(fixture).map((e) => e.file)).toEqual(['a.opus', 'b.opus'])
+  })
+
+  it('levelPlaylist is the songs tagged for that level (multi-scene song included)', () => {
+    expect(levelPlaylist(fixture, 'liberty-drowned').map((e) => e.file)).toEqual([
+      'b.opus',
+      'c.opus',
+    ])
+  })
+
+  it('a level with no specific assignment falls back to the default pool', () => {
+    expect(levelPlaylist(fixture, 'aqualand').map((e) => e.file)).toEqual(['d.opus', 'e.opus'])
+  })
+
+  it('falls back to the full set when every song is scoped (never silent)', () => {
+    const allScoped = [entry('x.opus', ['menu']), entry('y.opus', ['level:foo'])]
+    // No unscoped songs → default pool is the whole set, so an unassigned
+    // level still gets music instead of silence.
+    expect(levelPlaylist(allScoped, 'unassigned')).toHaveLength(2)
+    expect(defaultPool(allScoped)).toHaveLength(2)
+  })
+
+  it('with no tags anywhere, every scene gets the full shuffle (back-compat)', () => {
+    // The no-playlists.json case: behaviour identical to before scenes existed.
+    const untagged = [entry('p.opus'), entry('q.opus')]
+    expect(menuPlaylist(untagged)).toHaveLength(2)
+    expect(levelPlaylist(untagged, 'anything')).toHaveLength(2)
+  })
+
+  it('resolvers never mutate or alias the input array', () => {
+    const before = [...fixture]
+    defaultPool(fixture)
+    menuPlaylist(fixture)
+    levelPlaylist(fixture, 'liberty-drowned')
+    expect(fixture).toEqual(before)
+    expect(defaultPool(fixture)).not.toBe(fixture)
   })
 })

@@ -29,6 +29,17 @@ app.commandLine.appendSwitch('no-sandbox')
 // appendSwitch, since the zygote is spun up very early).
 app.commandLine.appendSwitch('no-zygote')
 
+// Autoplay: let the soundtrack radio start without a user gesture. The web
+// build can't escape Chromium's per-document autoplay policy — every page
+// reload re-arms the "needs a gesture" gate, which players experience as
+// having to click to "re-focus" the app after a scene change. The desktop
+// shell loads trusted local content over app://, so it's safe to disable
+// the gate outright: audio then plays from boot across every scene
+// (menu → race → results → …) with no clicks, even though each scene is
+// still its own page load. The renderer (soundtrack-radio.ts) also resumes
+// eagerly, which this switch lets succeed immediately.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+
 // WebGPU enablement is Linux-only.
 //
 // - On real Windows, Chromium's WebGPU is enabled by default for D3D12 on
@@ -57,7 +68,14 @@ if (process.platform === 'linux') {
 // Boot-time diagnostic: log which GPU-relevant flags this binary applied, so
 // `coredumpctl`/`journalctl`/Steam log scrapes can confirm the active config
 // without devtools. Reads back the actual values from commandLine.
-const gpuFlags = ['enable-unsafe-webgpu', 'enable-features', 'use-angle', 'no-sandbox', 'no-zygote']
+const gpuFlags = [
+  'enable-unsafe-webgpu',
+  'enable-features',
+  'use-angle',
+  'no-sandbox',
+  'no-zygote',
+  'autoplay-policy',
+]
 const applied = gpuFlags
   .map((f) => {
     const v = app.commandLine.getSwitchValue(f)
