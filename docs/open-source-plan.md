@@ -45,10 +45,14 @@ gates before the public flip. Not legal advice.*
 
 ## Remaining gates before the flip
 
-1. **Replace the 13 Hunyuan props** (`public/assets/props/ai/*`) with CC0 /
-   hand-made equivalents per the replacement catalog, then retire the GLBs
-   from R2 and the manifest. This also covers the live game — the territory
-   exposure exists today independent of the repo.
+1. ~~**Replace the 13 Hunyuan props**~~ — **DONE (#415, merged 2026-08-13).**
+   No track references any `ai/*` prop; the four live placements went to CC0
+   equivalents at height parity and `cc0/anchor` was reconditioned upright.
+   **One step left:** the GLBs are still *fetchable* on R2 even though nothing
+   loads them — `rclone delete r2-hoverbike:hoverbike-content/assets/props/ai`
+   (plus the local `public/assets/props/ai/` dir) closes the distribution
+   surface. Deliberately left as a manual call because bucket deletes don't
+   undo.
 2. **Verify PartyKit prod env** — `LEADERBOARD_HMAC_SECRET` and
    `LEADERBOARD_ADMIN_TOKEN` must be set on the deployed project
    (`pnpm exec partykit env list`); the HMAC path fails *open* to the dev
@@ -60,6 +64,13 @@ gates before the public flip. Not legal advice.*
    clone runs with zero credentials.
 4. **Re-cut king-tide from the final hoverbike main** (see runbook), then
    flip visibility.
+
+> **CI is a real gate again as of 2026-08-13 (#416).** It had been dead at
+> setup since June (pnpm/action-setup v6 vs the `packageManager` pin), which
+> also hid two asset-contract bugs behind it. `main` is now green on
+> `check-and-build`, `docs`, `determinism` and `QA`. That matters for the flip:
+> a public repo gets free Actions minutes on standard runners, so the CI the
+> project inherits on day one actually works.
 
 ## Flip runbook
 

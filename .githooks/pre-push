@@ -3,8 +3,10 @@
 #
 # Opt in by pointing git at this hooks dir (one-time, per clone):
 #     git config core.hooksPath .githooks
-# CI for this repo is unreliable (aborts at setup on a spending-limit
-# failure — see CLAUDE.md hard rule 1), so the local gate is the real one.
+# Catches problems a push-and-wait cycle would only surface minutes later,
+# and keeps the tree green regardless of CI. (CI itself is trustworthy again
+# since #416 — see CLAUDE.md hard rule 1 — this gate is the fast path, not a
+# replacement for it.)
 #
 # Runs `pnpm verify` (typecheck + lint + test). Any non-zero exit aborts
 # the push.

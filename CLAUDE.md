@@ -17,11 +17,20 @@ linked docs — extend those rather than growing this file.
 
 ## Hard rules (don't get these wrong)
 
-1. **Don't trust CI — verify locally.** GitHub Actions for this repo regularly
-   aborts at setup on a spending-limit failure (a ~2s failure on every job).
-   Don't gate work on green CI or wait for it. Before landing, run
-   `pnpm typecheck`, `pnpm test`, `pnpm lint`, `pnpm build` (plus
-   `pnpm test:blender` for Hoverbike-addon changes).
+1. **Verify locally before you push — but CI is real signal again (2026-08-13).**
+   Always run `pnpm typecheck`, `pnpm test`, `pnpm lint`, `pnpm build` (plus
+   `pnpm test:blender` for Hoverbike-addon changes) before landing; the
+   pre-push hook enforces `pnpm verify`. What changed: every workflow had been
+   dying at setup since 2026-06-25 — `pnpm/action-setup@v6` hard-errors when a
+   `version:` input is combined with package.json's `packageManager` pin — so
+   the old advice here was "don't trust CI, it aborts on a spending limit".
+   That diagnosis was wrong and the failure is fixed (#416). **A red check now
+   means something.** Read it before assuming it's infrastructure.
+   Blocking gates: `check-and-build`, `docs`, `determinism`. Informational:
+   `e2e` and `QA report` (both `continue-on-error`). Jobs that boot real
+   tracks hydrate assets from R2 and skip with a `::warning::` when
+   `RCLONE_CONF_BASE64` is absent (forks), so a fork's green run means "not
+   exercised", not "passed".
 
 2. **Verify with headed Playwright on _your own_ dev server — not the in-app preview.**
    For any visual/feel work the primary check is **headed Playwright** (`pnpm e2e`
