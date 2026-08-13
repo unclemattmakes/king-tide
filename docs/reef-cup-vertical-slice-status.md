@@ -100,7 +100,8 @@ slice-complete when **all** of these hold:
    see [Cross-cutting](#cross-cutting-the-cup-shell).)*
 
 Out of scope for *this* slice (tracked elsewhere, flagged so they're not
-forgotten): **soundtrack licensing** (today's tracks are CC0 placeholders) and
+forgotten): ~~**soundtrack licensing**~~ *(resolved 2026-08-12 — all 14 FMA
+tracks verified per-track, see [CREDITS.md](../CREDITS.md))* and
 the **wave-mastery legibility refit** (the "master the jump" pitch grading +
 wave-pump chyron rework from [CLAUDE.md](../CLAUDE.md)). The slice should still
 *exercise* wave-mastery — Mayday Bay's crest-launch + South Beach's wing-ramp are

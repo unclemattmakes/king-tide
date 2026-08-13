@@ -1428,18 +1428,33 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
      *  ship in the game. Three groups today: the Blender Studio brush
      *  textures (CC BY 4.0 — attribution is *required*), the soundtrack
      *  artists (driven off the generated `SOUNDTRACK` manifest so the list
-     *  can never drift from what actually plays), and Quaternius (CC0 props
-     *  — no attribution required, credited as a courtesy). Reached from the
-     *  mode-screen footer; it scrolls inside `#menu-stage` and inherits
-     *  keyboard / controller / touch nav from the menu-flow poller (the
-     *  BACK link + the external `<a>`s are all focusables). */
+     *  — including each track's CC license, which for every non-CC0 track
+     *  is a license obligation, not a courtesy — can never drift from what
+     *  actually plays; full per-track links live in CREDITS.md), and
+     *  Quaternius (CC0 props — no attribution required, credited as a
+     *  courtesy). Reached from the mode-screen footer; it scrolls inside
+     *  `#menu-stage` and inherits keyboard / controller / touch nav from
+     *  the menu-flow poller (the BACK link + the external `<a>`s are all
+     *  focusables). */
     function buildCredits(): HTMLElement {
       const el = document.createElement('section')
       el.className = 'bc-screen'
       const tracks = SOUNDTRACK.map(
         (t) =>
-          `<li><span class="bc-credit-title">${escapeHtml(t.title)}</span><span class="bc-credit-by">${escapeHtml(t.artist)}</span></li>`,
+          `<li><span class="bc-credit-title">${escapeHtml(t.title)}</span><span class="bc-credit-by">${escapeHtml(t.artist)} &middot; ${escapeHtml(t.license)}</span></li>`,
       ).join('')
+      // One deed link per distinct license in the rotation (CC0 has a
+      // dedication page too) + the archive everything came from.
+      const licenseLinks = [
+        ...new Map(
+          SOUNDTRACK.filter((t) => t.licenseUrl).map((t) => [t.license, t.licenseUrl]),
+        ).entries(),
+      ]
+        .map(
+          ([name, url]) =>
+            `<a href="${url}" target="_blank" rel="noopener">${escapeHtml(name)}</a>`,
+        )
+        .join('')
       el.innerHTML = `
         <div class="bc-section-head">
           <div>
@@ -1464,9 +1479,16 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           </section>
           <section class="bc-credit-group">
             <h3>MUSIC</h3>
-            <p>Soundtrack by these independent artists &mdash; each track remains
-              &copy; its creator, used with thanks.</p>
+            <p>Independent surf &amp; garage tracks from the <b>Free Music
+              Archive</b> &mdash; each track &copy; its artist, used under the
+              Creative-Commons license shown (our only change: transcoded to
+              Opus for streaming). Per-track source links live in the
+              project&rsquo;s <b>CREDITS.md</b>.</p>
             <ul class="bc-credit-tracks">${tracks}</ul>
+            <div class="bc-credit-links">
+              <a href="https://freemusicarchive.org" target="_blank" rel="noopener">freemusicarchive.org</a>
+              ${licenseLinks}
+            </div>
           </section>
           <section class="bc-credit-group">
             <h3>3D PROPS</h3>

@@ -106,6 +106,39 @@ test.describe('UI contact sheet', () => {
       await page.waitForTimeout(600)
       await shot(page, '06-settings')
       await page.keyboard.press('Escape')
+      await page.waitForTimeout(450)
+    }
+
+    // Credits (mode-screen footer) — third-party attribution incl. the
+    // per-track soundtrack licenses, which are a license obligation. The
+    // settings Escape can overshoot to the title screen, so walk to mode
+    // select from wherever we landed.
+    for (let i = 0; i < 4; i++) {
+      if (
+        await page
+          .locator('#mode-credits')
+          .isVisible()
+          .catch(() => false)
+      )
+        break
+      const title = page.locator('#menu.show .bc-title')
+      if (await title.isVisible().catch(() => false)) await title.click()
+      else await page.keyboard.press('Escape')
+      await page.waitForTimeout(450)
+    }
+    const creditsLink = page.locator('#mode-credits')
+    if (await creditsLink.isVisible().catch(() => false)) {
+      await creditsLink.click()
+      await page.waitForTimeout(900)
+      await shot(page, '07-credits')
+      // The track list scrolls inside the stage — grab the bottom half too
+      // so the full soundtrack table is reviewable.
+      await page
+        .locator('.bc-credits')
+        .evaluate((el) => el.closest('#menu-stage, .bc-screen')?.scrollTo(0, 99_999))
+        .catch(() => {})
+      await page.waitForTimeout(400)
+      await shot(page, '08-credits-scrolled')
     }
   })
 

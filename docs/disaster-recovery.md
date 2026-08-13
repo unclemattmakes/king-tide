@@ -22,7 +22,7 @@ prefixes `VITE_ASSET_BASE_URL`.
 | --- | --- |
 | Bucket | `hoverbike-content` (account OddballCreatureClub) |
 | Public URL | `https://hoverbike-content.mattscott.dev` (R2 custom domain) |
-| S3 endpoint | `https://<cloudflare-account-id>.r2.cloudflarestorage.com` |
+| S3 endpoint | `https://<account-id>.r2.cloudflarestorage.com` (account ID: Cloudflare dashboard → R2) |
 | rclone remote | `r2-hoverbike` (S3, provider Cloudflare — see asset-storage.md for the conf block) |
 | Layout | `public/assets/**` → `assets/**`, `public/audio/**` → `audio/**` |
 

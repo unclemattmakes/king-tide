@@ -99,16 +99,19 @@ LIB_BLEND_DIR = os.path.join(CONTENT_ROOT, "tracks-src", "props", "ai")
 # prompt in the manifest; the concept image is an intermediate toward it.
 CONCEPT_ART_DIR = os.path.join(CONTENT_ROOT, "concept-art", "props")
 
-# ── Server / tool config (env-overridable, Windows defaults per the doc) ─
+# ── Server / tool config (env-overridable; defaults assume the conventional
+# home-dir layout from docs/ai-prop-pipeline.md — set the env vars if yours
+# lives elsewhere) ─
+_HOME = os.path.expanduser("~")
 COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188")
 HUNYUAN_URL = os.environ.get("HUNYUAN_URL", "http://127.0.0.1:8080")
-COMFY_DIR = os.environ.get("COMFYUI_DIR", r"C:\Users\<user>\git\ComfyUI")
+COMFY_DIR = os.environ.get("COMFYUI_DIR", os.path.join(_HOME, "git", "ComfyUI"))
 COMFY_PY = os.environ.get(
-    "COMFYUI_PY", r"C:\Users\<user>\miniconda3\envs\comfyui\python.exe")
+    "COMFYUI_PY", os.path.join(_HOME, "miniconda3", "envs", "comfyui", "python.exe"))
 HUNYUAN_DIR = os.environ.get(
-    "HUNYUAN_DIR", r"C:\Users\<user>\git\ai-gen\Hunyuan3D-2")
+    "HUNYUAN_DIR", os.path.join(_HOME, "git", "ai-gen", "Hunyuan3D-2"))
 HUNYUAN_PY = os.environ.get(
-    "HUNYUAN_PY", r"C:\Users\<user>\miniconda3\envs\hunyuan\python.exe")
+    "HUNYUAN_PY", os.path.join(_HOME, "miniconda3", "envs", "hunyuan", "python.exe"))
 
 _BLENDER_DEFAULTS = {
     "win32": r"C:\Program Files\Blender Foundation\Blender 5.1\blender.exe",

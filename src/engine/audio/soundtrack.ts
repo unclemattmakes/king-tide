@@ -1,6 +1,6 @@
 /**
- * Soundtrack radio — the licensed-music jukebox that rides the audio
- * engine's music bus. Plays the commissioned tracks (see
+ * Soundtrack radio — the CC-licensed-music jukebox that rides the audio
+ * engine's music bus. Plays the Creative-Commons tracks (see
  * `soundtrack.generated.ts`, built by `pnpm gen:music`) in a shuffled,
  * gapless-looping rotation across menus and races, EA-Trax style.
  *
@@ -22,11 +22,20 @@
 
 import { assetUrl } from '@/engine/asset-url'
 
-/** One licensed track. `file` is a basename under `public/audio/music/`. */
+/** One soundtrack track. `file` is a basename under `public/audio/music/`.
+ *  The license fields come from the `credits.json` sidecar that lives next
+ *  to the source mp3s (merged in by `tools/convert-music.mjs`): `license`
+ *  is the short label ("CC BY-SA 4.0"), `licenseUrl` the deed link, and
+ *  `sourceUrl` the canonical track page the file was downloaded from. The
+ *  credits screen and CREDITS.md render these — attribution is a license
+ *  requirement for every non-CC0 track, not a courtesy. */
 export interface SoundtrackEntry {
   file: string
   artist: string
   title: string
+  license: string
+  licenseUrl: string
+  sourceUrl: string
 }
 
 /**

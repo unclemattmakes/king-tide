@@ -2,10 +2,15 @@
   "name": "hoverbike",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unclemattmakes/king-tide.git"
+  },
   "type": "module",
   "packageManager": "pnpm@10.33.4",
   "description": "Wave-mastery arcade hover-bike racing on a drowned Earth.",
-  "author": "Hoverbike",
+  "author": "Uncle Matt Makes",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",

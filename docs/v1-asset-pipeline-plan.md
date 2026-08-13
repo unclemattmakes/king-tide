@@ -215,8 +215,8 @@ flash, anti-grav trails, lava steam, lighthouse beam, neon glow,
 crane shadow, bell ripple, torch flame, oxidation shimmer, palm
 sway, jungle motes, gull flocks, ferry-wake foam, container rust
 streaks, tsunami spray). Today each is a one-off render system or
-doesn't exist. WebGPU constraint (per [memory:webgpu particles](../../../C--Users-matts-projects-hoverbike/memory/feedback_webgpu_particles.md)):
-must be `SpriteNodeMaterial + InstancedMesh`, no `ShaderMaterial`,
+doesn't exist. WebGPU constraint (learned the hard way in the v1 VFX
+work): must be `SpriteNodeMaterial + InstancedMesh`, no `ShaderMaterial`,
 no `THREE.Points`.
 
 **Fix.** Single emitter abstraction. Blender side: `kind = "emitter"`

@@ -11,7 +11,8 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 > possible DLC — no shipped track places zones, and the tutorial's `ANTI-GRAV`
 > beat is parked with it); **wave mastery** is now a motocross *master-the-jump*
 > model (pitch the takeoff/landing), not the press-forward-on-crest pump; the
-> soundtrack is **CC0 placeholder**, licensing still open. See
+> soundtrack is **14 verified Creative-Commons tracks** (FMA; per-track
+> licenses + links in [CREDITS.md](CREDITS.md)). See
 > [docs/status.md](docs/status.md) and [docs/product-plan.md](docs/product-plan.md).
 
 - [Status](docs/status.md) — current state, controls, known issues, roadmap
@@ -57,7 +58,7 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 - **Multiplayer** — `?room=<id>` lobby with smash-bros pick + ready states + sticky raceStarted bit for late joiners; host-elected AI sync, 20 Hz transform snapshots, live RTT readout, in-race HUD chip with peer slot + ping
 - **Best-lap save state** per (track, bike) in localStorage + ghost replay
 - **Tutorial framework** — track-agnostic beat director (THROTTLE → CRUISE → LOOK → WAVE PUMP → DRIFT → READY; `?tutorial=1`). *(Anti-grav is cut from races — parked for a possible future DLC — so there is no anti-grav tutorial beat.)*
-- **Procedural audio** — four-bus mixer (master / music / sfx / ambient) + sidechain duck on pump/explosion + drift skid loop + per-tier release whoosh + procedural music pad bed (CC0 placeholder soundtrack; licensing still open)
+- **Procedural audio** — four-bus mixer (master / music / sfx / ambient) + sidechain duck on pump/explosion + drift skid loop + per-tier release whoosh + procedural music pad bed (fallback under the CC-licensed FMA soundtrack — see [CREDITS.md](CREDITS.md))
 - **Accessibility** — colorblind palettes (deuteranopia / protanopia / tritanopia), reduced flash, large text, high contrast, motion-sickness reduction, screen-shake intensity, subtitles always on
 - **Rider editor** — `?rideredit=1` opens a turntable where each rider bone can be reshaped (primitives + colours + seated pose). Load / Save / Export.
 - **In-app track editor** — `?edit=1` opens a TransformControls editor over the JSON track snapshot; gates / pickups / boost pads / spline points placeable + drag-manipulable; Save writes back via a dev-only Vite middleware
@@ -173,6 +174,16 @@ See [`docs/adr/`](docs/adr/README.md) for the full set of architecture decisions
 
 - **AI on vertical/elevated terrain** — AI racers can jam where the race line climbs sharply or hugs raised terrain (gates floating above the surface, crosswise gate facing). Fixes are per-track level-design work; the full 8-bike field is now guarded for the Reef Cup tracks by `tests/e2e/field-completion.spec.ts` (runs by default). Player-only races and human multiplayer are unaffected.
 - **Multiplayer e2e coverage** — M10.11 transform-snapshot sync is covered by unit tests + manual playtest; a two-tab Playwright probe is not yet automated. Bugs that only manifest cross-tab need to be reproduced manually.
+
+## License
+
+- **Code** — [MIT](LICENSE).
+- **Game content** — art, tracks, audio, and everything served from the asset
+  CDN (`public/assets/`, `public/audio/`, at any git revision) is **not** under
+  the MIT code license; see [CONTENT-LICENSE.md](CONTENT-LICENSE.md). Third-party
+  and AI-generated content is itemised in [CREDITS.md](CREDITS.md).
+- **Name & logo** — "King Tide" (and the working title "Hoverbike") identify this
+  project and aren't licensed for reuse; forks should ship under their own name.
 
 ## Contributing
 

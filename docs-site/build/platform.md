@@ -50,4 +50,4 @@ The Gamepad API is read every frame from `navigator.getGamepads()`. Plug a contr
 
 ## Hosting
 
-Vercel push-to-deploy from `main`. Cloudflare CDN is ready but not yet attached to a custom domain. The Vercel team is `oddballcreatureclubs-projects`.
+Vercel push-to-deploy from `main`. Cloudflare CDN is ready but not yet attached to a custom domain.

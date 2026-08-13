@@ -3310,5 +3310,5 @@ The conventions, bugs, and gotchas above are the load-bearing context. Some spec
 - The `tests/e2e/m6-autoplay.spec.ts` test prints the player trajectory — invaluable for debugging AI behaviour and physics edge cases. Several other specs follow the same "drive a scenario then dump samples" pattern (see `m9-ramp.spec.ts` for the canonical example).
 - URL params: `?track=lagoon|cliffside` and `?bike=cruiser|racer|stunt`. Defaults are `lagoon` + `racer`. Players also reach these via the GARAGE button.
 - Vercel auto-deploys on push to `main`. There is no preview-deploy gate, so don't push half-broken code.
-- The user (matt / occ-matt) prefers tight, focused commits with explicit "why" in the message. Co-author tag is `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
+- The maintainer prefers tight, focused commits with explicit "why" in the message, co-author-tagged when an AI session wrote them.
 - The user is OK with auto mode pushing through routine tasks but wants to be the empirical source of truth on "feel" — playtest reports trump my analysis.

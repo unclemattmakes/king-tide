@@ -15,9 +15,12 @@
 >    2026-06 content pass; the Reef opener **Mexico City** (slug `mexico-city`)
 >    — drowned, on the old Lake Texcoco bed — was rebuilt via the Texcoco art
 >    pass and now ships, so the Reef Cup is ungated as of 2026-06-10.)*
-> 3. **The soundtrack is CC0 placeholder music, not commissioned/licensed.** The
->    14 `.opus` tracks play, but licensing is still open work. Entries calling
->    them "commissioned" / "licensed" are aspirational.
+> 3. **The soundtrack is 14 verified Creative-Commons tracks** (Free Music
+>    Archive; mix of CC0 / CC BY / CC BY-SA / CC BY-NC — per-track licenses,
+>    links and constraints in [CREDITS.md](../CREDITS.md)). Older entries
+>    calling them "commissioned" / "licensed" / "CC0 placeholder" are stale.
+>    The NC tracks are fine while the game is non-commercial; the SA tracks
+>    must not be baked into published trailer videos.
 >
 > Wave mastery has also pivoted to a motocross pitch-the-takeoff/landing model
 > (the Mario-Kart fork), away from the press-forward-on-crest pump described

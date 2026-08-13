@@ -99,7 +99,7 @@ type = s3
 provider = Cloudflare
 access_key_id = <your R2 access key id>
 secret_access_key = <your R2 secret>
-endpoint = https://<cloudflare-account-id>.r2.cloudflarestorage.com
+endpoint = https://<your-cloudflare-account-id>.r2.cloudflarestorage.com
 region = auto
 ```
 

@@ -35,8 +35,8 @@ Strategy, archetype list, and the **subject-suitability rule** live in
 
 ## Stage 1 — Concept art (ComfyUI, text→image)
 
-- **Env:** `C:\Users\<user>\miniconda3\envs\comfyui` (Python 3.11, torch **cu128** — Blackwell needs it).
-- **Repo:** `C:\Users\<user>\git\ComfyUI`. **Model:** SDXL base 1.0 in `models/checkpoints/sd_xl_base_1.0.safetensors`.
+- **Env:** `%USERPROFILE%\miniconda3\envs\comfyui` (Python 3.11, torch **cu128** — Blackwell needs it).
+- **Repo:** `%USERPROFILE%\git\ComfyUI`. **Model:** SDXL base 1.0 in `models/checkpoints/sd_xl_base_1.0.safetensors`.
 - **Start:** `python main.py --port 8188` → http://127.0.0.1:8188.
 - **Client:** [`tools/comfyui_gen.py`](../tools/comfyui_gen.py) — SDXL txt2img over the HTTP API (POST `/prompt` → poll `/history/{id}` → GET `/view`):
   ```
@@ -70,7 +70,7 @@ single-object inputs live in `<content-root>/concept-art/midjourney/<level>/`.
 
 ## Stage 2 — Image→3D (Hunyuan3D)
 
-- **Env:** `C:\Users\<user>\miniconda3\envs\hunyuan` (Python 3.11, torch cu128). **Repo:** `C:\Users\<user>\git\ai-gen\Hunyuan3D-2`. **Model:** `Hunyuan3D-2mini` (auto-caches to `~/.cache/huggingface`).
+- **Env:** `%USERPROFILE%\miniconda3\envs\hunyuan` (Python 3.11, torch cu128). **Repo:** `%USERPROFILE%\git\ai-gen\Hunyuan3D-2`. **Model:** `Hunyuan3D-2mini` (auto-caches to `~/.cache/huggingface`).
 - **Start** (⚠ must `cd` into the repo dir — `gradio_cache` is cwd-relative): `python api_server.py --port 8080`.
 - **⚠ IMAGE-TO-3D ONLY.** Text→3D is disabled — `pipeline_t2i` is commented out in `api_server.py`. A text prompt crashes the worker thread *and* `/status` then hangs on `"processing"` forever. Always send an image (that's why ComfyUI is the front of the chain).
 - **API:** `POST /send {image:<base64>, octree_resolution:256, num_inference_steps:20, guidance_scale:5.5, texture:false}` → `{uid}`. `GET /status/{uid}` → `{"status":"processing"}` until done, then `{"status":"completed","model_base64":<glb>}`. Run **shape-only** (`texture:false`) — the conditioner strips materials anyway; keeps VRAM ~6 GB. Output ≈ 200–500 k tris.
@@ -105,7 +105,7 @@ locally as of 2026-06-01, with two gotchas:
 
 Run inside Blender on the imported mesh:
 ```python
-import sys; sys.path.insert(0, r"C:\Users\<user>\projects\hoverbike")
+import sys; sys.path.insert(0, r"<path-to-your-hoverbike-clone>")
 from tools.blender.condition_ai_mesh import condition_active
 condition_active(prop_id="stone_idol", family="prop", target_tris=2000,
                  target_height=4.0, collider="box", tint="#8a8782", smooth=True)
@@ -247,8 +247,8 @@ both be loaded at once.** Hand the VRAM back and forth:
   ```
 - **Start Hunyuan** (background; **cd into the repo dir**):
   ```powershell
-  Set-Location 'C:\Users\<user>\git\ai-gen\Hunyuan3D-2'
-  & 'C:\Users\<user>\miniconda3\envs\hunyuan\python.exe' api_server.py --port 8080
+  Set-Location "$env:USERPROFILE\git\ai-gen\Hunyuan3D-2"
+  & "$env:USERPROFILE\miniconda3\envs\hunyuan\python.exe" api_server.py --port 8080
   ```
   Poll `GET /openapi.json` until it returns 200 (~60 s model load).
 - **Free ComfyUI** (unload SDXL, keep the server up):

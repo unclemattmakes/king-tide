@@ -190,5 +190,17 @@ aren't. The project owner has the final call on what crosses the line.
 
 ## License
 
-By contributing you agree that your contribution is licensed under the
-MIT License (see [`LICENSE`](LICENSE)).
+By contributing you agree that your **code** contribution is licensed under
+the MIT License (see [`LICENSE`](LICENSE)).
+
+**Content contributions** (models, textures, audio, tracks, art) follow
+[`CONTENT-LICENSE.md`](CONTENT-LICENSE.md) and carry two extra requirements:
+
+1. **Provenance is mandatory.** State where every asset came from and its
+   license. Only CC0 or CC-BY third-party material is accepted (no NC/ND/SA
+   without prior discussion), and it must be recorded in
+   [`CREDITS.md`](CREDITS.md) with author + source + license links.
+2. **AI-generated content must be disclosed** (tool + prompt where
+   practical). Raw AI output is labeled as machine-generated in CREDITS.md
+   and carries no copyright claim; substantially reworked pieces should say
+   what the human contribution was.

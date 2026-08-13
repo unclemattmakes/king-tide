@@ -7,6 +7,12 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Local env — docs/leaderboard-backend.md tells contributors to put
+# VITE_LEADERBOARD_HMAC_SECRET in a .env; make sure it can never land in git.
+.env
+.env.*
+!.env.example
+
 # Compiled runtime assets (track/bike/prop GLBs, thumb/hero JPGs, atlas PNGs,
 # opus soundtrack) are served from Cloudflare R2 — NOT git. This is what keeps
 # Vercel deploys from re-pulling ~160 MB of git-LFS on every build. The app
