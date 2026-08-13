@@ -60,7 +60,7 @@ jobs:
       # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: pnpm
