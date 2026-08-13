@@ -1,21 +1,13 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { type GltfRoot, parseGlbJson } from '@/game/tracks/glb-loader'
+import { readAssetBytes } from './helpers/assets'
 
-const REPO_ROOT = path.resolve(__dirname, '../..')
-const RACER_GLB = path.join(REPO_ROOT, 'public', 'assets', 'bikes', 'racer.glb')
-
-// Compiled GLBs live in Git LFS (see docs/asset-storage.md). On a clone
-// without `git lfs install` — or a CI runner checked out without `lfs: true` —
-// the file arrives as a pointer stub, not real bytes. Detect that and skip the
-// suite with a clear reason rather than failing on a cryptic "invalid magic"
-// parse error. CI checks out with `lfs: true`, so it exercises the real
-// contract below.
-const LFS_POINTER_PREFIX = 'version https://git-lfs.github.com/spec/v1'
-const buf = fs.readFileSync(RACER_GLB)
-const isLfsPointer =
-  buf.subarray(0, LFS_POINTER_PREFIX.length).toString('utf8') === LFS_POINTER_PREFIX
+// Compiled GLBs are not in git — they're served from R2 and gitignored (see
+// docs/asset-storage.md), so they're absent until `pnpm assets:pull` and in
+// CI's deliberately asset-free `check-and-build` job. Skip with a stated
+// reason rather than failing on a missing file; every environment that *has*
+// the bytes (local dev, hydrated CI jobs) still exercises the contract below.
+const racer = readAssetBytes('bikes/racer.glb')
 
 /**
  * Bike GLB contract test.
@@ -27,9 +19,10 @@ const isLfsPointer =
  * builder ever stops emitting one of these nodes, the runtime breaks
  * silently; this test catches the regression headlessly.
  */
-describe.skipIf(isLfsPointer)('bike GLB contract — racer.glb', () => {
-  const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
-  const gltf: GltfRoot = isLfsPointer ? { nodes: [] } : parseGlbJson(ab)
+describe.skipIf(!racer.available)(racer.describeSuffix('bike GLB contract — racer.glb'), () => {
+  // The body still runs to collect tests even when skipped, so keep the parse
+  // behind the availability check.
+  const gltf: GltfRoot = racer.available ? parseGlbJson(racer.arrayBuffer()) : { nodes: [] }
   const nodes = gltf.nodes ?? []
 
   it('contains exactly one bike_root with the canonical extras', () => {

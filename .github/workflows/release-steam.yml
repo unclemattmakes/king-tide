@@ -57,9 +57,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - uses: actions/setup-node@v6
         with:

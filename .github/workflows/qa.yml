@@ -33,13 +33,17 @@ jobs:
     # because the orchestrator's real exit code is the most diagnostic
     # signal an artifact can carry.
     continue-on-error: true
+    env:
+      E2E_HEADLESS: '1'
+      # Secret mapped to env so step `if:` can read it (the `secrets` context
+      # is not available in `if:`). Same pattern as ci.yml's e2e/determinism.
+      RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
 
     steps:
       - uses: actions/checkout@v6
 
+      # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - uses: actions/setup-node@v6
         with:
@@ -48,14 +52,39 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The QA matrix boots every track for real, so it needs the compiled
+      # GLBs — which are gitignored and served from R2 (docs/asset-storage.md).
+      # Without this the whole matrix fails on missing assets, which is what it
+      # did silently for months. Gated on the secret so forks degrade to the
+      # skip notice below instead of a misleading red matrix.
+      - name: Install rclone
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        uses: AnimMouse/setup-rclone@v1
+
+      - name: Hydrate assets from R2
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        env:
+          RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rclone"
+          echo "$RCLONE_CONF_BASE64" | base64 -d > "$RUNNER_TEMP/rclone/rclone.conf"
+          export RCLONE_CONFIG="$RUNNER_TEMP/rclone/rclone.conf"
+          pnpm assets:pull
+
       - name: Install Playwright Chromium
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
         run: pnpm e2e:install
 
       - name: Run pnpm qa
         # The orchestrator skips Blender-side track-lint by default —
         # `--track-lint` opts in when BLENDER_EXE is on PATH (CI doesn't
         # have Blender, so we don't pass it here).
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
         run: pnpm qa
+
+      - name: Skip notice (no asset secret)
+        if: ${{ env.RCLONE_CONF_BASE64 == '' }}
+        run: echo "::warning::RCLONE_CONF_BASE64 not set — skipping the QA matrix (cannot hydrate assets from R2). It runs for real on branches/PRs with the secret."
 
       - name: Append report to job summary
         if: always()
@@ -92,23 +121,47 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     continue-on-error: true
+    env:
+      E2E_HEADLESS: '1'
+      RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
 
     steps:
       - uses: actions/checkout@v6
+      # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 10
       - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      # Same asset story as the qa job above — the soak boots real tracks.
+      - name: Install rclone
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        uses: AnimMouse/setup-rclone@v1
+
+      - name: Hydrate assets from R2
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        env:
+          RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rclone"
+          echo "$RCLONE_CONF_BASE64" | base64 -d > "$RUNNER_TEMP/rclone/rclone.conf"
+          export RCLONE_CONFIG="$RUNNER_TEMP/rclone/rclone.conf"
+          pnpm assets:pull
+
       - name: Install Playwright Chromium
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
         run: pnpm e2e:install
 
       - name: Run pnpm qa --soak
+        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
         run: pnpm qa --soak
+
+      - name: Skip notice (no asset secret)
+        if: ${{ env.RCLONE_CONF_BASE64 == '' }}
+        run: echo "::warning::RCLONE_CONF_BASE64 not set — skipping the QA soak (cannot hydrate assets from R2)."
 
       - name: Append soak report to job summary
         if: always()

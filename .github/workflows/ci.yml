@@ -3,6 +3,11 @@ name: ci
 # Typecheck, lint, unit tests, build, docs build.
 # E2E (Playwright) runs in a separate job because it needs a browser install
 # and is heavier.
+#
+# pnpm version: never pass `version:` to pnpm/action-setup. Since v6 the action
+# hard-fails ("Multiple versions of pnpm specified") when that input is combined
+# with a `packageManager` field in package.json, which this repo pins. The pin is
+# the single source of truth — passing both broke every job in every workflow.
 
 on:
   push:
@@ -26,9 +31,8 @@ jobs:
       # `determinism` jobs, which hydrate from R2.
       - uses: actions/checkout@v6
 
+      # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - uses: actions/setup-node@v6
         with:
@@ -54,9 +58,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+      # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 10
       - uses: actions/setup-node@v6
         with:
           node-version: 20
@@ -78,9 +81,8 @@ jobs:
       RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
     steps:
       - uses: actions/checkout@v6
+      # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 10
       - uses: actions/setup-node@v6
         with:
           node-version: 20
@@ -135,9 +137,8 @@ jobs:
       RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
     steps:
       - uses: actions/checkout@v6
+      # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 10
       - uses: actions/setup-node@v6
         with:
           node-version: 20
@@ -188,9 +189,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+      # No `version:` — package.json's `packageManager` pin owns it.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 10
       - uses: actions/setup-node@v6
         with:
           node-version: 20
