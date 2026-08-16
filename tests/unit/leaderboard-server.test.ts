@@ -125,6 +125,29 @@ function submitReq(body: SubmitBody, ip = '203.0.113.1'): Party.Request {
   )
 }
 
+/** An authenticated admin request. Pass `body` for the POST routes. */
+function adminReq(method: string, suffix: string, body?: unknown): Party.Request {
+  return asPartyRequest(
+    new Request(`http://example.com/parties/leaderboard/global${suffix}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${ADMIN_TOKEN}`,
+        ...(body ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    }),
+  )
+}
+
+type UnblockResponse = {
+  ok: boolean
+  handle: string
+  removed: boolean
+  blocklistSize: number
+}
+
+type BlocklistResponse = { ok: boolean; handles: string[]; blocklistSize: number }
+
 async function asJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T
 }
@@ -461,6 +484,137 @@ describe('leaderboard server — admin', () => {
     })
     const res = await server.onRequest(submitReq(retry, '198.51.100.100'))
     expect(await asJson<SubmitResponse>(res)).toMatchObject({ ok: false, error: 'blocked-handle' })
+  })
+
+  it('unblocks a handle — it can submit again', async () => {
+    const { server } = makeServer()
+    // Block, then confirm the block bites.
+    const block = await server.onRequest(adminReq('POST', '/admin/block', { handle: 'TST' }))
+    expect(block.status).toBe(200)
+    const blocked = await server.onRequest(
+      submitReq(
+        await buildSignedBody({
+          trackId: 'lagoon',
+          handle: 'TST',
+          bikeId: 'racer',
+          bestLap: 30,
+        }),
+        '203.0.113.30',
+      ),
+    )
+    expect(await asJson<SubmitResponse>(blocked)).toMatchObject({
+      ok: false,
+      error: 'blocked-handle',
+    })
+    // Unblock.
+    const unblock = await server.onRequest(adminReq('DELETE', '/admin/block/TST'))
+    expect(unblock.status).toBe(200)
+    expect(await asJson<UnblockResponse>(unblock)).toMatchObject({
+      ok: true,
+      handle: 'TST',
+      removed: true,
+      blocklistSize: 0,
+    })
+    // Same handle now lands. Fresh IP to dodge the rate limit.
+    const retry = await server.onRequest(
+      submitReq(
+        await buildSignedBody({
+          trackId: 'lagoon',
+          handle: 'TST',
+          bikeId: 'racer',
+          bestLap: 30,
+        }),
+        '198.51.100.30',
+      ),
+    )
+    expect(retry.status).toBe(200)
+    expect(await asJson<SubmitResponse>(retry)).toMatchObject({ ok: true, improved: true })
+  })
+
+  it('unblocks the block half of wipe-handle', async () => {
+    const { server } = makeServer()
+    await server.onRequest(adminReq('DELETE', '/admin/handle/OOPS'))
+    const unblock = await server.onRequest(adminReq('DELETE', '/admin/block/OOPS'))
+    expect(await asJson<UnblockResponse>(unblock)).toMatchObject({ removed: true })
+    const res = await server.onRequest(
+      submitReq(
+        await buildSignedBody({
+          trackId: 'lagoon',
+          handle: 'OOPS',
+          bikeId: 'racer',
+          bestLap: 30,
+        }),
+        '198.51.100.31',
+      ),
+    )
+    expect(res.status).toBe(200)
+  })
+
+  it('unblocking an unblocked handle is a no-op, not an error', async () => {
+    const { server } = makeServer()
+    const res = await server.onRequest(adminReq('DELETE', '/admin/block/NEVERBLOCKD'))
+    expect(res.status).toBe(200)
+    expect(await asJson<UnblockResponse>(res)).toMatchObject({ removed: false, blocklistSize: 0 })
+  })
+
+  it('rejects unblock without a bearer token', async () => {
+    const { server } = makeServer()
+    await server.onRequest(adminReq('POST', '/admin/block', { handle: 'TST' }))
+    const res = await server.onRequest(
+      asPartyRequest(
+        new Request('http://example.com/parties/leaderboard/global/admin/block/TST', {
+          method: 'DELETE',
+        }),
+      ),
+    )
+    expect(res.status).toBe(401)
+    // And the handle is still blocked.
+    const list = await server.onRequest(adminReq('GET', '/admin/blocklist'))
+    expect(await asJson<BlocklistResponse>(list)).toMatchObject({ handles: ['TST'] })
+  })
+
+  it('rejects unblock with the wrong bearer token', async () => {
+    const { server } = makeServer()
+    await server.onRequest(adminReq('POST', '/admin/block', { handle: 'TST' }))
+    const res = await server.onRequest(
+      asPartyRequest(
+        new Request('http://example.com/parties/leaderboard/global/admin/block/TST', {
+          method: 'DELETE',
+          headers: { authorization: 'Bearer not-the-admin-token' },
+        }),
+      ),
+    )
+    expect(res.status).toBe(401)
+    const list = await server.onRequest(adminReq('GET', '/admin/blocklist'))
+    expect(await asJson<BlocklistResponse>(list)).toMatchObject({ handles: ['TST'] })
+  })
+
+  it('lists the blocklist, sorted', async () => {
+    const { server } = makeServer()
+    const empty = await server.onRequest(adminReq('GET', '/admin/blocklist'))
+    expect(empty.status).toBe(200)
+    expect(await asJson<BlocklistResponse>(empty)).toMatchObject({ handles: [], blocklistSize: 0 })
+    for (const handle of ['ZED', 'ABC']) {
+      await server.onRequest(adminReq('POST', '/admin/block', { handle }))
+    }
+    await server.onRequest(adminReq('DELETE', '/admin/handle/MID'))
+    const list = await server.onRequest(adminReq('GET', '/admin/blocklist'))
+    expect(await asJson<BlocklistResponse>(list)).toMatchObject({
+      handles: ['ABC', 'MID', 'ZED'],
+      blocklistSize: 3,
+    })
+  })
+
+  it('rejects GET /admin/blocklist without a bearer token', async () => {
+    const { server } = makeServer()
+    const res = await server.onRequest(
+      asPartyRequest(
+        new Request('http://example.com/parties/leaderboard/global/admin/blocklist', {
+          method: 'GET',
+        }),
+      ),
+    )
+    expect(res.status).toBe(401)
   })
 
   it('audit log captures outcomes', async () => {

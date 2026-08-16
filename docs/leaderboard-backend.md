@@ -138,10 +138,21 @@ pnpm leaderboard:moderate wipe-entry the-maw 3
 
 # Block a future submission without touching past entries.
 pnpm leaderboard:moderate block SOMEHANDLE
+
+# See what's currently blocked.
+pnpm leaderboard:moderate blocklist
+
+# Undo a block (mistake, or a test handle).
+pnpm leaderboard:moderate unblock TST
 ```
 
 All commands honour `--host=<host>` (default
 `hoverbike.occ-matt.partykit.dev`).
+
+`unblock` only lifts the block — entries removed by `wipe-handle` are
+gone and don't come back. It's idempotent: unblocking a handle that
+isn't listed prints "was not on the blocklist" and changes nothing, so
+a typo reads as a typo rather than a silent success.
 
 ### When to reach for which lever
 
@@ -151,6 +162,8 @@ All commands honour `--host=<host>` (default
 | Implausibly fast time, single row  | `wipe-entry <track> <rank>`            |
 | Same player re-creating with leet  | `block` after each `wipe-handle`       |
 | "Is this account being abused?"    | `audit --limit 500`                    |
+| "What handles are blocked?"        | `blocklist`                            |
+| Blocked the wrong handle / a test  | `unblock <HANDLE>`                     |
 
 ## Threat model — what's protected, what isn't
 

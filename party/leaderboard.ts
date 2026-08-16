@@ -17,7 +17,8 @@
  *   4. Profanity filter + blocklist    — front line for offensive
  *      handles.
  *   5. Admin endpoints                 — reactive removal (handle
- *      wipe, entry wipe, block, audit). The actual line of defence.
+ *      wipe, entry wipe, block/unblock, audit). The actual line of
+ *      defence.
  *
  * Routes (all relative to `/parties/leaderboard/global`):
  *
@@ -27,6 +28,8 @@
  *   DELETE /admin/handle/:h     — wipe handle everywhere + block
  *   DELETE /admin/entry/:t/:r   — wipe one row by rank (1-indexed)
  *   POST   /admin/block         — add handle to blocklist
+ *   DELETE /admin/block/:h      — remove handle from blocklist
+ *   GET    /admin/blocklist     — list blocked handles
  *   GET    /admin/audit         — recent submissions
  *
  * Admin endpoints require `Authorization: Bearer <LEADERBOARD_ADMIN_TOKEN>`.
@@ -206,6 +209,17 @@ export default class LeaderboardServer implements Party.Server {
       if (!isAdmin(req, this.room.env))
         return jsonResponse(401, { ok: false, error: 'unauthorized' })
       return this.handleAdminBlock(req)
+    }
+    const unblockMatch = suffix.match(/^\/admin\/block\/([^/]+)$/)
+    if (req.method === 'DELETE' && unblockMatch) {
+      if (!isAdmin(req, this.room.env))
+        return jsonResponse(401, { ok: false, error: 'unauthorized' })
+      return this.handleAdminUnblock(decodeURIComponent(unblockMatch[1] ?? ''))
+    }
+    if (req.method === 'GET' && suffix === '/admin/blocklist') {
+      if (!isAdmin(req, this.room.env))
+        return jsonResponse(401, { ok: false, error: 'unauthorized' })
+      return this.handleAdminBlocklist()
     }
     if (req.method === 'GET' && suffix === '/admin/audit') {
       if (!isAdmin(req, this.room.env))
@@ -428,6 +442,29 @@ export default class LeaderboardServer implements Party.Server {
     blocklist.add(handle)
     await this.room.storage.put(BLOCKLIST_KEY, Array.from(blocklist))
     return jsonResponse(200, { ok: true, handle, blocklistSize: blocklist.size })
+  }
+
+  /** Remove a handle from the blocklist — the undo for `block` and for
+   *  the block half of `wipe-handle`. Wiped entries are not restored
+   *  (they're gone); this only lets the handle submit again.
+   *
+   *  Idempotent: unblocking a handle that isn't listed is a 200 with
+   *  `removed: false` rather than a 404, so a retried DELETE doesn't
+   *  look like a failure. The flag is what tells an operator they
+   *  typo'd. */
+  private async handleAdminUnblock(rawHandle: string): Promise<Response> {
+    const handle = normalizeHandle(rawHandle)
+    if (!handle) return jsonResponse(400, { ok: false, error: 'bad-request' })
+    const blocklist = await this.loadBlocklist()
+    const removed = blocklist.delete(handle)
+    if (removed) await this.room.storage.put(BLOCKLIST_KEY, Array.from(blocklist))
+    return jsonResponse(200, { ok: true, handle, removed, blocklistSize: blocklist.size })
+  }
+
+  private async handleAdminBlocklist(): Promise<Response> {
+    const blocklist = await this.loadBlocklist()
+    const handles = Array.from(blocklist).sort()
+    return jsonResponse(200, { ok: true, handles, blocklistSize: handles.length })
   }
 
   private async handleAdminAudit(url: URL): Promise<Response> {

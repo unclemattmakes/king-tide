@@ -3,8 +3,8 @@
  * Moderation CLI for the leaderboard Party.
  *
  * Wraps the admin HTTP endpoints on `/parties/leaderboard/global` so a
- * human reviewer can wipe a handle, remove a single row, block a
- * future submission, or skim the audit log. All admin endpoints
+ * human reviewer can wipe a handle, remove a single row, block or
+ * unblock a handle, or skim the audit log. All admin endpoints
  * require the `LEADERBOARD_ADMIN_TOKEN` bearer secret — read from
  * the environment.
  *
@@ -14,6 +14,8 @@
  *   pnpm leaderboard:moderate wipe-handle SLURXYZ
  *   pnpm leaderboard:moderate wipe-entry the-maw 3
  *   pnpm leaderboard:moderate block SLURXYZ
+ *   pnpm leaderboard:moderate blocklist
+ *   pnpm leaderboard:moderate unblock TST
  *
  * Override the host with `--host=<host>` (default
  * `hoverbike.occ-matt.partykit.dev`). For dev:
@@ -30,6 +32,8 @@ Commands:
   wipe-handle <HANDLE>              — remove every entry by HANDLE + block future submissions
   wipe-entry <trackId> <rank>       — remove one row by 1-indexed rank
   block <HANDLE>                    — add HANDLE to the blocklist
+  unblock <HANDLE>                  — remove HANDLE from the blocklist
+  blocklist                         — print every blocked handle
 
 Flags:
   --host=<host>                     — override host (dev: localhost:1999)
@@ -161,6 +165,35 @@ async function main() {
       if (!handle) usage()
       const res = await adminFetch(host, token, 'POST', '/admin/block', { handle })
       console.log(`blocked ${res.handle} · blocklist size: ${res.blocklistSize}`)
+      return
+    }
+    case 'unblock': {
+      const handle = args[1]
+      if (!handle) usage()
+      const res = await adminFetch(
+        host,
+        token,
+        'DELETE',
+        `/admin/block/${encodeURIComponent(handle)}`,
+      )
+      if (res.removed) {
+        console.log(`unblocked ${res.handle} · blocklist size: ${res.blocklistSize}`)
+      } else {
+        // Idempotent server-side; say so plainly rather than claiming a
+        // removal that didn't happen (usually a typo'd handle).
+        console.log(`${res.handle} was not on the blocklist · blocklist size: ${res.blocklistSize}`)
+      }
+      return
+    }
+    case 'blocklist': {
+      const res = await adminFetch(host, token, 'GET', '/admin/blocklist')
+      const handles = res.handles ?? []
+      if (handles.length === 0) {
+        console.log('(blocklist is empty)')
+        return
+      }
+      for (const h of handles) console.log(h)
+      console.log(`\n${handles.length} blocked handle(s)`)
       return
     }
     default:
