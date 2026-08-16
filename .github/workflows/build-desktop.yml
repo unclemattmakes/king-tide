@@ -102,7 +102,7 @@ jobs:
 
       - name: Upload Linux tree artifact
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hoverbike-linux-tree
           path: hoverbike-linux.tar.gz
@@ -123,7 +123,7 @@ jobs:
 
       - name: Upload Windows installer artifact
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hoverbike-windows-installer
           path: dist-electron/*-setup.exe
@@ -132,7 +132,7 @@ jobs:
 
       - name: Upload Windows tree artifact
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hoverbike-windows-tree
           path: dist-electron/win-unpacked
