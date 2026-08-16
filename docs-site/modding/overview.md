@@ -19,7 +19,7 @@ For **bikes**, you author each variant directly in `bikes-src/<id>.blend` and cl
 The [Blender](/blender/overview) section has a full pipeline reference — addon panels, every operator, the headless builders, scene conventions — plus a guided [blank-scene-to-playable-map tutorial](/blender/your-first-track).
 :::
 
-For the v1 production sequencing, see [`docs/v1-asset-pipeline-plan.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/v1-asset-pipeline-plan.md). For the full Blender walkthrough and object-kind reference, see [`docs/blender-pipeline-guide.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-pipeline-guide.md).
+For the v1 production sequencing, see [`docs/v1-asset-pipeline-plan.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/v1-asset-pipeline-plan.md). For the full Blender walkthrough and object-kind reference, see [`docs/blender-pipeline-guide.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/blender-pipeline-guide.md).
 
 ## TL;DR
 
@@ -53,7 +53,7 @@ pnpm dev              # http://localhost:5191
 | `tools/blender/hoverbike_addon/` | pipeline | In-Blender addon (a package, not a single file) — installs a Hoverbike sidebar with *Export Bike to Game* / *Export Track to Game* buttons that auto-pick mode by the .blend's parent dir. |
 | `tools/blender/build_*.py` | pipeline | Headless builders. `build_bike.py` opens `bikes-src/<id>.blend`; `build_prop.py` and `build_track.py` are spec-driven. Each reads one spec via `HOVERBIKE_SPEC` env var. |
 | `tools/blender/run.mjs` | pipeline | Cross-platform Node wrapper. Discovers specs, validates, spawns Blender per spec, writes the manifest. |
-| `public/assets/<cat>/*.glb` | generated | Output GLBs. Currently committed; future work will gitignore them. |
+| `public/assets/<cat>/*.glb` | generated | Output GLBs. **Not** in git — gitignored and served from the asset CDN (see [asset storage](https://github.com/unclemattmakes/king-tide/blob/main/docs/asset-storage.md)); a fresh clone gets them by copying `.env.example` to `.env` (the app then streams them from the CDN). |
 | `public/assets/manifest.json` | generated | Index of every built asset. The runtime + editor read it. |
 
 ## The three categories
@@ -108,14 +108,14 @@ See [Authoring bikes](/modding/bikes) and [Authoring props](/modding/props).
 
 ### Add a brand-new track
 
-Building a track specifically? → the level-making hub: [`docs/level-making.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md) (reading order, which-doc-for-whom, the two authoring workflows, and where the `.blend` lives).
+Building a track specifically? → the level-making hub: [`docs/level-making.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/level-making.md) (reading order, which-doc-for-whom, the two authoring workflows, and where the `.blend` lives).
 
 You can author tracks two ways. Pick whichever fits:
 
 - **Spec-driven** (calibration-style declarative tracks): copy `specs/tracks/test-ring.json` to `specs/tracks/<new-id>.json`, edit, save.
-- **Editor-driven** (everything else): see [`docs/track-editor-guide.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/track-editor-guide.md).
+- **Editor-driven** (everything else): see [`docs/track-editor-guide.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/track-editor-guide.md).
 
-For environment geometry (cliffs, mesas, hand-modeled props), see [`docs/blender-pipeline-guide.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-pipeline-guide.md).
+For environment geometry (cliffs, mesas, hand-modeled props), see [`docs/blender-pipeline-guide.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/blender-pipeline-guide.md).
 
 ## Troubleshooting
 

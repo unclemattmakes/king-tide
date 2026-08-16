@@ -524,10 +524,10 @@ fields the editor owns — see [Addon reference → Export Track to Game](./addo
 You've got a greybox you can race. To take it from there to a dressed,
 shippable map:
 
-- **The full picture — where every level-making doc fits** → [Making a level: start here](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md).
-- **The build-from-scratch content pass** → [Level-design playbook](https://github.com/occ-matt/hoverbike/blob/main/docs/level-design-playbook.md).
-- **Per-track design docs (canonical layouts + intent)** → [docs/tracks](https://github.com/occ-matt/hoverbike/blob/main/docs/tracks/README.md).
-- **Dressing the track with props + foliage** → [Track art-pass playbook](https://github.com/occ-matt/hoverbike/blob/main/docs/track-art-pass-playbook.md).
+- **The full picture — where every level-making doc fits** → [Making a level: start here](https://github.com/unclemattmakes/king-tide/blob/main/docs/level-making.md).
+- **The build-from-scratch content pass** → [Level-design playbook](https://github.com/unclemattmakes/king-tide/blob/main/docs/level-design-playbook.md).
+- **Per-track design docs (canonical layouts + intent)** → [docs/tracks](https://github.com/unclemattmakes/king-tide/blob/main/docs/tracks/README.md).
+- **Dressing the track with props + foliage** → [Track art-pass playbook](https://github.com/unclemattmakes/king-tide/blob/main/docs/track-art-pass-playbook.md).
 
 Tooling references:
 

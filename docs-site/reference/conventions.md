@@ -43,7 +43,7 @@ export type TransformData = { position: Vec3; rotation: Quat }
 export const TransformStore = createStore<TransformData>('Transform')
 ```
 
-See [`src/engine/sim/ecs/store.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/engine/sim/ecs/store.ts) for the implementation.
+See [`src/engine/sim/ecs/store.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/engine/sim/ecs/store.ts) for the implementation.
 
 ## Sign conventions in `hover.ts` are empirical, NOT standard math
 
@@ -64,11 +64,11 @@ Pitch and roll are **kinematic** in YXZ Euler decomposition — only yaw evolves
 
 Pre-M9.22 the bike read every wiggle of the wave normal at all altitudes — read like a jet ski. Now reaction is strongest exactly when the bike is closest to the terrain. If wave riding feels too floaty, widen the fade or raise the per-bike `surfaceFollow`. Don't disable the fade.
 
-Implementation in [`src/game/systems/hover.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/systems/hover.ts) inside the `isGrounded` branch.
+Implementation in [`src/game/systems/hover.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/systems/hover.ts) inside the `isGrounded` branch.
 
 ## Bike wakes are physical, not cosmetic — *load-bearing*
 
-Each bike's trailing wake **displaces the water mesh** AND **contributes to buoyancy**, and it follows the bike's **recorded path** — not a ray from its current heading. The sim owns a per-bike breadcrumb trail ([`engine/sim/water/wake-trail.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/engine/sim/water/wake-trail.ts), `field.trails`); buoyancy evaluates the wake profile along it (`sampleWakeFromTrail`, summed by the samplers in [`wave-field.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/engine/sim/water/wave-field.ts)), and the GPU shader at [`engine/render/water.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/engine/render/water.ts) uploads **the same trail points** each frame and mirrors the same profile — so the ridge a trailing rider feels is exactly the one drawn, through turns, jumps (real gaps) and dissolving stopped wakes.
+Each bike's trailing wake **displaces the water mesh** AND **contributes to buoyancy**, and it follows the bike's **recorded path** — not a ray from its current heading. The sim owns a per-bike breadcrumb trail ([`engine/sim/water/wake-trail.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/engine/sim/water/wake-trail.ts), `field.trails`); buoyancy evaluates the wake profile along it (`sampleWakeFromTrail`, summed by the samplers in [`wave-field.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/engine/sim/water/wave-field.ts)), and the GPU shader at [`engine/render/water.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/engine/render/water.ts) uploads **the same trail points** each frame and mirrors the same profile — so the ridge a trailing rider feels is exactly the one drawn, through turns, jumps (real gaps) and dissolving stopped wakes.
 
 `wakeUpdateSystem` feeds `field.trails` (and re-derives `field.wakes`, which only drives the at-hull dimple/propwash visuals) once per fixed step **before** `hoverSystem` reads the surface — that's what makes the lead bike's wake felt by trailing buoyancy. The bike's own wake doesn't affect itself at speed (the longitudinal ramp is zero at the live head), but riding back over your own laid trail is a real bump — donut-hopping is physical.
 

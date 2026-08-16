@@ -11,7 +11,7 @@ Pickup boxes are scattered around each track. Drive through one to grab whatever
 | **Mine** | red | Drops behind you with a 0.6 s arming delay. Proximity trigger spinouts the victim. |
 | **Homing missile** | white | Acquires the nearest bike inside a forward cone (≤ 80 m, `dot ≥ 0.3`). Turn rate capped at 2.4 rad/s. 5 s self-destruct if it doesn't hit. |
 
-Implementation: [`src/game/components/pickup.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/components/pickup.ts) + [`src/game/components/combat.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/components/combat.ts).
+Implementation: [`src/game/components/pickup.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/components/pickup.ts) + [`src/game/components/combat.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/components/combat.ts).
 
 ## The pool
 
@@ -21,7 +21,7 @@ Each pickup box draws from a **weighted pool**:
 const POOL: PickupType[] = ['boost', 'boost', 'missile', 'mine', 'shield']
 ```
 
-Boost is over-represented (2× weight) because it's the safe baseline — the offensive pickups are higher-stakes, so they should feel more like a treat than a default. Tune the ratio in [`pickup-spawn.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/entities/pickup-spawn.ts) if combat starts dominating racing.
+Boost is over-represented (2× weight) because it's the safe baseline — the offensive pickups are higher-stakes, so they should feel more like a treat than a default. Tune the ratio in [`pickup-spawn.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/entities/pickup-spawn.ts) if combat starts dominating racing.
 
 ## Hit reaction
 

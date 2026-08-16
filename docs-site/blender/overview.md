@@ -1,7 +1,7 @@
 # Blender pipeline overview
 
 ::: tip New to level-making?
-Start at the [Making a level hub](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md) for the newcomer reading order, the which-doc-for-whom map, and the two authoring workflows.
+Start at the [Making a level hub](https://github.com/unclemattmakes/king-tide/blob/main/docs/level-making.md) for the newcomer reading order, the which-doc-for-whom map, and the two authoring workflows.
 :::
 
 The Hoverbike asset pipeline runs through **Blender 5.1+**. Most of

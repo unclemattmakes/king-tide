@@ -7,7 +7,7 @@
 > Beats follow [mexico-city.md](./mexico-city.md).
 >
 > *(Prompts authored on a remote session with no image generator. **The pass
-> has since been run — ✅ 2026-06-07 ([#321](https://github.com/occ-matt/hoverbike/issues/321)).**
+> has since been run — ✅ 2026-06-07 (#321).**
 > All 7 beats rendered on the lane below, carrying the painterly-vinyl `--sref`
 > canonical frame and the `--no` ban list; curated to
 > `concept-art/midjourney/mexico-city/best/`. Curated picks (best cell per

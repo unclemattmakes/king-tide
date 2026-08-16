@@ -113,4 +113,4 @@ Two reasons:
 1. **e2e tests need a deterministic surface.** The intent override + entity inspection lets Playwright drive scenarios without timing flake.
 2. **Inspection from outside the page.** Claude (via the Claude Preview MCP) can `preview_eval` against `window.__hover` to read state without screenshots, which is essential for debugging "why did the bike just do that" questions during dev.
 
-Source: [`src/debug.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/debug.ts).
+Source: [`src/debug.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/debug.ts).

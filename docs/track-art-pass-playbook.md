@@ -62,15 +62,15 @@ across a re-export. So:
 
 Entry shape (`src/game/tracks/types.ts` `Prop`):
 ```json
-{ "type": "asset", "assetId": "ai/sea_boulder",
+{ "type": "asset", "assetId": "cc0/coastal_rock",
   "position": {"x":..,"y":..,"z":..}, "rotation": {"x":0,"y":..,"z":0,"w":..},
   "size": {"x":1,"y":1,"z":1} }
 ```
-- `assetId: "ai/sea_boulder"` → loads `/assets/props/ai/sea_boulder.glb`
-  (`public/assets/props/ai/`). AI props are conditioned with their **base at
-  y=0**, so **`position.y` is the surface height the base rests on.**
+- `assetId: "cc0/coastal_rock"` → loads `/assets/props/cc0/coastal_rock.glb`
+  (`public/assets/props/cc0/`). Library props are conditioned with their **base
+  at y=0**, so **`position.y` is the surface height the base rests on.**
 - `size` is a **uniform scale multiplier** on the GLB's intrinsic size. Props
-  are already conditioned to game scale (`specs/props/ai/<level>.json`
+  are already conditioned to game scale (`specs/props/cc0/quaternius.json`
   `target_height`), so keep ~1.0; vary 0.85–1.4 for natural variation.
 - `rotation` is a quaternion. Yaw θ about Y → `{x:0, y:sin(θ/2), z:0, w:cos(θ/2)}`.
 - Runtime does **no terrain snapping** — `position.y` is literal. Seat it yourself.

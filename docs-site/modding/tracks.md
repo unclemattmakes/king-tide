@@ -11,7 +11,7 @@ Tracks are the most complex of the three asset categories — they pair gameplay
 Mixing them is the common case: you author terrain + roads + tunnels in Blender, click **Export Track to Game**, then jump into the in-app editor to drag individual gates and pickups into place. The .blend owns geometry + the racing line; the editor owns hand-placed gameplay objects.
 
 ::: tip New here? Start with the level-making hub
-[Making a level: start here](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md) carries the newcomer reading order, the which-doc-for-whom map, and the export-ownership contract that explains *which* edits Blender owns vs. the editor. Read it first, then come back for the spec / editor mechanics below.
+[Making a level: start here](https://github.com/unclemattmakes/king-tide/blob/main/docs/level-making.md) carries the newcomer reading order, the which-doc-for-whom map, and the export-ownership contract that explains *which* edits Blender owns vs. the editor. Read it first, then come back for the spec / editor mechanics below.
 :::
 
 ::: tip Authoring in Blender?
@@ -192,7 +192,7 @@ Set `environmentGlb` in the JSON to the public URL of your Blender export:
 
 In editor mode the GLB is **not loaded** — you author against the bare water plane without parallax distractions. It loads on Play.
 
-For environment geometry workflow, see [`docs/blender-pipeline-guide.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-pipeline-guide.md).
+For environment geometry workflow, see [`docs/blender-pipeline-guide.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/blender-pipeline-guide.md).
 
 ### Splines: anchors vs. legacy points
 

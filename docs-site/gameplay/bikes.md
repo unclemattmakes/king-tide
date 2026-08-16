@@ -18,7 +18,7 @@ Three flavors with explicit handling tradeoffs so picking a bike feels like a re
 | Hover spring | 24 | 28 | **32** |
 | Hover damp | **7** | 6 | 5 |
 
-Source of truth: [`src/game/bikes/variants.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/bikes/variants.ts). The defaults each variant inherits live in [`stats.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/bikes/stats.ts).
+Source of truth: [`src/game/bikes/variants.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/bikes/variants.ts). The defaults each variant inherits live in [`stats.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/bikes/stats.ts).
 
 ## What each stat actually does
 
@@ -44,7 +44,7 @@ The hover is a PD controller in **acceleration form**:
 aUp = g + hoverSpring * (target - distance) - hoverDamp * vy
 ```
 
-With `g = 25` (matches Rapier gravity), `aUp = g` cancels gravity at rest. The bike sits at `target = hoverHeight` with no extra force. Above-water `hoverDamp` only fires on upward velocity (one-sided) so dive momentum off a ramp punches through. Underwater (`groundDistance < 0` on water) the spring is replaced with depth-proportional buoyancy + asymmetric quadratic drag — see [`status.md` §"Underwater dive feel"](https://github.com/occ-matt/hoverbike/blob/main/docs/status.md#underwater-dive-feel-m923--load-bearing-for-wave-race-feel) for the constants.
+With `g = 25` (matches Rapier gravity), `aUp = g` cancels gravity at rest. The bike sits at `target = hoverHeight` with no extra force. Above-water `hoverDamp` only fires on upward velocity (one-sided) so dive momentum off a ramp punches through. Underwater (`groundDistance < 0` on water) the spring is replaced with depth-proportional buoyancy + asymmetric quadratic drag — see [`status.md` §"Underwater dive feel"](https://github.com/unclemattmakes/king-tide/blob/main/docs/status.md#underwater-dive-feel-m923--load-bearing-for-wave-race-feel) for the constants.
 
 ## Surface follow is altitude-faded
 
@@ -57,7 +57,7 @@ Off a ramp (or off the Cliffside drop), the bike enters an **airborne** state:
 - **60 % gravity counter** — effective fall rate ~10 m/s² instead of 25. Hang time is generous.
 - **Pitch-vectored thrust** — throttle while airborne pushes along the bike's *real* forward vector. Pitch up (`E`) extends air time; pitch down (`Q`) dives.
 
-This is intentional, and tuned for the Cliffside cliff drop. Constants live in [`src/game/systems/hover.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/systems/hover.ts) (`AIR_LIFT_FRAC`, `AIR_THRUST_MUL`).
+This is intentional, and tuned for the Cliffside cliff drop. Constants live in [`src/game/systems/hover.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/systems/hover.ts) (`AIR_LIFT_FRAC`, `AIR_THRUST_MUL`).
 
 ## Pitch + throttle on water — *intentional*
 

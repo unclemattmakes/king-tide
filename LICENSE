@@ -1,6 +1,12 @@
 MIT License
 
-Copyright (c) 2026 occ-matt and Hoverbike contributors
+SCOPE: this licence covers the SOURCE CODE only. The game's content — art,
+audio, track and prop data (including `public/tracks/*.json` and `specs/**`),
+and everything served from the asset CDN — is licensed separately under
+CONTENT-LICENSE.md, and third-party material is itemised in CREDITS.md. The
+name "King Tide" and the game's branding are not licensed by either.
+
+Copyright (c) 2026 Uncle Matt Makes and King Tide contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

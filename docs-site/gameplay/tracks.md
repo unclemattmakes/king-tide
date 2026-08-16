@@ -25,7 +25,7 @@ playable lineup:
 `status: 'ship'` means **wired and playable, not art-complete.** Only **Mayday Bay**
 and **The Maw** are dressed; the rest are greybox route-stubs awaiting the v2 art
 pass. The current proof-of-thesis is the **Reef Cup** (Mayday Bay → Mexico City →
-Cape Town Drift) — see [`docs/tracks/README.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/tracks/README.md) for the canonical lineup.
+Cape Town Drift) — see [`docs/tracks/README.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/tracks/README.md) for the canonical lineup.
 :::
 
 A handful of **procedural dev tracks** also ship for engine and physics work — they're
@@ -59,7 +59,7 @@ The grid is 8 bikes: you plus **seven AI opponents**. They:
 - **Fire their own pickups** via `aiCombatSystem` (see [Pickups & combat](/gameplay/pickups#ai-pickup-usage)).
 
 ::: warning Cliffside AI is rough
-The climb ramp + cliff drop create a dead-end the AI can't recover from once it lands off-mesa. The bottom half of the track is fine. This is a level-design limitation, not a controller bug — see [`status.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/status.md) and the README's *Known issues*.
+The climb ramp + cliff drop create a dead-end the AI can't recover from once it lands off-mesa. The bottom half of the track is fine. This is a level-design limitation, not a controller bug — see [`status.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/status.md) and the README's *Known issues*.
 :::
 
 ## Auto-play mode
@@ -80,7 +80,7 @@ The player spawns on the racing line at the start gate, facing forward. `Backspa
 
 Two flavors of track exist:
 
-- **Procedural** (`lagoon`, `cliffside`) — built in code, in [`src/game/tracks/lagoon-loop.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/tracks/lagoon-loop.ts) and [`cliffside.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/tracks/cliffside.ts). Not editable in the in-app editor.
+- **Procedural** (`lagoon`, `cliffside`) — built in code, in [`src/game/tracks/lagoon-loop.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/tracks/lagoon-loop.ts) and [`cliffside.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/tracks/cliffside.ts). Not editable in the in-app editor.
 - **JSON-driven** (`calibration`, `test-ring`, `lagoon-edit`, anything you author) — gameplay data lives in `public/tracks/<id>.json`, optionally referencing a Blender-built `environmentGlb`.
 
 For authoring, see [Modding → Tracks](/modding/tracks).

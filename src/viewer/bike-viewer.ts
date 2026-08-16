@@ -324,7 +324,7 @@ function renderHud(refs: Refs, onSwitch: (bikeId: string) => void): void {
   hud.innerHTML = `
     <div style="font-size:14px;font-weight:600;margin-bottom:6px">${current.displayName} <span style="color:#7a8696;font-weight:400">/ ${current.id}</span></div>
     <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 10px;color:#bcc7d4">
-      <div>spec</div><div><a href="https://github.com/occ-matt/hoverbike/blob/main/${current.specPath}" target="_blank" rel="noreferrer" style="color:#9bd1ff;text-decoration:none">${current.specPath}</a></div>
+      <div>spec</div><div><a href="https://github.com/unclemattmakes/king-tide/blob/main/${current.specPath}" target="_blank" rel="noreferrer" style="color:#9bd1ff;text-decoration:none">${current.specPath}</a></div>
       <div>mass</div><div>${massKg} kg</div>
       <div>top speed</div><div>${topSpeed} m/s</div>
       <div>hover h</div><div>${hoverHeight} m</div>

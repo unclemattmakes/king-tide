@@ -76,9 +76,11 @@ jobs:
     continue-on-error: true
     env:
       E2E_HEADLESS: '1'
-      # Mapped from the secret so step `if:` can test it — the `secrets`
-      # context is NOT available in `if` conditions, but `env` is.
-      RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
+      # A non-secret BOOLEAN, not the credential: step `if:` can't read the
+      # `secrets` context, but it can read `env`. Evaluating the comparison
+      # here keeps the write-capable R2 token out of every step's environment
+      # — it's injected step-level, only where it's actually used.
+      HAS_ASSET_SECRET: ${{ secrets.RCLONE_CONF_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v7
       # No `version:` — package.json's `packageManager` pin owns it.
@@ -95,10 +97,10 @@ jobs:
       # this job is informational (continue-on-error) so a missing-asset failure
       # here doesn't gate the build. The hard asset gate is the `determinism` job.
       - name: Install rclone
-        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         uses: AnimMouse/setup-rclone@v1
       - name: Hydrate assets from R2
-        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         env:
           RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
         run: |
@@ -133,8 +135,11 @@ jobs:
     timeout-minutes: 20
     env:
       E2E_HEADLESS: '1'
-      # See the e2e job: secret mapped to env so step `if:` can read it.
-      RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
+      # A non-secret BOOLEAN, not the credential: step `if:` can't read the
+      # `secrets` context, but it can read `env`. Evaluating the comparison
+      # here keeps the write-capable R2 token out of every step's environment
+      # — it's injected step-level, only where it's actually used.
+      HAS_ASSET_SECRET: ${{ secrets.RCLONE_CONF_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v7
       # No `version:` — package.json's `packageManager` pin owns it.
@@ -145,10 +150,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Install rclone
-        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         uses: AnimMouse/setup-rclone@v1
       - name: Hydrate assets from R2
-        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         env:
           RCLONE_CONF_BASE64: ${{ secrets.RCLONE_CONF_BASE64 }}
         run: |
@@ -157,16 +162,16 @@ jobs:
           export RCLONE_CONFIG="$RUNNER_TEMP/rclone/rclone.conf"
           pnpm assets:pull
       - name: Verify assets present
-        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         run: node tools/check-assets-present.mjs
       - name: Install Playwright Chromium
-        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         run: pnpm e2e:install
       - name: Run determinism gate
-        if: ${{ env.RCLONE_CONF_BASE64 != '' }}
+        if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         run: pnpm e2e tests/e2e/m10-determinism.spec.ts tests/e2e/determinism-snapshot.spec.ts
       - name: Skip notice (no asset secret)
-        if: ${{ env.RCLONE_CONF_BASE64 == '' }}
+        if: ${{ env.HAS_ASSET_SECRET != 'true' }}
         run: echo "::warning::RCLONE_CONF_BASE64 not set — skipping the determinism gate (cannot hydrate assets from R2). It runs for real on branches/PRs with the secret."
       - name: Upload Playwright report
         if: always()

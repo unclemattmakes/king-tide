@@ -8,7 +8,7 @@ Quick start for getting the game running locally.
 |---|---|---|
 | Node.js | ≥ 20 | Required by the build + Blender wrapper. |
 | pnpm | ≥ 10 | The project's package manager. `corepack enable` is the easiest install. |
-| Blender | ≥ 5.1 | Only needed if you want to (re)build the asset GLBs from spec. The committed GLBs let you skip this for game-only work. |
+| Blender | ≥ 5.1 | Only needed if you want to (re)build the asset GLBs from spec. Game-only work does not need Blender — fetch the prebuilt assets instead (see First run). |
 | A modern browser | Chrome / Edge ≥ 121, Firefox ≥ 124, Safari ≥ 17.4 | WebGPU recommended; WebGL2 is the fallback. |
 
 See [Platform & browser support](/build/platform) for the full compatibility matrix.
@@ -16,6 +16,7 @@ See [Platform & browser support](/build/platform) for the full compatibility mat
 ## First run
 
 ```bash
+cp .env.example .env   # points at the public asset CDN — assets are not in git
 pnpm install
 pnpm dev          # http://localhost:5191 — auto-falls-through to 5192+ if 5191 is busy
 ```

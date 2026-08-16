@@ -74,7 +74,7 @@ re-use it.
 
 ## What CI runs
 
-See [`.github/workflows/ci.yml`](https://github.com/occ-matt/hoverbike/blob/main/.github/workflows/ci.yml).
+See [`.github/workflows/ci.yml`](https://github.com/unclemattmakes/king-tide/blob/main/.github/workflows/ci.yml).
 On every PR:
 
 - `pnpm typecheck`

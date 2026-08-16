@@ -38,9 +38,12 @@ Two standing constraints we honour:
 - **NonCommercial (3 tracks — Checkie Brown, Crowander ×2):** valid only while
   the game has zero monetization (no sales, ads, or sponsorship). If that ever
   changes, replace these tracks first.
-- **ShareAlike (6 tracks):** promotional **videos** with these tracks baked
-  into the audio are adaptations under CC 4.0's synch clause and must
-  themselves ship CC BY-SA. In-game playback and the CDN-served files are fine.
+- **ShareAlike (7 tracks — the 6 CC BY-SA *plus* Checkie Brown's CC BY-NC-SA):**
+  promotional **videos** with these tracks baked into the audio are adaptations
+  under CC 4.0's synch clause and must themselves ship under the same licence —
+  BY-SA for six of them, and BY-**NC**-SA for "Hawaii 5-0", which additionally
+  forces that video non-commercial. In-game playback and the CDN-served files
+  are fine.
 
 ## Brush textures
 
@@ -74,14 +77,16 @@ claim** (raw AI output has no human author):
 
 - **Concept images** — SDXL base 1.0 (CreativeML Open RAIL++-M) via local
   ComfyUI, plus Midjourney for track mood plates (not shipped in the repo).
-- **Meshes** — `public/assets/props/ai/*` were generated with local
-  **Tencent Hunyuan3D-2** from those concepts, then hand-conditioned.
-  These are scheduled for replacement with CC0/hand-made props (the Hunyuan
-  license's territory clause is incompatible with worldwide distribution;
-  see `docs/open-source-plan.md`).
+- **Meshes** — *none ship.* A set of props was once generated with local
+  **Tencent Hunyuan3D-2** from those concepts and hand-conditioned; all of it
+  was **retired in 2026-08** and replaced with CC0 equivalents, because that
+  model's licence forbids distributing its outputs into the EU, UK and South
+  Korea — incompatible with a worldwide-playable game. No `ai/*` prop is
+  referenced by any track, and the meshes are gone from the asset CDN.
 
-Generation prompts/seeds are preserved in `specs/props/ai/*.json` for
-reproducibility.
+The generation prompts and seeds remain in `specs/props/ai/*.json` as a record
+of how that work was done. They are text, written by a human, and unaffected by
+the model licence — but nothing built from them ships.
 
 ## Fonts
 

@@ -6,7 +6,8 @@
 > same order they appeared in `status.md`. The older entries below are
 > **v1-historical** (see the v2-boundary banner at the top of `status.md`):
 > anti-grav is cut, most tracks are greybox for the v2 art pass, and the
-> soundtrack is CC0 placeholder — treat any claim to the contrary here as
+> soundtrack is 14 verified Creative-Commons tracks (per-track licences in
+> CREDITS.md; only one is CC0) — treat any claim to the contrary here as
 > a snapshot of its date, not current reality.
 
 ---
@@ -834,7 +835,7 @@
 > **Quaternius** (CC0, courtesy credit). This pins the specific licence behind the
 > now-shipped real oil-stroke sheet (#313): the brush assets are **CC BY 4.0**, so
 > the derived `brush_strokes.png` ships commercially **with attribution**, carried
-> by the credits screen. (Music licensing itself is still open — see the v2 banner
+> by the credits screen. (Music licensing was settled in 2026-08 — see CREDITS.md
 > caveat above; per-track license metadata isn't modeled yet, so the screen
 > credits artist + title.)
 >
@@ -1921,9 +1922,9 @@ at the unit level (the ghost entity has no RigidBody so the existing
 ### v1 cathedral + wave-pump signal (2026-05-17)
 
 First two checkpoints of [docs/v1-work-breakdown.md](./v1-work-breakdown.md):
-**Step 0 — Scaffolding** ([#110](https://github.com/occ-matt/hoverbike/pull/110))
+**Step 0 — Scaffolding** (#110)
 and **Step 1 — Wave-pump signal**
-([#111](https://github.com/occ-matt/hoverbike/pull/111)).
+(#111).
 
 **Menu cathedral.** Cold-boot flow is now the full v1 shape with most
 surfaces disabled. New files:
@@ -1992,7 +1993,7 @@ stays.
 
 ### Foundation Systems complete (2026-05-18)
 
-[PR #113](https://github.com/occ-matt/hoverbike/pull/113). Four
+PR #113. Four
 foundation systems landed on top of Step 0 + wave-pump, closing the
 **Step 1 — Foundation systems** row in
 [docs/v1-work-breakdown.md](./v1-work-breakdown.md) at 5/5. Each
@@ -2362,7 +2363,7 @@ rebindable via Settings → Controls → Rebind gamepad.
 | Test (e2e) | Playwright (real Vite dev server, real WebGPU/WebGL2) |
 | Lint/format | Biome 2 |
 | Hosting | Vercel (push-to-deploy) |
-| Source | https://github.com/occ-matt/hoverbike (private) |
+| Source | https://github.com/unclemattmakes/king-tide (private) |
 
 See [implementation-plan.md](./implementation-plan.md) for repo layout and the architectural rule (sim layer must not import Three.js).
 

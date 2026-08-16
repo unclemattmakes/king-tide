@@ -24,8 +24,8 @@ gates before the public flip. Not legal advice.*
   dropped `public/assets/*` (except `manifest.json`), `public/audio/*`,
   `tracks-src/*.blend`, `bikes-src/*.blend`; mailmap applied; `main` only.
 - ✅ **Soundtrack provenance** — all 14 tracks verified (FMA, 2026-08-12):
-  1× CC0, 4× CC BY, 5× CC BY-SA, 2× CC BY-NC, 1× CC BY-NC-SA, **0 ND,
-  0 unverified**. `credits.json` sidecar written next to the mp3s;
+  1× CC0, 4× CC BY, **6× CC BY-SA**, 2× CC BY-NC, 1× CC BY-NC-SA (= 14),
+  **0 ND, 0 unverified**. `credits.json` sidecar written next to the mp3s;
   `tools/convert-music.mjs` merges it into the generated manifest;
   `SoundtrackEntry` carries `license`/`licenseUrl`/`sourceUrl`; credits
   screen renders per-track licenses. Constraints (NC = stay non-commercial;
@@ -36,34 +36,39 @@ gates before the public flip. Not legal advice.*
 - ✅ **Scrub pass** — `.env*` gitignored; Cloudflare account ID redacted
   (asset-storage, disaster-recovery); `C:\Users\<user>` paths genericized
   (make_level_props.py defaults now derive from `~`; ai-prop-pipeline.md);
-  dead memory-bank link fixed (v1-asset-pipeline-plan); `dev-box`
+  dead memory-bank link fixed (v1-asset-pipeline-plan); the personal dev
   hostname → `dev-box` (changelog, perf-baseline, perf-reports); Vercel team
-  slug dropped (docs-site platform.md); stale "CC0 placeholder" soundtrack
-  claims corrected (README, status, product-plan, changelog,
+  slug dropped from docs-site/build/platform.md; stale "CC0 placeholder"
+  soundtrack claims corrected (README, status, product-plan,
   reef-cup-vertical-slice-status); orphaned `docs/img/` deleted (4.1 MB,
-  embedded local paths in PNG metadata, referenced by nothing).
+  embedded local paths in the image metadata, referenced by nothing).
+  **Note this pass was tip-only** — the pre-scrub values survive in history,
+  which is what the cut publishes; the runbook below strips them.
 
 ## Remaining gates before the flip
 
-1. ~~**Replace the 13 Hunyuan props**~~ — **DONE (#415, merged 2026-08-13).**
-   No track references any `ai/*` prop; the four live placements went to CC0
-   equivalents at height parity and `cc0/anchor` was reconditioned upright.
-   **One step left:** the GLBs are still *fetchable* on R2 even though nothing
-   loads them — `rclone delete r2-hoverbike:hoverbike-content/assets/props/ai`
-   (plus the local `public/assets/props/ai/` dir) closes the distribution
-   surface. Deliberately left as a manual call because bucket deletes don't
-   undo.
-2. **Verify PartyKit prod env** — `LEADERBOARD_HMAC_SECRET` and
-   `LEADERBOARD_ADMIN_TOKEN` must be set on the deployed project
-   (`pnpm exec partykit env list`); the HMAC path fails *open* to the dev
-   fallback secret.
-3. **Contributor asset path** — the R2 bucket is public-read; add a tokenless
-   pull (plain HTTPS off `https://hoverbike-content.mattscott.dev`) or
-   document running with
-   `VITE_ASSET_BASE_URL=https://hoverbike-content.mattscott.dev` so a fresh
-   clone runs with zero credentials.
+1. ~~**Replace the 13 Hunyuan props**~~ — **DONE (#415).** No track references
+   any `ai/*` prop. The GLBs were deleted from R2 and from local disk on
+   2026-08-13 (originals preserved out-of-band under the content root's
+   `retired/props-ai/`), so the CDN now 404s them.
+2. ~~**Verify PartyKit prod env**~~ — **CHECKED 2026-08-13: no variables are
+   set**, so the deployed board signs and verifies with `DEV_HMAC_SECRET`.
+   **This does not gate the flip:** that same secret is already a plain
+   literal in the deployed production bundle, so publishing the source adds
+   no attacker capability. Setting a real `LEADERBOARD_HMAC_SECRET` is ops
+   hygiene worth doing, but note it only re-hides a value the next build
+   republishes — real leaderboard integrity needs server-side validation, not
+   a secret. `LEADERBOARD_ADMIN_TOKEN` being unset is *safe*: the admin gate
+   fails closed.
+3. ~~**Contributor asset path**~~ — **DONE.** The bucket serves anonymously
+   with `Access-Control-Allow-Origin: *` (verified for the manifest, GLBs and
+   audio), so no download is needed at all: `.env.example` sets
+   `VITE_ASSET_BASE_URL` and the app streams everything at runtime. A local
+   `pnpm assets:pull` stays the maintainer path. Deliberately *not* shipping a
+   public pull script — the bucket can't be enumerated anonymously, so any
+   such script would half-hydrate and be worse than nothing.
 4. **Re-cut king-tide from the final hoverbike main** (see runbook), then
-   flip visibility.
+   flip visibility. ← the only remaining gate.
 
 > **CI is a real gate again as of 2026-08-13 (#416).** It had been dead at
 > setup since June (pnpm/action-setup v6 vs the `packageManager` pin), which
@@ -76,17 +81,54 @@ gates before the public flip. Not legal advice.*
 
 When the gates above are green:
 
+The cut publishes **all of history**, not just the tip — so a value scrubbed
+at the tip is still public unless the filter removes it everywhere. The path
+list below therefore strips more than just the big binaries:
+
 ```bash
 # 1. Fresh filtered cut from the up-to-date archive repo (run from a scratch dir)
 git clone --no-local --single-branch --branch main <path-to-hoverbike> king-tide-cut
 cd king-tide-cut
+
+# replacements.txt — applied to every blob in history:
+#   literal:15b62d20…==><cloudflare-account-id>
+#   literal:dev-box==>dev-box
+# NB: do NOT add a C:\Users\<name> rule. It is length-changing, and would
+# corrupt the marshalled string tables inside any .pyc blob — those are
+# removed by path instead (see __pycache__ below).
+
 python -m git_filter_repo --force --invert-paths \
   --path public/audio --path bikes-src \
   --path-regex '^tracks-src/.*\.blend$' \
   --path-regex '^public/assets/(?!manifest\.json$).+' \
+  --path docs/img \
+  --path tools/blender/__pycache__ \
+  --replace-text <replacements.txt> \
   --mailmap <mailmap.txt>   # same 3-line map: occ-matt / mattscott / "Uncle Matt Makes ___" → Uncle Matt Makes
+```
 
-# 2. Force-push over king-tide main (private, no consumers yet)
+Why the two extra `--path` entries — both carry the author's local Windows
+path in *binary* metadata, and neither is reachable from the tip, so a
+tip-only scrub misses them entirely:
+
+- `docs/img` — 12 Blender-rendered PNG/JPGs whose `tEXt`/JPEG-comment chunks
+  embed `C:\Users\<user>\projects\hoverbike\tracks-src\<name>.blend`. Deleted
+  from the tip in #414; still the largest surviving blobs in the cut without
+  this.
+- `tools/blender/__pycache__` — 5 orphaned `.pyc` blobs (added and removed the
+  same day in May 2026) whose `co_filename` records a
+  `.claude\worktrees\<name>` path.
+
+```bash
+# 2. Verify BEFORE pushing — scan every surviving blob, not just the tip
+git rev-list --objects --all | cut -d' ' -f1 | sort -u \
+  | git cat-file --batch-check='%(objecttype) %(objectname)' \
+  | awk '$1=="blob"{print $2}' \
+  | while read -r sha; do git cat-file blob "$sha" \
+      | grep -aoiE 'C:\\Users\\[A-Za-z0-9._-]+|15b62d20[a-f0-9]+|dev-box' ; done | sort -u
+# expect: no output
+
+# 3. Force-push over king-tide main (private, no consumers yet)
 git remote add dest https://github.com/unclemattmakes/king-tide.git
 git push --force dest main
 ```
@@ -104,8 +146,10 @@ domain; announce with the making-of site as the centerpiece.
 ## Standing constraints (post-flip)
 
 - **Music**: the 3 NC tracks are valid only while the game is non-commercial;
-  the 6 SA tracks must not be baked into published video trailers (CC synch
-  clause). Full table in [CREDITS.md](../CREDITS.md).
+  the **7** tracks carrying a ShareAlike obligation (6 CC BY-SA + the one
+  CC BY-NC-SA) must not be baked into published video trailers unless that
+  video ships under the same licence (CC synch clause) — and for the
+  BY-NC-SA one, non-commercially. Full table in [CREDITS.md](../CREDITS.md).
 - **Midjourney**: crossing $1M yearly revenue would require an MJ Pro/Mega
   seat for asset ownership (not currently relevant — no monetization).
 - **AI-raw content** is uncopyrightable (USCO 2025 / *Thaler* cert denied

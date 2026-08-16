@@ -49,4 +49,4 @@ Mouse only controls the camera. Throttle / steer / pitch are not bound to mouse.
 
 ## Touch
 
-There's a virtual stick driver in [`src/engine/input/touch.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/engine/input/touch.ts) that already merges into the input stream, but **no on-screen overlay is rendered** today. Mobile is not yet a first-class target — see [Platform & browser support](/build/platform).
+There's a virtual stick driver in [`src/engine/input/touch.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/engine/input/touch.ts) that already merges into the input stream, but **no on-screen overlay is rendered** today. Mobile is not yet a first-class target — see [Platform & browser support](/build/platform).

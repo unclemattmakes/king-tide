@@ -1,7 +1,7 @@
 # Architecture
 
 The load-bearing decisions live as
-[ADRs](https://github.com/occ-matt/hoverbike/tree/main/docs/adr) in the
+[ADRs](https://github.com/unclemattmakes/king-tide/tree/main/docs/adr) in the
 repo:
 
 | #    | Decision                                       |
@@ -97,4 +97,4 @@ breaks it, you've introduced non-determinism.
   `aiControlSystem`. Non-hosts apply received AI poses to kinematic
   rigid bodies.
 
-Full design: [`docs/m10-11-state-sync.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/m10-11-state-sync.md).
+Full design: [`docs/m10-11-state-sync.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/m10-11-state-sync.md).

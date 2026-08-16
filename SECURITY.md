@@ -8,7 +8,7 @@ public URL, so a few things are worth surfacing.
 
 Please **don't** open a public GitHub issue for security problems. Instead:
 
-- Open a **private security advisory**: <https://github.com/occ-matt/hoverbike/security/advisories/new>, or
+- Open a **private security advisory**: <https://github.com/unclemattmakes/king-tide/security/advisories/new>, or
 - Email the repo owner via the GitHub profile.
 
 A reply target of 7 days is reasonable for a hobby project; please be patient.

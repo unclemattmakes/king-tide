@@ -106,7 +106,7 @@ it from the curve geometry.
 
 For Python-side authoring (seed scripts, headless builders), use the
 constants in
-[`tools/blender/hoverbike_kinds.py`](https://github.com/occ-matt/hoverbike/blob/main/tools/blender/hoverbike_kinds.py)
+[`tools/blender/hoverbike_kinds.py`](https://github.com/unclemattmakes/king-tide/blob/main/tools/blender/hoverbike_kinds.py)
 instead of string literals:
 
 ```python
@@ -122,7 +122,7 @@ obj["kind"] = ExportedKind.EMITTER
 ```
 
 The TypeScript runtime side has a mirrored enum in
-[`src/engine/asset-kinds.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/engine/asset-kinds.ts).
+[`src/engine/asset-kinds.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/engine/asset-kinds.ts).
 A unit test (`tests/unit/asset-kinds.test.ts`) parses both files and
 fails if they drift, so adding a value on one side without the other
 is caught at CI time.
@@ -280,4 +280,4 @@ export always uses viewport visibility.
 - [Wave zones cookbook](./wave-zones) — in-depth wave-mastery examples.
 - [Modding → Tracks](/modding/tracks) — the spec-driven + editor-driven workflows.
 - [Modding → Bikes](/modding/bikes) — bike-specific authoring.
-- In-repo docs: [`docs/blender-pipeline-guide.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-pipeline-guide.md) — the source material these pages are distilled from.
+- In-repo docs: [`docs/blender-pipeline-guide.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/blender-pipeline-guide.md) — the source material these pages are distilled from.

@@ -5,7 +5,7 @@ art assets (bikes, tracks, props) you probably want the
 [Modding](../modding/overview) section instead.
 
 The canonical contributor guide is the repo's
-[`CONTRIBUTING.md`](https://github.com/occ-matt/hoverbike/blob/main/CONTRIBUTING.md)
+[`CONTRIBUTING.md`](https://github.com/unclemattmakes/king-tide/blob/main/CONTRIBUTING.md)
 — it covers setup, branch naming, commit style, and PR review.
 
 This site adds the orientation a newcomer probably wants on day one:
@@ -24,19 +24,19 @@ sim-layer rule is the constraint most likely to surprise a newcomer.
 
 Use the templates:
 
-- [Bug report](https://github.com/occ-matt/hoverbike/issues/new?template=bug.yml)
-- [Feature / idea](https://github.com/occ-matt/hoverbike/issues/new?template=feature.yml)
+- [Bug report](https://github.com/unclemattmakes/king-tide/issues/new?template=bug.yml)
+- [Feature / idea](https://github.com/unclemattmakes/king-tide/issues/new?template=feature.yml)
 
 For security issues, see
-[`SECURITY.md`](https://github.com/occ-matt/hoverbike/blob/main/SECURITY.md)
+[`SECURITY.md`](https://github.com/unclemattmakes/king-tide/blob/main/SECURITY.md)
 — don't open public issues for those.
 
 ## Good first PRs
 
-- Items in [`docs/blender-wishlist.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/blender-wishlist.md) — open
+- Items in [`docs/blender-wishlist.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/blender-wishlist.md) — open
   roadmap for Blender automation.
 - Unchecked rows in the convention table in
-  [`docs/v1-work-breakdown.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/v1-work-breakdown.md) —
+  [`docs/v1-work-breakdown.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/v1-work-breakdown.md) —
   the active v1 execution plan.
 - Issues labelled `good first issue` or `help wanted` on GitHub.
 

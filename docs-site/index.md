@@ -52,17 +52,17 @@ This is the **dev + modder-facing** documentation. If you're trying to:
 
 - **Run the game locally** or wire up a controller → start in [Build & Run](/build/setup).
 - **Build your first track in Blender** → [Your first track](/blender/your-first-track) — blank scene to playable map.
-- **Go deeper on level-making** → in-repo [`docs/level-making.md`](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md) — reading order, which-doc-for-whom, and the two authoring workflows.
+- **Go deeper on level-making** → in-repo [`docs/level-making.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/level-making.md) — reading order, which-doc-for-whom, and the two authoring workflows.
 - **Make a new bike, prop, or track** → [Modding](/modding/overview).
 - **Hack on the engine itself** → [Contributing](/contributing/).
 - **Look up a number** (top speed, hover height, pickup behavior) → [Gameplay](/gameplay/bikes).
-- **Read the deep design docs** → in-repo [`docs/`](https://github.com/occ-matt/hoverbike/tree/main/docs) plan files (`status.md`, `implementation-plan.md`, `product-plan.md`, ADRs). This site links to them where relevant; it does not duplicate them.
+- **Read the deep design docs** → in-repo [`docs/`](https://github.com/unclemattmakes/king-tide/tree/main/docs) plan files (`status.md`, `implementation-plan.md`, `product-plan.md`, ADRs). This site links to them where relevant; it does not duplicate them.
 
 ## Project at a glance
 
 | | |
 |---|---|
-| Repo | [occ-matt/hoverbike](https://github.com/occ-matt/hoverbike) (private) |
+| Repo | [unclemattmakes/king-tide](https://github.com/unclemattmakes/king-tide) |
 | Live build | [hoverbike-…vercel.app](https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app) — pushes to `main` auto-deploy |
 | Stack | TypeScript · Vite 8 · Three.js (WebGPU + WebGL2) · Rapier WASM · bitECS 0.4 |
 | Tooling | pnpm 10 · Vitest · Playwright · Biome 2 · Blender 5.1 (headless) |

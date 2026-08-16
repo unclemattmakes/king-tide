@@ -470,7 +470,7 @@ editor.
 | **Setup Prop Mesh Bake** / **Bake Prop Meshes** | Prop-library baking helpers — pre-bake prop meshes for the painterly-vinyl intake. |
 
 Prop *placement* is a designer task — see the
-[track art-pass playbook](https://github.com/occ-matt/hoverbike/blob/main/docs/track-art-pass-playbook.md)
+[track art-pass playbook](https://github.com/unclemattmakes/king-tide/blob/main/docs/track-art-pass-playbook.md)
 for where to flank the race line safely.
 
 ### Gameplay
@@ -749,7 +749,7 @@ the runtime loader sees the racing line as a polyline.
 
 For the full round-trip contract and the two authoring workflows it
 bridges, see the
-[Making a level hub](https://github.com/occ-matt/hoverbike/blob/main/docs/level-making.md).
+[Making a level hub](https://github.com/unclemattmakes/king-tide/blob/main/docs/level-making.md).
 
 ---
 

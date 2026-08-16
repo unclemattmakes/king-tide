@@ -21,7 +21,7 @@ There is **no shared kit**: editing `racer.blend` does not propagate to `cruiser
 open http://localhost:5191/?bike=falcon
 ```
 
-To make the new bike selectable from the Garage menu, also wire it into [`src/game/bikes/variants.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/bikes/variants.ts). Otherwise the URL parameter is the only entry.
+To make the new bike selectable from the Garage menu, also wire it into [`src/game/bikes/variants.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/bikes/variants.ts). Otherwise the URL parameter is the only entry.
 
 ::: tip Where the bike id comes from
 The .blend's filename basename is the id (`bikes-src/falcon.blend` → `falcon`). The addon backfills `bike_root.extras.bike_id` from that filename on first export, but if you ever want the id to differ from the filename, set the scene custom property `hoverbike_bike_id`.
@@ -49,7 +49,7 @@ Visual meshes are everything else — there's no minimum. The runtime renders an
 
 ## Naming + parenting (what actually matters)
 
-The runtime walks the GLB by `extras.kind`, **never by name** ([`bike-loader.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/assets/bike-loader.ts)). That means:
+The runtime walks the GLB by `extras.kind`, **never by name** ([`bike-loader.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/assets/bike-loader.ts)). That means:
 
 | What | Naming matters? | Why |
 |---|---|---|
@@ -60,14 +60,14 @@ The runtime walks the GLB by `extras.kind`, **never by name** ([`bike-loader.ts`
 
 Two material-name conventions do leak into runtime / build behaviour:
 
-- **`_livery` substring** in any material name → that material gets cloned + tinted per-AI-bike at instantiation time, so AI riders show distinct colors without their own GLBs ([`bike-loader.ts:178`](https://github.com/occ-matt/hoverbike/blob/main/src/game/assets/bike-loader.ts)). If you want a part to recolour for AI bikes, give its material a name that includes `_livery`. If not, use any other name.
+- **`_livery` substring** in any material name → that material gets cloned + tinted per-AI-bike at instantiation time, so AI riders show distinct colors without their own GLBs ([`bike-loader.ts:178`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/assets/bike-loader.ts)). If you want a part to recolour for AI bikes, give its material a name that includes `_livery`. If not, use any other name.
 - **`mat_bike_<bike_id>_{chassis,livery,glow,fork,fin,tail}`** → the headless build's `spec.appearance` overrides find materials by this exact pattern and recolour them. If you don't use the spec's `appearance` block, the pattern is a no-op and you can name materials anything.
 
 ### Don't parent geo under sockets
 
 Tempting pattern: parent the thruster mesh under `socket_fx_thruster_l` so moving the socket drags the geo. **Don't** — for two reasons:
 
-1. **Sockets are hidden at clone time.** [`cloneLoadedBike`](https://github.com/occ-matt/hoverbike/blob/main/src/game/assets/bike-loader.ts) sets `visible = false` on every `kind=socket` and `kind=collider` empty. Three.js propagates invisibility down the subtree, so geo parented under a socket never renders in the game. (It would still show up in the bike viewer if you toggle visibility on, but that's a debug surface.)
+1. **Sockets are hidden at clone time.** [`cloneLoadedBike`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/assets/bike-loader.ts) sets `visible = false` on every `kind=socket` and `kind=collider` empty. Three.js propagates invisibility down the subtree, so geo parented under a socket never renders in the game. (It would still show up in the bike viewer if you toggle visibility on, but that's a debug surface.)
 2. **Socket positions are a runtime contract.** The rider parents at `socket_seat`. The chase camera anchors at `socket_nose_cam`. FX emitters spawn at `socket_fx_*`. If a geo edit silently shifts a socket, you've broken those anchors with no error.
 
 The pattern that gives you the "live attach" feel without the gotchas: **parent the socket under the geo, not the geo under the socket.** Example: `socket_fx_thruster_l` as a child of your `bike_thruster_l` mesh. Move the thruster, the FX socket follows automatically.
@@ -132,7 +132,7 @@ Written into `bike_root` extras at build time so the runtime + viewer HUD see th
 | `hoverHeight` | (0, 4] m | Goes to `bike_root.extras.hover_height`. |
 
 ::: tip Bike stats vs. variant stats
-The spec's `physics` and the GLB's extras are surface metadata for the manifest and viewer. **Sim-side handling** (turn torque, accel, lateral drag, surface follow, hover spring/damp, boost multiplier) lives in the **variant** wired up at [`src/game/bikes/variants.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/bikes/variants.ts). Editing the spec doesn't change how the bike feels under your hands — change the variant for that.
+The spec's `physics` and the GLB's extras are surface metadata for the manifest and viewer. **Sim-side handling** (turn torque, accel, lateral drag, surface follow, hover spring/damp, boost multiplier) lives in the **variant** wired up at [`src/game/bikes/variants.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/bikes/variants.ts). Editing the spec doesn't change how the bike feels under your hands — change the variant for that.
 :::
 
 ### `appearance` (optional override)
@@ -161,11 +161,11 @@ bike_root              (extras: kind=bike, bike_id, mass_kg, top_speed_mps,
                         hidden at runtime)
 ```
 
-The runtime path that consumes this is [`src/game/assets/bike-loader.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/assets/bike-loader.ts).
+The runtime path that consumes this is [`src/game/assets/bike-loader.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/assets/bike-loader.ts).
 
 ## Wiring into the Garage menu
 
-Open [`src/game/bikes/variants.ts`](https://github.com/occ-matt/hoverbike/blob/main/src/game/bikes/variants.ts) and add an entry:
+Open [`src/game/bikes/variants.ts`](https://github.com/unclemattmakes/king-tide/blob/main/src/game/bikes/variants.ts) and add an entry:
 
 ```ts
 export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {

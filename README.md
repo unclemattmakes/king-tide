@@ -69,6 +69,19 @@ Prerequisites: **Node ≥ 20**, **pnpm ≥ 10** (`engines` in `package.json`). A
 WebGPU-capable browser (recent Chrome / Edge) gives the best feel; Firefox
 runs the WebGL2 fallback.
 
+**First, get the assets.** The compiled content — track/bike/prop GLBs,
+textures, the soundtrack — is not in this repo; it's served from a public CDN
+(see [docs/asset-storage.md](docs/asset-storage.md)). Copy the example env and
+the app streams it all at runtime:
+
+```bash
+cp .env.example .env      # sets VITE_ASSET_BASE_URL to the public asset CDN
+```
+
+Skip this and the app boots to **"Boot failed"** — it'll be looking for assets
+in a `public/` directory that a fresh clone doesn't have. (Maintainers with
+bucket credentials can `pnpm assets:pull` for a local copy instead.)
+
 ```bash
 pnpm install
 pnpm dev          # http://localhost:5191
@@ -139,7 +152,7 @@ The repo backs **two** Vercel projects, both pointing at the same GitHub repo, b
 
 In the Vercel dashboard (team `oddballcreatureclubs-projects`):
 
-1. **Add New → Project**, import the `occ-matt/hoverbike` repo.
+1. **Add New → Project**, import the `unclemattmakes/king-tide` repo.
 2. In the import screen, set **Root Directory** to `docs-site`. Leave Framework Preset as auto-detect (it will pick VitePress from `vercel.json`).
 3. The dashboard's Build Command, Output Directory, and Install Command are overridden by `docs-site/vercel.json` — leave them at defaults.
 4. **Deploy.** First build runs `cd .. && pnpm install --frozen-lockfile` then `cd .. && pnpm docs:build`, output reads from `docs-site/.vitepress/dist`.

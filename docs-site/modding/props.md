@@ -108,4 +108,4 @@ The category drives the editor's grouping. Keep it tight — you'll be picking f
 Hand-authored kit props are the floor, not the ceiling. Two ways to go further:
 
 - **Prop-lines** — a parametric "asset along a curve": scatter a prop down a spline at a given spacing instead of placing each one by hand. They're a shipped feature, placed and edited in the in-app editor alongside regular props. See [editor-driven authoring](/modding/tracks#editor-driven-authoring).
-- **AI-generated props** — for level-scale prop sets, the local AI pipeline (concept → 3D mesh → conditioned, library-ready prop) does the heavy lifting. See the [AI prop pipeline](https://github.com/occ-matt/hoverbike/blob/main/docs/ai-prop-pipeline.md) doc, or run the `/make-props` skill to drive it over a whole level.
+- **AI-generated props** — for level-scale prop sets, the local AI pipeline (concept → 3D mesh → conditioned, library-ready prop) does the heavy lifting. See the [AI prop pipeline](https://github.com/unclemattmakes/king-tide/blob/main/docs/ai-prop-pipeline.md) doc, or run the `/make-props` skill to drive it over a whole level.

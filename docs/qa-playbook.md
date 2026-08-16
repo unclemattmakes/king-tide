@@ -28,7 +28,7 @@ counted.
 
 Current pass-state per gate is whatever the latest CI run on `main`
 says — don't trust a hand-maintained ✅ here, check
-[GitHub Actions](https://github.com/occ-matt/hoverbike/actions) (or
+[GitHub Actions](https://github.com/unclemattmakes/king-tide/actions) (or
 `gh run list --workflow=ci.yml --branch=main` from a shell).
 
 `pnpm qa` runs the orchestrator end-to-end (typecheck + lint + unit +
@@ -177,7 +177,7 @@ surface, so no settings or console data leaks via this path.
 ### Filing a bug
 
 1. From the running tab: `window.__hover.qa.downloadBundle()`.
-2. Open the [QA issue template](https://github.com/occ-matt/hoverbike/issues/new?template=qa.yml).
+2. Open the [QA issue template](https://github.com/unclemattmakes/king-tide/issues/new?template=qa.yml).
 3. Drag the bundle JSON into the "QA bundle" field. The template's
    triage workflow reads the timestamp / URL / commit out of the
    bundle so triagers don't have to chase them.

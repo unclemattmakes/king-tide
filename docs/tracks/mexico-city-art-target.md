@@ -3,7 +3,7 @@
 > **What this is.** A forward-looking visual build-target for the Mexico City
 > track (Reef Cup #1 — drowned Mexico City), grounded in the design
 > docs. The **Midjourney concept pass is DONE** (2026-06-07,
-> [#321](https://github.com/occ-matt/hoverbike/issues/321)) — plates live in the
+> #321) — plates live in the
 > external store (see *Source material* below). There is still **no authored
 > `.blend`** — the track is concept-locked, geometry pending — so the build notes
 > here are mood/material targets to build toward. The layout follows

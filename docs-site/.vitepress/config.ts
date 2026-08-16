@@ -101,10 +101,10 @@ export default defineConfig({
       ],
     },
 
-    socialLinks: [{ icon: 'github', link: 'https://github.com/occ-matt/hoverbike' }],
+    socialLinks: [{ icon: 'github', link: 'https://github.com/unclemattmakes/king-tide' }],
 
     editLink: {
-      pattern: 'https://github.com/occ-matt/hoverbike/edit/main/docs-site/:path',
+      pattern: 'https://github.com/unclemattmakes/king-tide/edit/main/docs-site/:path',
       text: 'Edit this page on GitHub',
     },
 
