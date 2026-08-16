@@ -99,7 +99,7 @@ jobs:
       # build-desktop uploads the electron-builder win-unpacked tree directly,
       # so there's no installer to extract. (Deck = this build via Proton.)
       - name: Download Windows tree artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: hoverbike-windows-tree
           path: artifacts/windows
