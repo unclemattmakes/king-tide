@@ -98,7 +98,7 @@
     "@vitest/coverage-v8": "^4.1.7",
     "ajv": "^8.17.1",
     "electron": "^42.3.0",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "^26.15.3",
     "jsdom": "^29.1.1",
     "partykit": "^0.0.115",
     "typescript": "^6.0.3",
