@@ -91,9 +91,9 @@
     "three": "^0.184.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
-    "@playwright/test": "^1.60.0",
-    "@types/node": "^20",
+    "@biomejs/biome": "^2.5.8",
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^26",
     "@types/three": "^0.184.1",
     "@vitest/coverage-v8": "^4.1.7",
     "ajv": "^8.17.1",
@@ -101,10 +101,10 @@
     "electron-builder": "^26.8.1",
     "jsdom": "^29.1.1",
     "partykit": "^0.0.115",
-    "typescript": "^6.0.3",
-    "vite": "^8.0.14",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
     "vitepress": "^1.6.4",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.10"
   },
   "pnpm": {
     "overrides": {
