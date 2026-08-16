@@ -46,7 +46,7 @@ import {
   mergeEntry,
   normalizeHandle,
 } from '../src/engine/leaderboard/core'
-import { DEV_HMAC_SECRET, verifySignature } from '../src/engine/leaderboard/hmac'
+import { verifySignature } from '../src/engine/leaderboard/hmac'
 import { containsProfanity } from '../src/engine/leaderboard/profanity'
 import {
   type BoardResponse,
@@ -135,9 +135,20 @@ function constantTimeEquals(a: string, b: string): boolean {
   return diff === 0
 }
 
-function hmacSecret(env: Record<string, unknown>): string {
+/** The signing secret, or `null` when the deploy has none configured.
+ *
+ *  Returning `null` — rather than falling back to `DEV_HMAC_SECRET` —
+ *  is the whole point. The fallback made an unconfigured server accept
+ *  anything signed with a constant that ships in the public client
+ *  bundle and lives in the source tree: i.e. accept everything, from
+ *  anyone. It also contradicted `DEV_HMAC_SECRET`'s own docstring
+ *  ("anyone hitting the production board with this value lands no
+ *  entries") and the client's warning that a properly-deployed server
+ *  would reject it. Now it does. Writes fail closed; reads are
+ *  unaffected, so an unconfigured board still serves its contents. */
+function hmacSecret(env: Record<string, unknown>): string | null {
   const v = env.LEADERBOARD_HMAC_SECRET
-  return typeof v === 'string' && v.length > 0 ? v : DEV_HMAC_SECRET
+  return typeof v === 'string' && v.length > 0 ? v : null
 }
 
 function plausibilityFloor(trackId: string): number {
@@ -219,6 +230,18 @@ export default class LeaderboardServer implements Party.Server {
       await this.audit({ ts: now, ip, trackId: '?', handle: '?', bestLap: 0, outcome: 'malformed' })
       return errResponse(400, 'bad-request', valid.detail)
     }
+    // Fail closed before touching storage: with no secret configured there
+    // is no way to tell a real submission from a forged one, so accept
+    // neither. 503 (not 4xx) because the fault is the deployment's, and it
+    // is retryable once the operator sets LEADERBOARD_HMAC_SECRET.
+    const secret = hmacSecret(this.room.env)
+    if (!secret) {
+      return errResponse(
+        503,
+        'unconfigured',
+        'LEADERBOARD_HMAC_SECRET is not set on this deployment; submissions are disabled.',
+      )
+    }
     if (Math.abs(now - body.ts) > SUBMIT_TS_WINDOW_MS) {
       await this.audit({
         ts: now,
@@ -252,7 +275,7 @@ export default class LeaderboardServer implements Party.Server {
         nonce: body.nonce,
       }),
       body.signature,
-      hmacSecret(this.room.env),
+      secret,
     )
     if (!sigOk) {
       await this.audit({

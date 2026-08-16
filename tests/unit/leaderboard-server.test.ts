@@ -16,7 +16,7 @@
 import type * as Party from 'partykit/server'
 import { beforeEach, describe, expect, it } from 'vitest'
 import LeaderboardServer from '../../party/leaderboard'
-import { signPayload } from '../../src/engine/leaderboard/hmac'
+import { DEV_HMAC_SECRET, signPayload } from '../../src/engine/leaderboard/hmac'
 import {
   canonicalSubmitPayload,
   type SubmitBody,
@@ -149,6 +149,56 @@ describe('leaderboard server — submit', () => {
     const body = await buildSignedBody(
       { trackId: 'lagoon', handle: 'ABC', bikeId: 'racer', bestLap: 42 },
       'wrong-secret',
+    )
+    const res = await server.onRequest(submitReq(body))
+    expect(res.status).toBe(401)
+    expect(await asJson<SubmitResponse>(res)).toMatchObject({ ok: false, error: 'bad-signature' })
+  })
+
+  // The fail-open bug this guards: with no LEADERBOARD_HMAC_SECRET the server
+  // used to fall back to DEV_HMAC_SECRET — a constant living in the source
+  // tree — and so accepted anything signed with it, from anyone. An
+  // unconfigured deploy must accept no writes at all.
+  it('refuses submissions when no signing secret is configured', async () => {
+    const { server } = makeServer({ LEADERBOARD_ADMIN_TOKEN: ADMIN_TOKEN })
+    const body = await buildSignedBody(
+      { trackId: 'lagoon', handle: 'ABC', bikeId: 'racer', bestLap: 42 },
+      DEV_HMAC_SECRET,
+    )
+    const res = await server.onRequest(submitReq(body))
+    expect(res.status).toBe(503)
+    expect(await asJson<SubmitResponse>(res)).toMatchObject({ ok: false, error: 'unconfigured' })
+  })
+
+  it('refuses even a correctly-signed submission when unconfigured', async () => {
+    // Nothing can be "correct" without a server-side key — including a body
+    // signed with the very secret an operator is about to configure.
+    const { server } = makeServer({})
+    const body = await buildSignedBody({
+      trackId: 'lagoon',
+      handle: 'ABC',
+      bikeId: 'racer',
+      bestLap: 42,
+    })
+    const res = await server.onRequest(submitReq(body))
+    expect(res.status).toBe(503)
+    expect(await asJson<SubmitResponse>(res)).toMatchObject({ ok: false, error: 'unconfigured' })
+  })
+
+  it('still serves reads when unconfigured (writes fail closed, reads do not)', async () => {
+    const { server } = makeServer({})
+    const res = await server.onRequest(
+      asPartyRequest(new Request('http://example.com/parties/leaderboard/global/board/lagoon')),
+    )
+    expect(res.status).toBe(200)
+    expect(await asJson<{ trackId: string }>(res)).toMatchObject({ trackId: 'lagoon' })
+  })
+
+  it('rejects the dev secret once a real one is configured', async () => {
+    const { server } = makeServer()
+    const body = await buildSignedBody(
+      { trackId: 'lagoon', handle: 'ABC', bikeId: 'racer', bestLap: 42 },
+      DEV_HMAC_SECRET,
     )
     const res = await server.onRequest(submitReq(body))
     expect(res.status).toBe(401)

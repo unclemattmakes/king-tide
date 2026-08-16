@@ -70,6 +70,12 @@ export type SubmitErrResponse = {
     | 'profanity'
     | 'blocked-handle'
     | 'implausible-time'
+    /** The server has no `LEADERBOARD_HMAC_SECRET`, so it cannot verify
+     *  anything and refuses to accept writes. Distinct from
+     *  `bad-signature`: the submission may be perfectly valid — the
+     *  *server* is misconfigured. Clients treat it like an offline board
+     *  and keep the local best. */
+    | 'unconfigured'
     | 'internal'
   /** Optional context — e.g. "wait 3 s" for rate-limit. */
   detail?: string

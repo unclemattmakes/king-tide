@@ -7,11 +7,16 @@
  *  - In dev (`import.meta.env.DEV`), the host points at the local
  *    PartyKit dev server (`localhost:1999`) and the secret falls
  *    through to `DEV_HMAC_SECRET`.
- *  - In prod, the host is the deployed `*.partykit.dev` domain. The
- *    secret comes from `VITE_LEADERBOARD_HMAC_SECRET`, which is
- *    embedded at build time. Missing/empty env var → also falls
- *    through to the dev secret, with a console warning so the deploy
- *    pipeline notices.
+ *  - In prod, the host is the deployed `*.partykit.dev` domain and the
+ *    secret comes from `VITE_LEADERBOARD_HMAC_SECRET`, embedded at
+ *    build time. If that is missing the remote board is **disabled**
+ *    for the build (local cache only) rather than signed with the dev
+ *    constant — the server refuses unsigned-in-practice writes now, so
+ *    submitting would only generate noise and misleading failures.
+ *
+ * Because the dev secret is only read under `import.meta.env.DEV`, Vite
+ * eliminates that branch in a production build and the constant never
+ * reaches the shipped bundle.
  *
  * The `?host=` URL override mirrors the multiplayer client's behaviour
  * — dev convenience for testing against a staging Party from a prod
@@ -31,7 +36,10 @@ function resolve(): { endpoint: RemoteEndpoint; remoteEnabled: boolean } {
   if (cached) return cached
   let host = PROD_HOST
   let remoteEnabled = true
-  let secret = DEV_HMAC_SECRET
+  // Assigned below: the build-time env secret, or the dev constant, but the
+  // dev constant strictly under `import.meta.env.DEV` so it is dead code —
+  // and therefore absent — in a production bundle.
+  let secret = ''
   try {
     if (typeof window !== 'undefined' && window.location) {
       const params = new URLSearchParams(window.location.search)
@@ -49,9 +57,19 @@ function resolve(): { endpoint: RemoteEndpoint; remoteEnabled: boolean } {
   const envSecret = import.meta.env.VITE_LEADERBOARD_HMAC_SECRET
   if (typeof envSecret === 'string' && envSecret.length > 0) {
     secret = envSecret
-  } else if (!import.meta.env.DEV) {
+  } else if (import.meta.env.DEV) {
+    // Local `partykit dev` runs with the same constant, so the pair matches.
+    secret = DEV_HMAC_SECRET
+  } else {
+    // Production build with no signing key. Previously we signed with the
+    // dev constant anyway and hoped the server would say no — it didn't,
+    // because it fell back to the same constant. Now the server refuses
+    // ('unconfigured'), so submitting would be pure noise: turn the remote
+    // board off and keep the local best instead. Same path as
+    // `?leaderboard=local`, so the UI already handles it.
+    remoteEnabled = false
     console.warn(
-      '[leaderboard] VITE_LEADERBOARD_HMAC_SECRET not set — falling back to the dev secret. Submissions will be rejected by a properly-deployed server.',
+      '[leaderboard] VITE_LEADERBOARD_HMAC_SECRET not set — remote board disabled for this build; personal bests stay local. Set it (and the matching LEADERBOARD_HMAC_SECRET on the Party) to enable the global board.',
     )
   }
   cached = {

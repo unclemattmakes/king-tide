@@ -89,10 +89,21 @@ Set in your `.env` / CI build environment before `pnpm build`:
 VITE_LEADERBOARD_HMAC_SECRET=<must equal LEADERBOARD_HMAC_SECRET>
 ```
 
-If unset, the client falls back to the dev secret hard-coded in
-`src/engine/leaderboard/hmac.ts` — submissions to a properly-deployed
-server will be rejected as `bad-signature` (which is the desired
-fail-closed behaviour).
+**Both halves are required for the global board to accept anything.**
+
+- **Server without `LEADERBOARD_HMAC_SECRET`** → every submit is refused
+  with `503 unconfigured`. Reads (`/board`, `/health`) keep working, so an
+  unconfigured deploy still serves whatever it holds. It does *not* fall back
+  to the dev secret: that constant lives in the source tree, so falling back
+  meant accepting anything from anyone.
+- **Client built without `VITE_LEADERBOARD_HMAC_SECRET`** → the remote board
+  is disabled for that build and personal bests stay in the local cache (the
+  same path as `?leaderboard=local`), with a console warning. It no longer
+  signs with the dev constant and submits into the void.
+- **Mismatched halves** → `401 bad-signature`, as before.
+
+So a deploy that forgets either half degrades to a local-only leaderboard
+rather than a global one that silently accepts forgeries.
 
 ### Local dev
 
