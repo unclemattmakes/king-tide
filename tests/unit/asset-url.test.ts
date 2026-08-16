@@ -36,11 +36,25 @@ describe('joinAssetUrl', () => {
 })
 
 describe('assetUrl', () => {
-  // In dev / tests no VITE_ASSET_BASE_URL is set, so it must be a no-op and
-  // resolve against the local public/ dir — the offline-dev contract that
-  // keeps the whole migration safe to land before R2 is wired up.
-  it('is a no-op without VITE_ASSET_BASE_URL (local dev / test)', () => {
-    expect(assetUrl('/assets/tracks/sandbar.glb')).toBe('/assets/tracks/sandbar.glb')
-    expect(assetUrl('/audio/music/foo.opus')).toBe('/audio/music/foo.opus')
+  // Both states are legitimate and vitest loads `.env`, so this can't assume
+  // either one: a fresh clone follows README/.env.example and sets
+  // VITE_ASSET_BASE_URL to the public asset CDN (the zero-credential path),
+  // while a maintainer clone with hydrated assets leaves it unset. Asserting
+  // the unset case unconditionally made `cp .env.example .env` — the very
+  // first step we tell contributors to take — turn the suite red.
+  const base = ((import.meta.env.VITE_ASSET_BASE_URL as string | undefined) ?? '').trim()
+
+  it('resolves an asset path against whatever base is configured', () => {
+    for (const path of ['/assets/tracks/sandbar.glb', '/audio/music/foo.opus']) {
+      const out = assetUrl(path)
+      expect(out.endsWith(path)).toBe(true)
+      if (base === '') {
+        // Offline-dev contract: no base ⇒ untouched, resolves against the
+        // local public/ dir. This is what keeps the R2 migration reversible.
+        expect(out).toBe(path)
+      } else {
+        expect(out).toBe(`${base.replace(/\/+$/, '')}${path}`)
+      }
+    }
   })
 })
