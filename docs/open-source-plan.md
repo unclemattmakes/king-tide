@@ -154,3 +154,5 @@ domain; announce with the making-of site as the centerpiece.
   seat for asset ownership (not currently relevant — no monetization).
 - **AI-raw content** is uncopyrightable (USCO 2025 / *Thaler* cert denied
   2026) — no license can attach to it; CREDITS.md labels it machine-generated.
+
+<!-- ci probe: verifying the determinism gate on CI hardware -->
