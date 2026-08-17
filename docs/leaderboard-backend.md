@@ -193,6 +193,63 @@ If the board sees sustained abuse, the response order is:
    working. This invalidates every in-flight client until they pick
    up a new build — only do it if the abuse warrants it.
 
+## Signing a submission
+
+`POST /submit` carries an HMAC-SHA256 over a **canonical string**, not over
+the JSON body — so field order and whitespace on the wire can't change the
+signature. The string is six `key:value` pairs joined by `|`, keys sorted
+alphabetically (see `canonicalSubmitPayload` in
+`src/engine/leaderboard/protocol.ts`):
+
+```
+bestLap:<n>|bikeId:<s>|handle:<s>|nonce:<hex>|trackId:<s>|ts:<ms>
+```
+
+The signature field is then `sha256:<lowercase-hex>` of that string, keyed
+with the shared secret.
+
+> ⚠️ **`bestLap` and `ts` are formatted by JavaScript's
+> `Number.prototype.toString()`.** That is the trap for any client not
+> written in JS: JS renders `40.0` as **`"40"`**, while Python's f-strings,
+> Go's `%v`, and most `printf`-style formatters render `"40.0"`. One
+> character of difference produces a completely different HMAC, and the
+> server answers **`401 bad-signature`** — which reads like a wrong key, so
+> the natural next move is to go re-check your secret and lose an hour.
+> `ts` is an integer so it's safe; `bestLap` is the one that bites.
+>
+> Serialise `bestLap` exactly as JS would: drop a trailing `.0`, keep
+> significant decimals (`41.5` → `"41.5"`, `40.0` → `"40"`, `40.25` →
+> `"40.25"`). When hand-testing, pick a lap time with a non-zero decimal so
+> the two agree by construction.
+
+Worked example (Python), which is also the shape of a useful smoke test:
+
+```python
+import hmac, hashlib, json, time, secrets, urllib.request
+
+def js_num(x):                      # match Number.prototype.toString()
+    f = float(x)                    # (verified against node for lap-time ranges)
+    return str(int(f)) if f == int(f) else repr(f)
+
+b = {"trackId": "sandbar", "handle": "ABC", "bikeId": "racer",
+     "bestLap": 41.5, "ts": int(time.time() * 1000),
+     "nonce": secrets.token_hex(16)}
+canon = "|".join([f"bestLap:{js_num(b['bestLap'])}", f"bikeId:{b['bikeId']}",
+                  f"handle:{b['handle']}", f"nonce:{b['nonce']}",
+                  f"trackId:{b['trackId']}", f"ts:{b['ts']}"])
+b["signature"] = "sha256:" + hmac.new(SECRET.encode(), canon.encode(),
+                                      hashlib.sha256).hexdigest()
+```
+
+Two more things that make a correct client look broken:
+
+- **Cloudflare fronts the Party.** A bare `curl`/`urllib` request with no
+  browser-ish `User-Agent` gets `403` with `error code: 1010` *before*
+  reaching the worker — an infrastructure block that looks like an app
+  rejection. Send a normal browser `User-Agent` when scripting against it.
+- **The per-IP rate limit is 1 submit / 5 s.** Back-to-back test submits
+  return `429 rate-limited`, not a signing error.
+
 ## Implementation notes
 
 - **Single global room** — the Party id is hard-coded to `global` on
