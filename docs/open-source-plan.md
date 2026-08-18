@@ -160,16 +160,17 @@ verified by observing the deployed system, not by reading back the config.
 ### 1. Vercel repointed from `hoverbike` to `king-tide`
 
 Both projects were **repointed, not recreated** (`vercel git connect`), so their
-env vars, project IDs and production URLs are unchanged — critically
-`VITE_ASSET_BASE_URL`, which is how production loads its art from the CDN.
+env vars, project IDs and production URLs were unchanged — critically
+`VITE_ASSET_BASE_URL`, which is how production loads its art from the CDN. (Both
+projects were later renamed and given custom domains; see section 3.)
 
-There are **two** projects, not three — `hoverbike-3mrd` is the docs site, not a
+There are **two** projects, not three — the docs live in their own project, not a
 second game project:
 
 | Project | Serves | Root dir | Production URL |
 |---|---|---|---|
-| `hoverbike` | the game (Vite) | `.` | <https://kingtide.unclemattmakes.com> |
-| `hoverbike-3mrd` | the VitePress docs | `docs-site` | <https://hoverbike-3mrd.vercel.app> |
+| `kingtide` (was `hoverbike`) | the game (Vite) | `.` | <https://kingtide.unclemattmakes.com> |
+| `kingtide-docs` (was `hoverbike-3mrd`) | the VitePress docs | `docs-site` | <https://kingtide-docs.unclemattmakes.com> |
 
 Verified: PR #14 produced preview deployments on **both** projects, merging it to
 `main` produced production deployments on **both**, and the live docs site now
@@ -198,15 +199,16 @@ serves the updated links (0 occurrences of the old URL, 2 of the new).
 Reading the failure modes: wrong client secret → `401 bad-signature`; unset
 server secret → `503 unconfigured`; both correct → `200`.
 
-### 3. Custom domain: `kingtide.unclemattmakes.com`
+### 3. Custom domains + project renames
 
-The canonical URL is now <https://kingtide.unclemattmakes.com>, replacing the
-`hoverbike.vercel.app` alias (which still works as a Vercel alias). Set up to
-match the existing `polyfish.unclemattmakes.com` convention on the same zone:
+The canonical URLs are now <https://kingtide.unclemattmakes.com> (game) and
+<https://kingtide-docs.unclemattmakes.com> (docs). Both follow the existing
+`polyfish.unclemattmakes.com` convention on the same zone:
 
 | Type | Name | Target | Proxy |
 |---|---|---|---|
 | CNAME | `kingtide` | `e5fe41961a182595.vercel-dns-016.com` | **DNS only** |
+| CNAME | `kingtide-docs` | `ab6a26b3ce17f45b.vercel-dns-016.com` | **DNS only** |
 
 Two things to get right if this is ever redone:
 
@@ -229,6 +231,22 @@ record is expected, not a misconfiguration.
 
 The leaderboard needed no change: the Party sends
 `access-control-allow-origin: *`, so the new origin submits fine.
+
+**The Vercel projects were renamed** `hoverbike` → `kingtide` and
+`hoverbike-3mrd` → `kingtide-docs`. Two things that surprised us, both worth
+knowing before renaming anything else:
+
+- **A rename does not move the `*.vercel.app` alias.** Both projects kept
+  `hoverbike.vercel.app` / `hoverbike-3mrd.vercel.app`, and those still serve.
+  Nothing linking to them broke — the rename is effectively cosmetic once custom
+  domains are in place.
+- **`kingtide.vercel.app` was already taken** by an unrelated Vercel account (a
+  hydroponics site, "King Tide Farms"). That namespace is global across all of
+  Vercel, not per-team, so the name we wanted was never available — which is
+  precisely why the rename could not have moved the alias anyway.
+
+Project IDs are unchanged by the rename (`prj_Fpz7g3…` for the game), so env
+vars, domains and the Git connection all survive it.
 
 ## Standing constraints (post-flip)
 
