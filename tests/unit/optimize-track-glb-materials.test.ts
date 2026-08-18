@@ -119,9 +119,8 @@ describe('dedupeTrackGlbMaterials', () => {
     const canon = (out.materials ?? []).find((m) => m.name === 'mat_deco_tint_0')
     expect(canon).toBeDefined()
     expect(canon?.extras?.[TINT_EXTRA_KEY]).toBe(TINT_ATTRIBUTE)
-    expect((canon?.pbrMetallicRoughness as { baseColorFactor: number[] }).baseColorFactor).toEqual([
-      1, 1, 1, 1,
-    ])
+    const pbr = canon?.pbrMetallicRoughness as { baseColorFactor: number[] } | undefined
+    expect(pbr?.baseColorFactor).toEqual([1, 1, 1, 1])
     // Coalesced runtime-ignored spreads are reported, not silent.
     expect(report.warnings.join('\n')).toMatch(/metallicFactor/)
     expect(report.warnings.join('\n')).toMatch(/roughnessFactor/)
@@ -288,9 +287,8 @@ describe('dedupeTrackGlbMaterials — prop mode', () => {
     const canon = (out.materials ?? []).find((m) => m.name === 'mat_prop_tint_0')
     expect(canon).toBeDefined()
     expect(canon?.extras?.[TINT_EXTRA_KEY]).toBe(TINT_ATTRIBUTE)
-    expect((canon?.pbrMetallicRoughness as { baseColorFactor: number[] }).baseColorFactor).toEqual([
-      1, 1, 1, 1,
-    ])
+    const pbr = canon?.pbrMetallicRoughness as { baseColorFactor: number[] } | undefined
+    expect(pbr?.baseColorFactor).toEqual([1, 1, 1, 1])
     // The sway-owned foliage material and the emissive singleton survive as-is.
     const names = (out.materials ?? []).map((m) => m.name)
     expect(names).toContain('mat_foliage_leaf')
