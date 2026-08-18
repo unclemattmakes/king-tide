@@ -134,6 +134,9 @@ supersede the bible's stat blocks where they disagree.
   the bike section of [asset-pipeline-guide](docs/asset-pipeline-guide.md) +
   [bike-art-direction](docs/bike-art-direction.md).
 - QA gates + manual playtest checklist: [qa-playbook.md](docs/qa-playbook.md).
+- Judging a dependabot PR: [dependency-triage.md](docs/dependency-triage.md) —
+  a green `pnpm verify` is **not** sufficient for a runtime bump (rapier 0.20
+  passed every test while moving the bike 47 cm); use the determinism harness.
 
 **Dev / tool scenes** — URL-param modes in
 [src/boot/url-modes.ts](src/boot/url-modes.ts) (`?viewer` bike, `?propviewer=<id>`,

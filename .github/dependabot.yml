@@ -19,10 +19,15 @@ updates:
       - dependency-name: "@dimforge/rapier3d-compat"
         versions: ["0.20.x"]
     groups:
+      # `three` is 0.x, so a "minor" here is a breaking render bump. Kept in
+      # its own group and triaged like a runtime change, never batched with
+      # dev tooling. See docs/dependency-triage.md.
       three-stack:
         patterns:
           - three
           - "@types/three"
+      # Routine dev-tooling upgrades. Minor/patch only — mergeable as a batch
+      # once `pnpm verify` is green.
       dev-tooling:
         patterns:
           - "@biomejs/*"
@@ -32,6 +37,30 @@ updates:
           - vitepress
           - typescript
           - "@types/node"
+          - jsdom
+          - electron
+          - electron-builder
+        update-types:
+          - minor
+          - patch
+      # Majors arrive on their own. Splitting them out is not cosmetic: PR #7
+      # bundled biome/vite/vitest minors together with typescript 6 -> 7 and
+      # @types/node 20 -> 26, which made the whole PR read as "already
+      # superseded" when two compiler-level majors were still hiding in it.
+      dev-tooling-major:
+        patterns:
+          - "@biomejs/*"
+          - "@playwright/*"
+          - vitest
+          - vite
+          - vitepress
+          - typescript
+          - "@types/node"
+          - jsdom
+          - electron
+          - electron-builder
+        update-types:
+          - major
 
   - package-ecosystem: github-actions
     directory: /
