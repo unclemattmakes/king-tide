@@ -148,8 +148,9 @@ Post-flip polish (non-gating): ~~point the README "Live" link at a stable
 domain~~ — **DONE (#14)**: README, the VitePress nav and the docs landing page
 pointed at the *per-deployment* URL, which sits behind Vercel deployment
 protection and served an anonymous visitor a "Login – Vercel" page; they now
-point at the stable alias <https://hoverbike.vercel.app>. Still open: announce
-with the making-of site as the centerpiece.
+point at a stable URL. Superseded by the custom domain below — the links now
+point at <https://kingtide.unclemattmakes.com>. Still open: announce with the
+making-of site as the centerpiece.
 
 ## Post-flip deployment (2026-08-17)
 
@@ -167,7 +168,7 @@ second game project:
 
 | Project | Serves | Root dir | Production URL |
 |---|---|---|---|
-| `hoverbike` | the game (Vite) | `.` | <https://hoverbike.vercel.app> |
+| `hoverbike` | the game (Vite) | `.` | <https://kingtide.unclemattmakes.com> |
 | `hoverbike-3mrd` | the VitePress docs | `docs-site` | <https://hoverbike-3mrd.vercel.app> |
 
 Verified: PR #14 produced preview deployments on **both** projects, merging it to
@@ -196,6 +197,38 @@ serves the updated links (0 occurrences of the old URL, 2 of the new).
 
 Reading the failure modes: wrong client secret → `401 bad-signature`; unset
 server secret → `503 unconfigured`; both correct → `200`.
+
+### 3. Custom domain: `kingtide.unclemattmakes.com`
+
+The canonical URL is now <https://kingtide.unclemattmakes.com>, replacing the
+`hoverbike.vercel.app` alias (which still works as a Vercel alias). Set up to
+match the existing `polyfish.unclemattmakes.com` convention on the same zone:
+
+| Type | Name | Target | Proxy |
+|---|---|---|---|
+| CNAME | `kingtide` | `e5fe41961a182595.vercel-dns-016.com` | **DNS only** |
+
+Two things to get right if this is ever redone:
+
+- **The CNAME target is per-domain.** Vercel issues a unique
+  `<hash>.vercel-dns-016.com` per domain — read it from the project's Domains
+  page, don't copy another domain's. The legacy `cname.vercel-dns.com` and
+  `A 76.76.21.21` still work, but the per-domain target is what Vercel now
+  recommends and what `polyfish` already uses.
+- **The Cloudflare proxy must stay off (grey cloud).** Proxied, Vercel cannot
+  complete its `http-01` challenge, so no certificate is issued — and with
+  Cloudflare SSL set to Flexible you get a redirect loop instead. The apex and
+  `www` on this zone *are* proxied (they point at Pages); the Vercel subdomains
+  are the exception.
+
+Verified: `kingtide.unclemattmakes.com` → CNAME → Vercel edge (216.150.x, not
+Cloudflare's 104.21/172.67 proxy range); Let's Encrypt cert issued for the exact
+CN; `/` and `/making-of/` both 200; `http://` → `https://` 308. Cert issuance
+lagged DNS by ~2 minutes — a failed TLS handshake immediately after adding the
+record is expected, not a misconfiguration.
+
+The leaderboard needed no change: the Party sends
+`access-control-allow-origin: *`, so the new origin submits fine.
 
 ## Standing constraints (post-flip)
 
