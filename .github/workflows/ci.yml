@@ -122,7 +122,15 @@ jobs:
 
   # Determinism GATE — unlike the broad `e2e` job above, this one is NOT
   # continue-on-error, so a determinism regression (sim divergence or a golden
-  # mismatch) can actually fail the build. It runs ONLY the two determinism
+  # mismatch) can actually fail the build.
+  #
+  # REALITY CHECK (measured 2026-08-17): this gate has never run. RCLONE_CONF_BASE64
+  # has never been set, so it always takes the skip path below. Setting it does NOT
+  # make the gate work — assets hydrate fine, but the specs then time out on
+  # GitHub-hosted runners, which have no GPU (headless Chromium falls back to
+  # SwiftShader and a WebGPU track boot can't finish inside the waits): 2 passed /
+  # 1 failed in 7.7 min. Making this a real gate needs GPU-capable self-hosted
+  # runners or CI-specific timeouts — see CLAUDE.md hard rule 1. It runs ONLY the two determinism
   # specs against hydrated assets.
   #
   # Asset/secret gating: the specs need the compiled GLBs from R2. If

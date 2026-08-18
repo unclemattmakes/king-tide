@@ -26,11 +26,21 @@ linked docs — extend those rather than growing this file.
    the old advice here was "don't trust CI, it aborts on a spending limit".
    That diagnosis was wrong and the failure is fixed (#416). **A red check now
    means something.** Read it before assuming it's infrastructure.
-   Blocking gates: `check-and-build`, `docs`, `determinism`. Informational:
-   `e2e` and `QA report` (both `continue-on-error`). Jobs that boot real
-   tracks hydrate assets from R2 and skip with a `::warning::` when
-   `RCLONE_CONF_BASE64` is absent (forks), so a fork's green run means "not
-   exercised", not "passed".
+   What CI actually covers: **`check-and-build` and `docs` are the real
+   gates** — typecheck, lint, unit tests, build, docs build. `determinism`,
+   `e2e` and `QA report` all boot real tracks, so they hydrate assets from R2
+   and **skip with a `::warning::` when `RCLONE_CONF_BASE64` is absent** — a
+   green run there means "not exercised", not "passed", on forks *and* on the
+   main repo (the secret has never been set).
+   **Don't just set that secret expecting the gates to light up.** Measured
+   2026-08-17 by setting it on a clone: hydration works fine, then the specs
+   fail on runner hardware — GitHub runners have no GPU, headless Chromium
+   falls back to SwiftShader, and a WebGPU track boot can't finish inside the
+   specs' waits. QA matrix 14/14 cells failed (`waitForFunction` 20 s);
+   determinism 2 passed / 1 failed in 7.7 min (30 s wait, 120 s test timeout).
+   These gates need GPU-capable (self-hosted) runners, or CI-specific
+   timeouts, before the secret buys anything but red. Same root cause as hard
+   rule 2's "keep it headed".
 
 2. **Verify with headed Playwright on _your own_ dev server — not the in-app preview.**
    For any visual/feel work the primary check is **headed Playwright** (`pnpm e2e`
