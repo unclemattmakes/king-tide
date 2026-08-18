@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'Hoverbike',
-  description: 'Developer + modder docs for the Hoverbike racer.',
+  title: 'King Tide',
+  description: 'Developer + modder docs for the King Tide racer.',
   cleanUrls: true,
   lastUpdated: true,
 
@@ -112,7 +112,7 @@ export default defineConfig({
 
     footer: {
       message: 'Made with VitePress.',
-      copyright: 'OddballCreatureClub — Hoverbike',
+      copyright: 'OddballCreatureClub — King Tide',
     },
   },
 })
