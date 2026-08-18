@@ -5,6 +5,19 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # Rapier 0.20.x reworked the contact solver defaults (erp -> natural
+      # frequency, a finite normalized_max_corrective_velocity, and the
+      # fast-contact special case removed). Measured against the 600-tick
+      # determinism harness on this game, that is NOT a drop-in bump: with
+      # byte-identical scripted input the player bike lands 47 cm away in Z
+      # with hover height off by 3.8 cm and vertical velocity off by 45%,
+      # and every one of the 104 lagoon bodies moves. It changes wave-mastery
+      # feel and fixes no advisory, so it needs a deliberate precision-tuning
+      # pass + golden reseed rather than a merge. Pinned to 0.20.x only, so
+      # 0.21+ still gets raised. See PR #10 for the full measurement.
+      - dependency-name: "@dimforge/rapier3d-compat"
+        versions: ["0.20.x"]
     groups:
       three-stack:
         patterns:
