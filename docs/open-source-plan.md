@@ -51,8 +51,10 @@ gates before the public flip. Not legal advice.*
    any `ai/*` prop. The GLBs were deleted from R2 and from local disk on
    2026-08-13 (originals preserved out-of-band under the content root's
    `retired/props-ai/`), so the CDN now 404s them.
-2. ~~**Verify PartyKit prod env**~~ — **CHECKED 2026-08-13: no variables are
-   set**, so the deployed board signs and verifies with `DEV_HMAC_SECRET`.
+2. ~~**Verify PartyKit prod env**~~ — **SUPERSEDED 2026-08-17: both variables
+   are now set and verified live** (see [Post-flip deployment](#post-flip-deployment-2026-08-17)).
+   *Historical note, true when written:* checked 2026-08-13, no variables were
+   set, so the deployed board signed and verified with `DEV_HMAC_SECRET`.
    **This does not gate the flip:** that same secret is already a plain
    literal in the deployed production bundle, so publishing the source adds
    no attacker capability. Setting a real `LEADERBOARD_HMAC_SECRET` is ops
@@ -67,8 +69,10 @@ gates before the public flip. Not legal advice.*
    `pnpm assets:pull` stays the maintainer path. Deliberately *not* shipping a
    public pull script — the bucket can't be enumerated anonymously, so any
    such script would half-hydrate and be worse than nothing.
-4. **Re-cut king-tide from the final hoverbike main** (see runbook), then
-   flip visibility. ← the only remaining gate.
+4. ~~**Re-cut king-tide from the final hoverbike main** (see runbook), then
+   flip visibility.~~ — **DONE.** The repo is public; MIT code / CC BY-NC
+   content. Deployment cutover is recorded under
+   [Post-flip deployment](#post-flip-deployment-2026-08-17).
 
 > **CI is a real gate again as of 2026-08-13 (#416).** It had been dead at
 > setup since June (pnpm/action-setup v6 vs the `packageManager` pin), which
@@ -140,8 +144,58 @@ becomes **free** on the public repo — re-enable CI as a trusted gate and
 reword the "don't trust CI" note in CLAUDE.md. Development cuts over to
 king-tide as origin; `hoverbike` remains the private pre-filter archive.
 
-Post-flip polish (non-gating): point the README "Live" link at a stable
-domain; announce with the making-of site as the centerpiece.
+Post-flip polish (non-gating): ~~point the README "Live" link at a stable
+domain~~ — **DONE (#14)**: README, the VitePress nav and the docs landing page
+pointed at the *per-deployment* URL, which sits behind Vercel deployment
+protection and served an anonymous visitor a "Login – Vercel" page; they now
+point at the stable alias <https://hoverbike.vercel.app>. Still open: announce
+with the making-of site as the centerpiece.
+
+## Post-flip deployment (2026-08-17)
+
+The two items that needed dashboard access. Both are **done and verified live** —
+verified by observing the deployed system, not by reading back the config.
+
+### 1. Vercel repointed from `hoverbike` to `king-tide`
+
+Both projects were **repointed, not recreated** (`vercel git connect`), so their
+env vars, project IDs and production URLs are unchanged — critically
+`VITE_ASSET_BASE_URL`, which is how production loads its art from the CDN.
+
+There are **two** projects, not three — `hoverbike-3mrd` is the docs site, not a
+second game project:
+
+| Project | Serves | Root dir | Production URL |
+|---|---|---|---|
+| `hoverbike` | the game (Vite) | `.` | <https://hoverbike.vercel.app> |
+| `hoverbike-3mrd` | the VitePress docs | `docs-site` | <https://hoverbike-3mrd.vercel.app> |
+
+Verified: PR #14 produced preview deployments on **both** projects, merging it to
+`main` produced production deployments on **both**, and the live docs site now
+serves the updated links (0 occurrences of the old URL, 2 of the new).
+
+### 2. Global leaderboard switched on
+
+`VITE_LEADERBOARD_HMAC_SECRET` is set on the `hoverbike` project, matching
+`LEADERBOARD_HMAC_SECRET` on the Party.
+
+- **Production target only.** Preview builds deliberately stay in local-only
+  mode rather than writing to the live global board.
+- Vercel classified it **Sensitive** (write-only), so it cannot be read back
+  with `vercel env pull` — a redacted pull is *not* evidence of a problem.
+- Verified in the shipped bundle: the 64-char value is inlined in
+  `assets/remote-*.js` as a backtick literal with **no trailing newline**, and
+  the `remote board disabled` branch is tree-shaken out (it only survives when
+  the var is unset).
+- Verified end-to-end against the live Party: a correctly-signed submission was
+  accepted (`{"ok":true,"rank":1}`), read back from `GET /board/<id>`, then
+  removed via `DELETE /admin/handle/<handle>`, leaving no residue. A throwaway
+  `trackId` was used so no real track's board was touched. **This is the only
+  check that proves both halves hold the same value** — the bundle check alone
+  proves the client has *a* secret, not the *right* one.
+
+Reading the failure modes: wrong client secret → `401 bad-signature`; unset
+server secret → `503 unconfigured`; both correct → `200`.
 
 ## Standing constraints (post-flip)
 
