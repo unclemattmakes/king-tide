@@ -1,11 +1,5 @@
 MIT License
 
-SCOPE: this licence covers the SOURCE CODE only. The game's content — art,
-audio, track and prop data (including `public/tracks/*.json` and `specs/**`),
-and everything served from the asset CDN — is licensed separately under
-CONTENT-LICENSE.md, and third-party material is itemised in CREDITS.md. The
-name "King Tide" and the game's branding are not licensed by either.
-
 Copyright (c) 2026 Uncle Matt Makes and King Tide contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -25,3 +19,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+SCOPE: this licence covers the SOURCE CODE only. The game's content — art,
+audio, track and prop data (including `public/tracks/*.json` and `specs/**`),
+and everything served from the asset CDN — is licensed separately under
+CONTENT-LICENSE.md, and third-party material is itemised in CREDITS.md. The
+name "King Tide" and the game's branding are not licensed by either.
