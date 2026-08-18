@@ -23,11 +23,11 @@ export default defineConfig({
       { text: 'Reference', link: '/reference/conventions' },
       {
         text: 'Making of',
-        link: 'https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app/making-of/',
+        link: 'https://hoverbike.vercel.app/making-of/',
       },
       {
         text: 'Live build',
-        link: 'https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app',
+        link: 'https://hoverbike.vercel.app',
       },
     ],
 

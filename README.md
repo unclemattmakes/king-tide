@@ -2,7 +2,7 @@
 
 Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics and light Mario Kart combat. Three.js + WebGPU + Rapier WASM, gamepad-first.
 
-**Live:** [hoverbike-...vercel.app](https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app) — every push to `main` auto-deploys.
+**Live:** [hoverbike.vercel.app](https://hoverbike.vercel.app) — every push to `main` auto-deploys.
 
 > **⚠ v2 status (2026-06).** "What's playable" below is the **v1** lineup;
 > content restarted for **v2** since. Net corrections: `status: 'ship'` means

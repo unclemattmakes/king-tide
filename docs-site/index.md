@@ -17,7 +17,7 @@ hero:
       link: /modding/overview
     - theme: alt
       text: Live build
-      link: https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app
+      link: https://hoverbike.vercel.app
 
 features:
   - title: Build & Run
@@ -63,7 +63,7 @@ This is the **dev + modder-facing** documentation. If you're trying to:
 | | |
 |---|---|
 | Repo | [unclemattmakes/king-tide](https://github.com/unclemattmakes/king-tide) |
-| Live build | [hoverbike-…vercel.app](https://hoverbike-ciaqaossl-oddballcreatureclubs-projects.vercel.app) — pushes to `main` auto-deploy |
+| Live build | [hoverbike.vercel.app](https://hoverbike.vercel.app) — pushes to `main` auto-deploy |
 | Stack | TypeScript · Vite 8 · Three.js (WebGPU + WebGL2) · Rapier WASM · bitECS 0.4 |
 | Tooling | pnpm 10 · Vitest · Playwright · Biome 2 · Blender 5.1 (headless) |
 | Hosting | Vercel |
