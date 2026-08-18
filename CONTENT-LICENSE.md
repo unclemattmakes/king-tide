@@ -1,5 +1,7 @@
 # Content license
 
+*(One-page summary of how code, content and third-party material divide up: [NOTICE](NOTICE).)*
+
 The **code** in this repository is MIT-licensed ([LICENSE](LICENSE)). This
 file covers everything else — the **game content**.
 

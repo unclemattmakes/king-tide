@@ -1,0 +1,31 @@
+King Tide — licensing at a glance
+=================================
+
+This project is licensed in two halves. Read this before reusing anything.
+
+CODE — MIT (see LICENSE)
+    Everything under src/, party/, tools/, tests/, electron/ and the build
+    configuration. GitHub labels the repository "MIT" from that file; that
+    label describes the CODE only.
+
+CONTENT — CC BY-NC 4.0 (see CONTENT-LICENSE.md)
+    The game's first-party creative work: art, audio, the track and prop data
+    in public/tracks/*.json and specs/**, and everything served from the asset
+    CDN. Not covered by the MIT licence above.
+
+THIRD-PARTY — see CREDITS.md
+    The soundtrack (14 Creative-Commons tracks, individually licensed), the
+    Blender Studio brush textures (CC BY 4.0), and the Quaternius prop and
+    rider models (CC0). Their own terms govern, and some are more restrictive
+    than either licence above.
+
+NAME AND BRANDING — not licensed
+    "King Tide", the working title "Hoverbike", and the game's logo and
+    branding identify this project and its author. Forks and derived games
+    must ship under their own name.
+
+SCOPE: this licence covers the SOURCE CODE only. The game's content — art,
+audio, track and prop data (including `public/tracks/*.json` and `specs/**`),
+and everything served from the asset CDN — is licensed separately under
+CONTENT-LICENSE.md, and third-party material is itemised in CREDITS.md. The
+name "King Tide" and the game's branding are not licensed by either.
