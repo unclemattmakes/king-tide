@@ -191,6 +191,8 @@ See [`docs/adr/`](docs/adr/README.md) for the full set of architecture decisions
 
 ## License
 
+Split licensing — see [NOTICE](NOTICE) for the one-page summary.
+
 - **Code** — [MIT](LICENSE).
 - **Game content** — art, tracks, audio, and everything served from the asset
   CDN (`public/assets/`, `public/audio/`, at any git revision) is **not** under
