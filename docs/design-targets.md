@@ -1,4 +1,4 @@
-# Hoverbike — Design Targets v0.1
+# King Tide — Design Targets v0.1
 
 > Synthesizes the [research/](../research/) findings against the locked
 > vision in [product-plan.md](./product-plan.md) and the current
@@ -29,7 +29,7 @@
 >   in [tracks/](./tracks/README.md). Rows below are left as-authored for
 >   history; this banner is the source of truth where they conflict.
 
-## 1. Research → Hoverbike crosswalk
+## 1. Research → King Tide crosswalk
 
 | Research signal | Our position | Target |
 |---|---|---|

@@ -1,11 +1,11 @@
-# Hoverbike QA Playbook
+# King Tide QA Playbook
 
 > Companion to [docs/v1-work-breakdown.md](./v1-work-breakdown.md). The
 > work-breakdown declares what we ship; this doc declares what we
 > ship-block on. Lives outside the milestone log so the convention
 > doesn't churn when individual systems land.
 
-This is the **QA contract** for the Hoverbike project — what every
+This is the **QA contract** for the King Tide project — what every
 build is graded against, how those gates run, and how a regression
 gets from "noticed" to "fixed". Modeled on the
 definition-of-done convention in `v1-work-breakdown.md`: every gate

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Symlink (or copy) the in-repo Hoverbike addon into Blender's user
+ * Symlink (or copy) the in-repo King Tide addon into Blender's user
  * scripts dir so Blender always loads the working-tree version.
  *
  * Usage:
@@ -43,8 +43,8 @@ const __filename = fileURLToPath(import.meta.url)
 const SCRIPT_DIR = path.dirname(__filename)
 // The addon is a package directory now (was a single .py file before
 // the package refactor). Symlink/copy the whole tree.
-const SOURCE = path.join(SCRIPT_DIR, 'hoverbike_addon')
-const ADDON_NAME = 'hoverbike_addon'
+const SOURCE = path.join(SCRIPT_DIR, 'kingtide_addon')
+const ADDON_NAME = 'kingtide_addon'
 
 const args = new Set(process.argv.slice(2))
 const FORCE_COPY = args.has('--copy')
@@ -201,7 +201,7 @@ function cleanupLegacyFileInstall(dir) {
   const legacyTarget = path.join(dir, `${ADDON_NAME}.py`)
   // lstatSync (not existsSync) so we also detect a dangling symlink
   // — common after the package refactor, since the old install
-  // pointed at hoverbike_addon.py which is now hoverbike_addon/_legacy.py.
+  // pointed at kingtide_addon.py which is now kingtide_addon/_legacy.py.
   let ls
   try {
     ls = lstatSync(legacyTarget)
@@ -302,7 +302,7 @@ function printPostInstall(target) {
   log(`installed at: ${target}`)
   log('')
   log('Next steps in Blender (one-time, if not already enabled):')
-  log('  Edit → Preferences → Add-ons → enable "Hoverbike: Export to Game"')
+  log('  Edit → Preferences → Add-ons → enable "King Tide: Export to Game"')
   log('')
   log('After an addon code change, reload it without restarting Blender:')
   log('  F3 → "Reload Scripts"   (or disable+enable in Preferences)')

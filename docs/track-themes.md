@@ -1,4 +1,4 @@
-# Hoverbike — Track Themes v1
+# King Tide — Track Themes v1
 
 > **⚠ v2 status (2026-06).** The *themes / lore / set-pieces* below are current,
 > but the **v1 lineup framing is historical**: content restarted for v2, so most

@@ -1,8 +1,8 @@
 """Headless prop GLB builder. Spec → GLB.
 
 Run:
-    HOVERBIKE_SPEC=specs/props/barrier_low.json \\
-    HOVERBIKE_OUTPUT=public/assets/props/barrier_low.glb \\
+    KINGTIDE_SPEC=specs/props/barrier_low.json \\
+    KINGTIDE_OUTPUT=public/assets/props/barrier_low.glb \\
       blender --background --python tools/blender/build_prop.py
 
 Reads the spec, appends a single kit part from

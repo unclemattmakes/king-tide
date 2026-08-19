@@ -189,7 +189,7 @@ def _apply_open_sea_sky(scene) -> None:
     Every write is guarded — the scene props only exist when the addon
     registered them, which it has by the time we run."""
     try:
-        from hoverbike_addon.sky_preset import set_sky_tint_from_hex
+        from kingtide_addon.sky_preset import set_sky_tint_from_hex
         set_sky_tint_from_hex("#cfe3f2")
     except Exception:
         pass
@@ -235,7 +235,7 @@ def _augment_and_reexport() -> None:
 
     bpy.ops.wm.save_as_mainfile(filepath=output_blend)
 
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(f"[seed-track-prop-showcase] re-export failed: {result}")
 

@@ -5,7 +5,7 @@
 
 > **Who this is for.** This is the **agent/MCP-driven** content-pass workflow: a
 > session driving the connected Blender over MCP (`execute_blender_code`) and calling
-> the addon's `bpy.ops.hoverbike.*` operators directly. **A human at the keyboard
+> the addon's `bpy.ops.kingtide.*` operators directly. **A human at the keyboard
 > should start at the published "Your first track" walkthrough and use the N-panel
 > addon buttons instead** — the `bpy.ops` operators here map 1:1 to the panel buttons,
 > so this playbook doubles as a tool cheat-sheet (§9) and
@@ -32,7 +32,7 @@
 >
 > The whole job is done in the connected Blender via MCP (`execute_blender_code`
 > + `render_viewport_to_path`), authoring the `.blend` and exporting with
-> `bpy.ops.hoverbike.export_track`. The `.blend` lives in `tracks-src/<id>.blend`
+> `bpy.ops.kingtide.export_track`. The `.blend` lives in `tracks-src/<id>.blend`
 > — the team keeps theirs Drive-synced (outside the clone), but it can equally be
 > your clone's own `tracks-src/`; the addon detects "track mode" from the folder
 > name either way, and the `.blend` is gitignored either way. Only the compiled
@@ -59,7 +59,7 @@
 - **`props-library.blend` exists** in `tracks-src/`, or the scatter ops have
   nothing to link — seed it with `node tools/blender/seed.mjs seed_props_library.py`
   if missing.
-- **The addon's *Project root* pref / `$HOVERBIKE_REPO_ROOT` points at the clone
+- **The addon's *Project root* pref / `$KINGTIDE_REPO_ROOT` points at the clone
   you want exports to land in** — exports go *there*, not wherever the `.blend`
   lives, and not necessarily your current git worktree (see §8).
 
@@ -108,7 +108,7 @@ docs' beat timings map onto `s` via the lap-time target.
 
 ### Pass 1 — race-line shape
 Usually "already set." To **reverse direction**: select `ai_spline_main`,
-`bpy.ops.hoverbike.reverse_spline()` then `snap_starts_to_spline()` (re-faces the
+`bpy.ops.kingtide.reverse_spline()` then `snap_starts_to_spline()` (re-faces the
 grid; "same line, flipped facing"). Keep the 2D shape unless the owner explicitly
 wants a reshape — single loop around one feature reads clean; save braided/urban
 for a later track.
@@ -254,7 +254,7 @@ Folded from the earlier Cape Hatteras build:
   `bpy.data` get picked up (`'_orphan_terrain' has no evaluated mesh data`).
   Purge them first; renaming isn't enough (finders key on `kind` / largest-bbox).
 - **`cp_NN` needs an `index` custom prop** (`cp["index"]=N`) or export validation
-  cancels — or use `hoverbike.materialize_gates_to_cp_empties`, which sets it.
+  cancels — or use `kingtide.materialize_gates_to_cp_empties`, which sets it.
 - **JSON export is opt-in merge, not stomp.** It overwrites
   `pickupSpawns`/`boostPads`/`waveZones`/`checkpoints` only when the scene has the
   matching visible empties — build from scratch but skip placing those empties and
@@ -266,7 +266,7 @@ Folded from the earlier Cape Hatteras build:
 ## 9. Tool cheat-sheet
 
 `reverse_spline` · `snap_starts_to_spline` · `add_island_terrain` ·
-`add_island_mod_zone` · `create_gn_ramp` (`hoverbike_addon.ramp`) · `add_boost_pad`
+`add_island_mod_zone` · `create_gn_ramp` (`kingtide_addon.ramp`) · `add_boost_pad`
 (+ `pickup_NN`/`wave_zone_NN` empties authored directly) · `add_wave_zone` ·
 `rebuild_water_preview` → `rebuild_buoys` · `add_horizon_ring` (+ edit top verts) ·
 `export_track`. Materials: `mat_foliage_*` sways; emissive → neon; flat BSDF for

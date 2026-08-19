@@ -2,7 +2,7 @@
 
 End-to-end check that the biome palette's evaluated instances make it
 all the way through to ``EXT_mesh_gpu_instancing`` in the exported GLB.
-Drives ``hoverbike.export_track`` so the realization pass + glTF flags
+Drives ``kingtide.export_track`` so the realization pass + glTF flags
 are exactly what production export uses.
 
 Pass:
@@ -37,13 +37,13 @@ def _enable_addon() -> bool:
     if addons_root not in sys.path:
         sys.path.insert(0, addons_root)
     try:
-        import hoverbike_addon  # type: ignore # noqa: F401
+        import kingtide_addon  # type: ignore # noqa: F401
     except ImportError as e:
-        print(f"FAIL: hoverbike_addon import: {e}", flush=True)
+        print(f"FAIL: kingtide_addon import: {e}", flush=True)
         return False
-    if not hasattr(bpy.ops.hoverbike, "export_track"):
+    if not hasattr(bpy.ops.kingtide, "export_track"):
         try:
-            hoverbike_addon.register()
+            kingtide_addon.register()
         except (RuntimeError, ValueError) as e:
             print(f"FAIL: addon register: {e}", flush=True)
             return False
@@ -71,7 +71,7 @@ def main() -> int:
 
     # Snapshot the current GLB so we can restore on exit (don't clobber
     # the user's working glb).
-    from hoverbike_addon._legacy import derive_asset_id, find_repo_root  # type: ignore
+    from kingtide_addon._legacy import derive_asset_id, find_repo_root  # type: ignore
 
     track_id = derive_asset_id("hoverbike_track_id")
     repo = find_repo_root(bpy.data.filepath)
@@ -90,8 +90,8 @@ def main() -> int:
             print(f"smoke: snapshotted {p} → {tmp.name}", flush=True)
 
     try:
-        print("smoke: running hoverbike.export_track", flush=True)
-        result = bpy.ops.hoverbike.export_track()
+        print("smoke: running kingtide.export_track", flush=True)
+        result = bpy.ops.kingtide.export_track()
         print(f"smoke: export_track returned {result}", flush=True)
         if "FINISHED" not in result:
             print(f"FAIL: export_track returned {result}", flush=True)

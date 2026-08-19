@@ -273,7 +273,7 @@ def build():
     # Export GLB via the canonical exporter.
     glb_out = os.path.join(REPO_ROOT, "public", "assets", "tracks", f"{TRACK_ID}.glb")
     os.makedirs(os.path.dirname(glb_out), exist_ok=True)
-    os.environ["HOVERBIKE_OUTPUT"] = glb_out
+    os.environ["KINGTIDE_OUTPUT"] = glb_out
     export_path = os.path.join(REPO_ROOT, "tools", "export_track.py")
     with open(export_path, "r", encoding="utf-8") as f:
         code = compile(f.read(), export_path, "exec")

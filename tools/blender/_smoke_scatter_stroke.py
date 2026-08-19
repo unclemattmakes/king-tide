@@ -1,7 +1,7 @@
 """Smoke test — exercise HV_StrokeScatter end-to-end on any track .blend.
 
-  1. Confirms the hoverbike addon is registered (or registers it).
-  2. Runs ``hoverbike.add_scatter_stroke`` to drop a palm stroke at the
+  1. Confirms the King Tide addon is registered (or registers it).
+  2. Runs ``kingtide.add_scatter_stroke`` to drop a palm stroke at the
      3D cursor and attach HV_StrokeScatter to the surf mesh.
   3. Evaluates the modifier on the depsgraph and counts emitted
      instances. Expects > 0 instances (default 12 m curve at width 8,
@@ -36,13 +36,13 @@ def _enable_addon() -> bool:
     if addons_root not in sys.path:
         sys.path.insert(0, addons_root)
     try:
-        import hoverbike_addon  # type: ignore
+        import kingtide_addon  # type: ignore
     except ImportError as e:
-        print(f"FAIL: hoverbike_addon import: {e}")
+        print(f"FAIL: kingtide_addon import: {e}")
         return False
-    if not hasattr(bpy.ops.hoverbike, "add_scatter_stroke"):
+    if not hasattr(bpy.ops.kingtide, "add_scatter_stroke"):
         try:
-            hoverbike_addon.register()
+            kingtide_addon.register()
         except (RuntimeError, ValueError) as e:
             print(f"FAIL: addon register: {e}")
             return False
@@ -69,7 +69,7 @@ def _add_stroke(prop_key: str) -> str | None:
     """Add one stroke of the given prop type; return the surf-object
     name on success, None on failure."""
     try:
-        bpy.ops.hoverbike.add_scatter_stroke(prop=prop_key)
+        bpy.ops.kingtide.add_scatter_stroke(prop=prop_key)
     except RuntimeError as e:
         print(f"FAIL: add_scatter_stroke prop={prop_key}: {e}")
         return None

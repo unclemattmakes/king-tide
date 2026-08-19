@@ -314,7 +314,7 @@ need a non-zero, trusted Q.
 > which is Matt's-hands territory, not a sync bug. Default **Q = 0.44 is now
 > trusted**, and §7.4's Q-gated signals (Jacobian compression foam, SoT-style
 > choppiness peak mask) are unblocked. One machine-local trap: the water
-> debug menu persists steepness in localStorage (`hoverbike.waterDebug.v10`),
+> debug menu persists steepness in localStorage (`kingtide.waterDebug.v10`),
 > so a distrust-era 0 keeps overriding the trusted default on that machine
 > until the menu's RESET is hit.
 

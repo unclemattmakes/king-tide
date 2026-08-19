@@ -13,7 +13,7 @@
  *   1. Resolves the Blender executable.
  *   2. Lists *.json files in the spec directory (skipping _schema/).
  *   3. Validates each spec against its $schema (ajv).
- *   4. Spawns Blender per spec with HOVERBIKE_SPEC and HOVERBIKE_OUTPUT
+ *   4. Spawns Blender per spec with KINGTIDE_SPEC and KINGTIDE_OUTPUT
  *      pointing at the corresponding GLB under public/assets/<category>/.
  *   5. Streams stdout/stderr with a per-spec prefix.
  *   6. Exits non-zero if any builder failed.
@@ -172,8 +172,8 @@ function runBuilder(builder, specDir) {
     const child = spawnSync(blender, ['--background', '--python', builderScript], {
       env: {
         ...process.env,
-        HOVERBIKE_SPEC: specPath,
-        HOVERBIKE_OUTPUT: outPath,
+        KINGTIDE_SPEC: specPath,
+        KINGTIDE_OUTPUT: outPath,
       },
       cwd: REPO_ROOT,
       stdio: 'inherit',
@@ -298,7 +298,7 @@ if (action === 'build_bike' || action === 'build_prop' || action === 'build_trac
   //   - bikes / props / riders: wipe-and-replace, since the only author
   //     for those is the spec pipeline.
   //   - tracks: upsert by id. Tracks authored interactively by the
-  //     Blender addon (see `_upsert_manifest_track` in hoverbike_addon.py)
+  //     Blender addon (see `_upsert_manifest_track` in kingtide_addon.py)
   //     have specPath under public/tracks/; the spec pipeline's tracks
   //     live under specs/. We let `gen:tracks` refresh the spec-driven
   //     entries by id but preserve any other ids that are already

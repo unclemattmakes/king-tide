@@ -1,5 +1,5 @@
 /**
- * Hoverbike QA matrix — single source of truth for the parameterized
+ * King Tide QA matrix — single source of truth for the parameterized
  * smoke / soak runs.
  *
  * A "cell" is one (track × bike) tuple the QA pass exercises. We

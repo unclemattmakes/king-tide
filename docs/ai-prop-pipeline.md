@@ -1,7 +1,7 @@
 # AI prop pipeline — local concept→3D→prop factory
 
 A fully **local, free** pipeline that turns a text prompt into a
-pipeline-legal Hoverbike prop, entirely on the dev machine's GPU
+pipeline-legal King Tide prop, entirely on the dev machine's GPU
 (RTX 5050 Laptop, 8 GB):
 
 ```
@@ -110,7 +110,7 @@ from tools.blender.condition_ai_mesh import condition_active
 condition_active(prop_id="stone_idol", family="prop", target_tris=2000,
                  target_height=4.0, collider="box", tint="#8a8782", smooth=True)
 ```
-It **iteratively** decimates (≤10× per pass — gentle passes preserve the silhouette far better than one collapse) → orients Z-up → recenters origin to bottom-centre → rescales to `target_height` (larger-than-life) → assigns `mat_<family>_<id>` → stamps `COLOR_0` → wraps in `prop_<id>_root` (kind=prop) + a bbox-derived primitive collider. Output = a pipeline-legal `prop_<id>` collection. (`family="foliage"` opts into the sway shader; `smooth=True` reads better on organic/sculpted meshes, flat for hard-surface.) Headless `main()` (`HOVERBIKE_INPUT/PROP_ID/OUTPUT`) conditions a file straight to a GLB.
+It **iteratively** decimates (≤10× per pass — gentle passes preserve the silhouette far better than one collapse) → orients Z-up → recenters origin to bottom-centre → rescales to `target_height` (larger-than-life) → assigns `mat_<family>_<id>` → stamps `COLOR_0` → wraps in `prop_<id>_root` (kind=prop) + a bbox-derived primitive collider. Output = a pipeline-legal `prop_<id>` collection. (`family="foliage"` opts into the sway shader; `smooth=True` reads better on organic/sculpted meshes, flat for hard-surface.) Headless `main()` (`KINGTIDE_INPUT/PROP_ID/OUTPUT`) conditions a file straight to a GLB.
 
 ## External CC0 packs (condition-only lane — skip generation)
 
@@ -303,7 +303,7 @@ python tools/make_level_props.py <level> status      # manifest summary, anytime
 
 - **Raw vs. compiled split (docs/asset-storage.md).** Everything raw goes to
   the Drive-synced content root (out of git, default `C:\project-content\hoverbike`,
-  override `$HOVERBIKE_CONTENT_ROOT`); only the compiled GLB goes to the repo:
+  override `$KINGTIDE_CONTENT_ROOT`); only the compiled GLB goes to the repo:
   - **concept art** (Phase A PNGs + the contact sheet) →
     `<content-root>/concept-art/props/<level>/` — kept next to the bike/track
     concept art, so iterations aren't thrown away.
@@ -319,7 +319,7 @@ python tools/make_level_props.py <level> status      # manifest summary, anytime
   monolithic `props-library.blend`. The content root's `tracks-src/` is
   already a registered Blender asset library, so its recursive scan
   aggregates the AI props next to the procedural ones under the shared
-  `Hoverbike/Track Props` catalogue. Smallest blast radius — regenerating
+  `King Tide/Track Props` catalogue. Smallest blast radius — regenerating
   one prop rewrites one small file and can't corrupt the procedural library
   or its siblings. The committed, reproducible anchor stays the GLB + the
   prompt in the manifest. *(Headless scatter still links by name from

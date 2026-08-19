@@ -88,14 +88,14 @@ class TrackSpec:
 # ────────────────────────────────────────────────────────────────────
 
 def _load_addon():
-    """Import the in-repo Hoverbike addon by path and register it.
+    """Import the in-repo King Tide addon by path and register it.
 
-    Post-2026-05 the addon is a package (``hoverbike_addon/`` with
-    sibling submodules), not a single ``hoverbike_addon.py``. We load
+    Post-2026-05 the addon is a package (``kingtide_addon/`` with
+    sibling submodules), not a single ``kingtide_addon.py``. We load
     the package's ``__init__.py`` via ``spec_from_file_location`` and
     pass ``submodule_search_locations`` so the ``from . import water,
     ...`` lines inside ``__init__.py`` resolve relative to the loaded
-    package. Registering as ``hoverbike_addon_disk`` keeps it distinct
+    package. Registering as ``kingtide_addon_disk`` keeps it distinct
     from any user-scripts-dir install Blender may have auto-loaded.
 
     Pre-loaded with the back-compat shim that re-exports legacy
@@ -103,17 +103,17 @@ def _load_addon():
     bottom), so seed scripts that pre-date the carve-out keep working
     without touching every call site.
     """
-    pkg_dir = os.path.join(SCRIPT_DIR, "hoverbike_addon")
+    pkg_dir = os.path.join(SCRIPT_DIR, "kingtide_addon")
     init_file = os.path.join(pkg_dir, "__init__.py")
     spec = importlib.util.spec_from_file_location(
-        "hoverbike_addon_disk",
+        "kingtide_addon_disk",
         init_file,
         submodule_search_locations=[pkg_dir],
     )
     addon = importlib.util.module_from_spec(spec)
     # Register in sys.modules BEFORE exec_module so the package's own
     # ``from . import ...`` lines find their parent under the same name.
-    sys.modules["hoverbike_addon_disk"] = addon
+    sys.modules["kingtide_addon_disk"] = addon
     spec.loader.exec_module(addon)
     addon.register()
     return addon
@@ -215,12 +215,12 @@ def build_track_from_spec(spec: TrackSpec) -> None:
     snap spline (water-aware) → rebuild previews → save .blend →
     lint → export GLB + JSON + manifest entry.
 
-    Note on road conformance: ``hoverbike.build_road`` is the modern
+    Note on road conformance: ``kingtide.build_road`` is the modern
     non-destructive operator — it attaches ``HV_RoadConform`` as a live
     Geometry Nodes modifier on the terrain instead of carving vertex
     data. The glTF exporter runs with ``export_apply=True`` so the
     modifier still lands in the shipped GLB geometry. Use
-    ``hoverbike.bake_terrain_to_road`` separately if a destructive bake
+    ``kingtide.bake_terrain_to_road`` separately if a destructive bake
     is needed (multi-segment push-down, fill-shelf embankment)."""
     tag = f"[track-build:{spec.track_id}]"
     output_blend = os.path.join(REPO_ROOT, "tracks-src", f"{spec.track_id}.blend")
@@ -237,7 +237,7 @@ def build_track_from_spec(spec: TrackSpec) -> None:
     # Use the new addon operator so per-track scripts don't reinvent
     # the start-placement math. The operator reads start_t from
     # scene.hoverbike_placement_t (set in _apply_road_scene_props).
-    snap_result = bpy.ops.hoverbike.snap_starts_to_spline()
+    snap_result = bpy.ops.kingtide.snap_starts_to_spline()
     if "FINISHED" not in snap_result:
         raise RuntimeError(f"{tag} snap_starts_to_spline failed: {snap_result}")
     _reposition_checkpoints(spec)
@@ -248,17 +248,17 @@ def build_track_from_spec(spec: TrackSpec) -> None:
     _select_terrain_active(scene)
 
     print(f"{tag} building road (non-destructive — attaches HV_RoadConform)")
-    # hoverbike.build_road is non-destructive: it attaches HV_RoadConform
+    # kingtide.build_road is non-destructive: it attaches HV_RoadConform
     # as a live GN modifier on the terrain rather than carving vertices.
     # The glTF export step downstream uses ``export_apply=True``, so the
     # conform still bakes into the shipped GLB. (The legacy destructive
-    # path moved to hoverbike.bake_terrain_to_road and is opt-in.)
-    result = bpy.ops.hoverbike.build_road()
+    # path moved to kingtide.bake_terrain_to_road and is opt-in.)
+    result = bpy.ops.kingtide.build_road()
     if "FINISHED" not in result:
         raise RuntimeError(f"{tag} build_road failed: {result}")
 
     print(f"{tag} snapping spline to terrain (water-aware)")
-    result = bpy.ops.hoverbike.snap_spline_to_terrain()
+    result = bpy.ops.kingtide.snap_spline_to_terrain()
     if "FINISHED" not in result:
         raise RuntimeError(f"{tag} snap_spline_to_terrain failed: {result}")
 
@@ -284,7 +284,7 @@ def build_track_from_spec(spec: TrackSpec) -> None:
         raise RuntimeError(f"{tag} lint failed: {errors}")
 
     print(f"{tag} exporting GLB + JSON + manifest")
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(f"{tag} export_track failed: {result}")
 

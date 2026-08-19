@@ -1,4 +1,4 @@
-# Hoverbike — Track Art Direction v1
+# King Tide — Track Art Direction v1
 
 > **⚠ Lineup/cup structure: defer to [tracks/README.md](./tracks/README.md)
 > (the Harbor Cup restructure).** The 13-track v1 list below is historical: the

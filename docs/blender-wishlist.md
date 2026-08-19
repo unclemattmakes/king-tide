@@ -21,7 +21,7 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
   surface (`sand` / `ice` / `metal` / …) so the drift/grip physics
   varies by material. The runtime side shipped with the drift mechanic
   (PR #195); this is the Blender authoring half — a `SurfaceType`
-  mirror in `hoverbike_kinds.py`, a sync test, and an N-panel control
+  mirror in `kingtide_kinds.py`, a sync test, and an N-panel control
   that writes `obj["surface"]`. Full brief:
   [tasks/blender-surface-authoring.md](./tasks/blender-surface-authoring.md).
 
@@ -30,7 +30,7 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
 
 - **Addon UX rework + water decoupling + island spawn (2026-05-19).**
   Five threads of work on the addon's authoring loop:
-  - **Top-bar Hoverbike menu.** New View3D-header dropdown (next to
+  - **Top-bar King Tide menu.** New View3D-header dropdown (next to
     View / Select / Add / Object, BlenderGIS-style) holding every
     operator categorised under Add / Build-Refresh / Spline / Terrain
     / Thumbnail / Utility. Always available regardless of selection
@@ -52,7 +52,7 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
     custom-prop overrides per track. Old .blends migrate lazily —
     first read after open promotes a legacy volume's Z into the
     scene prop, so existing tracks export the same height as before.
-  - **Add Island Terrain operator.** New entry under Hoverbike → Add
+  - **Add Island Terrain operator.** New entry under King Tide → Add
     → *Terrain templates* (and Terrain submenu) that spawns a
     1024×1024 m subdivided plane with the `HV_Island` Geometry-Nodes
     modifier + 4 default peak controls into the current scene —
@@ -108,7 +108,7 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
     a WARNING with the strongest curvature on the spline, so authors
     know whether to lower the threshold or sharpen the bends.
 
-  Reinstall `tools/blender/hoverbike_addon.py` in Blender to pick
+  Reinstall `tools/blender/kingtide_addon.py` in Blender to pick
   these up.
 
 - **Road + ramp authoring tools (2026-05-12).** Two new operators that
@@ -238,7 +238,7 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
     gizmos, racer silhouettes, and turn indicators are now
     guaranteed not to ride into `<id>.glb` even with the addon's
     visibility toggles flipped on.
-  - **Gate-preview button regression fix.** `HOVERBIKE_PT_panel`'s
+  - **Gate-preview button regression fix.** `KINGTIDE_PT_panel`'s
     `_draw_track` / `_draw_bike` / `_draw_unknown` were referencing
     `context.scene.*` without `context` in scope — a NameError
     aborted panel draw partway through, leaving the Gate Preview
@@ -251,19 +251,19 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
   [`src/game/tracks/gate-placement.ts`](../src/game/tracks/gate-placement.ts),
   Python mirror in [`tools/blender/gate_placement.py`](../tools/blender/gate_placement.py),
   Blender addon panel toggle ("Rebuild Gate Preview" / "Hide Gate
-  Preview" in the N-key Hoverbike tab), and editor button ("Auto-place
+  Preview" in the N-key King Tide tab), and editor button ("Auto-place
   gates from spline"). Vitest case + Python self-test pin both sides to
   the same algorithm. Default spacing is **60m** (preserves Lagoon
   Loop's ~9-gate density while fixing its 42–100m uniform-T variance).
 
   Outstanding before this counts as fully closed: Matt needs to
-  reinstall `tools/blender/hoverbike_addon.py` in Blender to pick up the
+  reinstall `tools/blender/kingtide_addon.py` in Blender to pick up the
   new operators (Edit → Preferences → Add-ons → Install…, then re-tick
   the box). The live MCP-side demo of the gate gizmo in
   `tracks-src/test-custom-track.blend` is already visible in the
   viewport.
 
-- **Item 7 — Racer-at-start preview (2026-05-11).** New "Rebuild Racer Preview" / "Hide Racer Preview" buttons in the addon's N-key Hoverbike panel. Drops a bike-silhouette wireframe at `start_00` (with rider-hump so the player reads as distinct from the AI) plus one per AI slot loaded from [`specs/grid-offsets.json`](../specs/grid-offsets.json) — the *same* file `src/boot/spawn-bikes.ts` now reads, so the in-Blender preview matches the actual race spawn 1:1.
+- **Item 7 — Racer-at-start preview (2026-05-11).** New "Rebuild Racer Preview" / "Hide Racer Preview" buttons in the addon's N-key King Tide panel. Drops a bike-silhouette wireframe at `start_00` (with rider-hump so the player reads as distinct from the AI) plus one per AI slot loaded from [`specs/grid-offsets.json`](../specs/grid-offsets.json) — the *same* file `src/boot/spawn-bikes.ts` now reads, so the in-Blender preview matches the actual race spawn 1:1.
 
 - **Item 6 — Vertex attribute spec (2026-05-11).** Canonical `COLOR_0`
   contract for procedural assets. Spec lives in
@@ -285,7 +285,7 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
   `EXT_mesh_gpu_instancing` glTF instancing. Both `export_gn_mesh`
   and `export_gpu_instances` are flipped on at all four export
   call sites (`tools/export_track.py`, `tools/blender/common.py`,
-  and the two Hoverbike-addon operators). Three.js's stock
+  and the two King Tide-addon operators). Three.js's stock
   `GLTFLoader` produces `THREE.InstancedMesh` at the receiving
   end with zero client-side plumbing. `attachTrackColliders` skips
   `InstancedMesh` so scatter is render-only by default — the wishlist's
@@ -301,7 +301,7 @@ with the headless `pnpm gen:*` pipeline. The existing pipeline is in
   `tracks-src/props-library.blend` built deterministically by
   [`tools/blender/seed_props_library.py`](../tools/blender/seed_props_library.py).
   Five prop collections — rocks, palms, buoys, gates, turn indicators
-  — each marked as a Blender Asset under the `Hoverbike/Track Props`
+  — each marked as a Blender Asset under the `King Tide/Track Props`
   catalogue (catalogue file: `tracks-src/blender_assets.cats.txt`).
   Authors register `tracks-src/` as an asset library once, then drag
   props into any track .blend as Collection Instances. Rocks and palms
@@ -409,7 +409,7 @@ Design:
 
 - Add a `gateSpacing` (metres) field to the `public/tracks/<id>.json`
   schema.
-- **Blender side:** extend `tools/blender/hoverbike_addon.py` with a
+- **Blender side:** extend `tools/blender/kingtide_addon.py` with a
   "Show gate preview" toggle in its N-key panel. A small GN node group
   resamples `ai_spline_main` by length and instances a gate gizmo
   (transparent quad at `half_width × height`, oriented to the spline
@@ -663,7 +663,7 @@ or fix in the current authoring loop:
 4. **~~Item 3 props library — rocks + palms + buoys, finally.~~**
    Shipped 2026-05-11. `tracks-src/props-library.blend` produced by
    `tools/blender/seed_props_library.py`, five collections marked as
-   Blender Assets under the `Hoverbike/Track Props` catalogue. The
+   Blender Assets under the `King Tide/Track Props` catalogue. The
    *aesthetic* polish (real PBR materials, sculpted silhouettes, palm
    leaf textures, preview thumbnails) is still the biggest visual
    upgrade left and benefits from in-Blender GUI iteration on the
@@ -960,10 +960,10 @@ which takes a small `TrackSpec` dataclass.
 Every per-track script re-implemented the same "place start_00 and
 start_01 perpendicular to the spline tangent at parameter t along
 ai_spline_main" logic. Now an addon operator (Spline tools section
-of the Hoverbike panel) does it from the viewport: pick `Spline t`
+of the King Tide panel) does it from the viewport: pick `Spline t`
 on the panel, click *Snap Starts to Spline*. Reuses the existing
 `_sample_curve_at_t` helper. Available headlessly as
-`bpy.ops.hoverbike.snap_starts_to_spline()`.
+`bpy.ops.kingtide.snap_starts_to_spline()`.
 
 ## Wave-stamp authoring lane (P3.2 follow-up, 2026-06-10)
 

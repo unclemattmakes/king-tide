@@ -34,8 +34,8 @@ Run (batch, like condition_ai_batch)::
 Spec = a JSON list of ``{input, prop_id, output, family?, clip_name?}``.
 ``input`` is the source rigged GLB; ``output`` the repo-relative
 ``public/assets/props/cc0/<id>.glb``. Or run a single asset via env vars
-(HOVERBIKE_INPUT / HOVERBIKE_PROP_ID / HOVERBIKE_OUTPUT [/ HOVERBIKE_FAMILY /
-HOVERBIKE_CLIP_NAME]).
+(KINGTIDE_INPUT / KINGTIDE_PROP_ID / KINGTIDE_OUTPUT [/ KINGTIDE_FAMILY /
+KINGTIDE_CLIP_NAME]).
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ from tools.blender.condition_ai_mesh import (  # noqa: E402
     _preserve_material,
     _stamp_color0,
 )
-from tools.blender.hoverbike_kinds import ExportedKind  # noqa: E402
+from tools.blender.kingtide_kinds import ExportedKind  # noqa: E402
 
 
 def _import_gltf(path: str) -> list[bpy.types.Object]:
@@ -175,17 +175,17 @@ def main() -> None:
         return
 
     # Single-asset env path.
-    inp = os.environ["HOVERBIKE_INPUT"]
-    prop_id = os.environ["HOVERBIKE_PROP_ID"]
-    out = os.environ["HOVERBIKE_OUTPUT"]
+    inp = os.environ["KINGTIDE_INPUT"]
+    prop_id = os.environ["KINGTIDE_PROP_ID"]
+    out = os.environ["KINGTIDE_OUTPUT"]
     if not os.path.isabs(out):
         out = os.path.join(_REPO_ROOT, out)
     ship_animated_prop(
         inp,
         prop_id,
         out,
-        family=os.environ.get("HOVERBIKE_FAMILY", "fauna"),
-        clip_name=os.environ.get("HOVERBIKE_CLIP_NAME", "Swim"),
+        family=os.environ.get("KINGTIDE_FAMILY", "fauna"),
+        clip_name=os.environ.get("KINGTIDE_CLIP_NAME", "Swim"),
     )
 
 

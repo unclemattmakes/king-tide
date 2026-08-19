@@ -206,7 +206,7 @@ flatten everything, as before.
 
 ## The name — pitch
 
-"Hoverbike" is a placeholder; the prior key-art pass left **TIDE RIDERS** as
+"King Tide" is a placeholder; the prior key-art pass left **TIDE RIDERS** as
 lead. Pitch, with the UI/logo consequences considered:
 
 | Name | Read | Notes |

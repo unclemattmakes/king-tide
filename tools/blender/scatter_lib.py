@@ -19,7 +19,7 @@ that materialises in the .blend as:
 
 The graph's ``Instance on Points`` output ships through the glTF
 exporter as ``EXT_mesh_gpu_instancing`` (closed by the realize pass in
-``hoverbike_addon/export.py``) and the runtime lifts it into one
+``kingtide_addon/export.py``) and the runtime lifts it into one
 ``THREE.InstancedMesh`` per source archetype.
 
 The per-track ``seed_track_<id>.py`` declares its scatter zones as a

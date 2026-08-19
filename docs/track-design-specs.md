@@ -1,4 +1,4 @@
-# Hoverbike — Track Design Specs v1
+# King Tide — Track Design Specs v1
 
 > **⚠ Partly superseded (2026-05-30, no-anti-grav reconciliation pass).**
 > Anti-grav is **cut from v1.** Every `antigrav_curve_*` object and
@@ -69,7 +69,7 @@ it three times forces an awkward teleport from the lava-lake finish
 back to sea level for the next climb.
 
 **Why:** The flow analysis identifies Mount Wario as the genre's
-strongest case for breaking the 3-lap default. Hoverbike's "drowned
+strongest case for breaking the 3-lap default. King Tide's "drowned
 landmark" framing makes the descent-as-finish reading universally
 legible (we go *down* to the new sea level). Volcanic erupting
 mountain is the most spectacular cup-closer geometry in the v1 set.
@@ -138,7 +138,7 @@ the amplitude from a lap counter.
 
 **What changes:** Add two new presets to `SKY_GRADE_TABLE` in
 [sky.ts](../src/engine/render/sky.ts) (and mirror in
-`SKY_COLOR_GRADES` in `tools/blender/hoverbike_addon/sky_preset.py`
+`SKY_COLOR_GRADES` in `tools/blender/kingtide_addon/sky_preset.py`
 + `src/game/tracks/types.ts`):
 
 - **`singapore_industrial`** — warm container orange lift + steel-gray
@@ -1868,7 +1868,7 @@ brighten as the fog thickens.
   swell-profile noise so the hills literally share the bay's waveform).
   Hills rise ~+40–70 m above sea level (z=0); the windward face ramps from
   the waterline so streets climb out of the bay. Bake biome/AO/path attrs
-  (`hoverbike.bake_terrain_attrs`).
+  (`kingtide.bake_terrain_attrs`).
 - **Drowned street grid** worked into the terrain — flooded canyon floors
   at / just below z=0 between the downtown towers.
 - **Downtown towers** as `kind=track` meshes standing in the bay:

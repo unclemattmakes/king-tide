@@ -1,6 +1,6 @@
 # Desktop builds (Linux + Windows)
 
-How Hoverbike ships as a native desktop game across Linux (Steam Deck +
+How King Tide ships as a native desktop game across Linux (Steam Deck +
 generic desktops) and Windows. macOS is intentionally deferred — we'd
 need a Mac for testing before adding the target.
 
@@ -87,8 +87,8 @@ Outputs:
 
 ```
 dist-electron/linux-unpacked/            # Linux game tree (binary: hoverbike)
-dist-electron/win-unpacked/              # Windows game tree (Hoverbike.exe)
-dist-electron/Hoverbike-<version>-setup.exe   # Windows NSIS installer
+dist-electron/win-unpacked/              # Windows game tree (King Tide.exe)
+dist-electron/King Tide-<version>-setup.exe   # Windows NSIS installer
 ```
 
 ### Cross-compile from Linux → Windows?
@@ -135,7 +135,7 @@ non-Steam distribution, but it is not uploaded to Steam.
 1. **Get the App ID + a Windows depot from the Partner backend** in the
    SteamPipe section.
 2. **Set the Windows launch executable** in the Steamworks backend to
-   `Hoverbike.exe`. (The depot VDF only maps files; the launch binary is App
+   `King Tide.exe`. (The depot VDF only maps files; the launch binary is App
    config.)
 3. **Bake build-account credentials** — see *First-time setup* in
    [`steam/README.md`](../steam/README.md).
@@ -179,7 +179,7 @@ app itself.
 
 ```ps1
 # Double-click the NSIS installer or run silently:
-.\Hoverbike-0.0.0-setup.exe /S
+.\King Tide-0.0.0-setup.exe /S
 ```
 
 The installer drops shortcuts in the Start menu + Desktop. Uninstall
@@ -272,15 +272,15 @@ The active backend is logged at boot:
 adapter's vendor / architecture / device / description is logged too —
 distinguishes a native Chromium adapter from VKD3D-Proton.
 
-### 6. Backend override via Steam launch options (`HOVERBIKE_BACKEND`)
+### 6. Backend override via Steam launch options (`KINGTIDE_BACKEND`)
 For diagnosing the active render path without rebuilding, set in
 **Steamworks → Properties → Set Launch Options** (or the game's Properties on
 the Deck):
 
 ```
-HOVERBIKE_BACKEND=webgl2 %command%   # force WebGL2 even when WebGPU is available
-HOVERBIKE_BACKEND=webgpu %command%   # force WebGPU adapter probe (falls back if unavailable)
-HOVERBIKE_BACKEND=auto   %command%   # default — probe + pick
+KINGTIDE_BACKEND=webgl2 %command%   # force WebGL2 even when WebGPU is available
+KINGTIDE_BACKEND=webgpu %command%   # force WebGPU adapter probe (falls back if unavailable)
+KINGTIDE_BACKEND=auto   %command%   # default — probe + pick
 ```
 
 `electron/main.cjs` reads the env var and appends `?backend=…` to the page URL;
@@ -322,7 +322,7 @@ References: Valve [steam-runtime #579](https://github.com/ValveSoftware/steam-ru
   The fix is gotcha #5: gate `--enable-unsafe-webgpu` to Linux only so
   Chromium's blocklist picks WebGL2 on Windows-via-Proton. To confirm the
   active backend, check the boot log for `[render] backend: …`, or set
-  `HOVERBIKE_BACKEND=webgl2` in Steam launch options to force the fallback
+  `KINGTIDE_BACKEND=webgl2` in Steam launch options to force the fallback
   (gotcha #6).
 - **Black screen / WebGPU not active on Linux** — don't add
   `--use-angle=vulkan` or `VulkanFromANGLE`/`DefaultANGLEVulkan`; those

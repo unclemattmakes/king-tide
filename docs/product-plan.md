@@ -1,4 +1,4 @@
-# Hoverbike — Product Plan v0.1
+# King Tide — Product Plan v0.1
 
 > Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics and light Mario Kart combat.
 >

@@ -54,14 +54,14 @@ def main() -> None:
     if addon_root not in sys.path:
         sys.path.insert(0, addon_root)
 
-    import hoverbike_addon
+    import kingtide_addon
 
     # Register UNCONDITIONALLY — the hasattr() guard the export smokes use
     # skips Scene-prop registration under --factory-startup, which then
     # AttributeErrors on hoverbike_start_bound_to_spline. Tolerate an
     # already-registered addon (running without --factory-startup).
     try:
-        hoverbike_addon.register()
+        kingtide_addon.register()
     except Exception as e:  # noqa: BLE001
         print(f"[smoke] register() note (likely already enabled): {e}")
 
@@ -82,12 +82,12 @@ def main() -> None:
 
     # 2) SNAP — the op the debounce timer would call. Assert the grid
     #    landed on the t-anchor (offset behind + beside it, not exact).
-    from hoverbike_addon.spline import sample_curve_at_t
+    from kingtide_addon.spline import sample_curve_at_t
 
     target = sample_curve_at_t(sp, t)
     if target is None:
         _fail(f"sample_curve_at_t returned None at t={t}")
-    res = bpy.ops.hoverbike.snap_starts_to_spline()
+    res = bpy.ops.kingtide.snap_starts_to_spline()
     if res != {"FINISHED"}:
         _fail(f"snap_starts_to_spline returned {res}")
     bpy.context.view_layer.update()
@@ -109,7 +109,7 @@ def main() -> None:
     #    bug fix: previously only "starts" was scheduled, so the finish
     #    line stayed frozen on a drag. Inspect the debounce queue directly
     #    (the timer doesn't tick in --background).
-    from hoverbike_addon import handlers as _h
+    from kingtide_addon import handlers as _h
 
     _h._pending_rebuilds.clear()
     scene.hoverbike_start_t = 0.6  # different value → re-fires the callback

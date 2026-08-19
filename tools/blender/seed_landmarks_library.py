@@ -27,7 +27,7 @@ Originally eight Seattle-flavoured archetypes; Phase B of
 ``docs/v1-asset-pipeline-plan.md`` extends the set with seven more
 archetypes that cover ten of the eleven v1 ship-track hero set-pieces.
 Each ships as one or more collections marked as a Blender Asset under
-the ``Hoverbike/Landmarks/<sub-category>`` catalogue:
+the ``King Tide/Landmarks/<sub-category>`` catalogue:
 
 | Collection                              | Sub-category | Inspiration                          | Default scale |
 |-----------------------------------------|--------------|--------------------------------------|---------------|
@@ -125,29 +125,29 @@ from tools.blender.seed_merge import (  # noqa: E402
 OUTPUT_PATH = os.path.join(REPO_ROOT, "tracks-src", "landmarks-library.blend")
 SHOWCASE_OUTPUT_PATH = os.path.join(REPO_ROOT, "tracks-src", "landmarks-showcase.blend")
 CATALOG_PATH = os.path.join(REPO_ROOT, "tracks-src", "blender_assets.cats.txt")
-CATALOG_ROOT = "Hoverbike/Landmarks"
+CATALOG_ROOT = "King Tide/Landmarks"
 
 # UUIDs reserved at 22222222-* so they don't clash with the prop
 # library's 11111111-* range. Deterministic so re-seeds produce a
 # stable catalogue file (Asset Browser keys on UUID, not path).
 CATALOG_UUIDS = {
-    "Hoverbike":                          "11111111-1111-4111-8111-000000000001",
-    "Hoverbike/Landmarks":                "22222222-2222-4222-8222-000000000001",
-    "Hoverbike/Landmarks/Spires":         "22222222-2222-4222-8222-000000000010",
-    "Hoverbike/Landmarks/Towers":         "22222222-2222-4222-8222-000000000011",
-    "Hoverbike/Landmarks/Stadiums":       "22222222-2222-4222-8222-000000000012",
-    "Hoverbike/Landmarks/Wheels":         "22222222-2222-4222-8222-000000000013",
-    "Hoverbike/Landmarks/Industrial":     "22222222-2222-4222-8222-000000000014",
-    "Hoverbike/Landmarks/Signage":        "22222222-2222-4222-8222-000000000015",
-    "Hoverbike/Landmarks/Backdrops":      "22222222-2222-4222-8222-000000000016",
+    "King Tide":                          "11111111-1111-4111-8111-000000000001",
+    "King Tide/Landmarks":                "22222222-2222-4222-8222-000000000001",
+    "King Tide/Landmarks/Spires":         "22222222-2222-4222-8222-000000000010",
+    "King Tide/Landmarks/Towers":         "22222222-2222-4222-8222-000000000011",
+    "King Tide/Landmarks/Stadiums":       "22222222-2222-4222-8222-000000000012",
+    "King Tide/Landmarks/Wheels":         "22222222-2222-4222-8222-000000000013",
+    "King Tide/Landmarks/Industrial":     "22222222-2222-4222-8222-000000000014",
+    "King Tide/Landmarks/Signage":        "22222222-2222-4222-8222-000000000015",
+    "King Tide/Landmarks/Backdrops":      "22222222-2222-4222-8222-000000000016",
     # Phase B sub-catalogues — keep numeric IDs contiguous so a future
     # grep can see the family at a glance.
-    "Hoverbike/Landmarks/Ruins":          "22222222-2222-4222-8222-000000000017",
-    "Hoverbike/Landmarks/Facades":        "22222222-2222-4222-8222-000000000018",
-    "Hoverbike/Landmarks/Tanks":          "22222222-2222-4222-8222-000000000019",
-    "Hoverbike/Landmarks/Mechanical":     "22222222-2222-4222-8222-00000000001a",
-    "Hoverbike/Landmarks/Reliefs":        "22222222-2222-4222-8222-00000000001b",
-    "Hoverbike/Landmarks/Lava":           "22222222-2222-4222-8222-00000000001c",
+    "King Tide/Landmarks/Ruins":          "22222222-2222-4222-8222-000000000017",
+    "King Tide/Landmarks/Facades":        "22222222-2222-4222-8222-000000000018",
+    "King Tide/Landmarks/Tanks":          "22222222-2222-4222-8222-000000000019",
+    "King Tide/Landmarks/Mechanical":     "22222222-2222-4222-8222-00000000001a",
+    "King Tide/Landmarks/Reliefs":        "22222222-2222-4222-8222-00000000001b",
+    "King Tide/Landmarks/Lava":           "22222222-2222-4222-8222-00000000001c",
 }
 
 # Layout for the saved .blend's viewport — spread landmarks in a row
@@ -1361,7 +1361,7 @@ def _mark_asset(coll: bpy.types.Collection, *, catalog_path: str,
     ad = coll.asset_data
     ad.catalog_id = CATALOG_UUIDS[catalog_path]
     ad.description = description
-    ad.author = "Hoverbike"
+    ad.author = "King Tide"
     for t in list(ad.tags):
         ad.tags.remove(t)
     for t in tags:
@@ -1510,7 +1510,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_tower_spire",
             mesh_builder=build_tower_spire_mesh,
             materials=[mat_white],
-            catalog="Hoverbike/Landmarks/Spires",
+            catalog="King Tide/Landmarks/Spires",
             description="Slim central pillar + three splayed legs + observation disc + spire. Drag, scale Z for shorter / taller spires. Reads as Space Needle / generic radio tower at race-pace viewing distance.",
             tags=["tower", "spire", "landmark", "centerpiece"],
         ),
@@ -1518,7 +1518,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_tower_stepped",
             mesh_builder=build_tower_stepped_mesh,
             materials=[mat_glass],
-            catalog="Hoverbike/Landmarks/Towers",
+            catalog="King Tide/Landmarks/Towers",
             description="Five stepped tiers. Default ~180 m tall, ~22 m square base. Scale uniformly for shorter or taller skyscrapers; the silhouette reads as Columbia Center / generic downtown anchor.",
             tags=["tower", "skyscraper", "landmark"],
         ),
@@ -1526,7 +1526,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_tower_pyramid_cap",
             mesh_builder=build_tower_pyramid_cap_mesh,
             materials=[mat_white],
-            catalog="Hoverbike/Landmarks/Towers",
+            catalog="King Tide/Landmarks/Towers",
             description="Square body + setback step + four-sided pyramid cap. ~90 m tall, art-deco silhouette. Use for Smith Tower-style historic landmarks or capital-building approaches.",
             tags=["tower", "historic", "landmark"],
         ),
@@ -1534,7 +1534,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_stadium_arched",
             mesh_builder=build_stadium_arched_mesh,
             materials=[mat_concrete],
-            catalog="Hoverbike/Landmarks/Stadiums",
+            catalog="King Tide/Landmarks/Stadiums",
             description="Oval bowl + two transverse arched roof ribs. ~110 m × 100 m footprint, 50 m to arch peak. Reads as Lumen Field / Wembley / any open-roof stadium.",
             tags=["stadium", "arena", "landmark"],
         ),
@@ -1542,7 +1542,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_wheel_ferris",
             mesh_builder=build_wheel_ferris_mesh,
             materials=[mat_steel],
-            catalog="Hoverbike/Landmarks/Wheels",
+            catalog="King Tide/Landmarks/Wheels",
             description="Vertical ferris wheel — torus rim, eight spokes, hub, support pylon. 50 m diameter, 28 m centre height. Great Wheel / London Eye / generic waterfront landmark.",
             tags=["wheel", "waterfront", "landmark"],
         ),
@@ -1550,7 +1550,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_industrial_cluster",
             mesh_builder=build_industrial_cluster_mesh,
             materials=[mat_industrial],
-            catalog="Hoverbike/Landmarks/Industrial",
+            catalog="King Tide/Landmarks/Industrial",
             description="Four storage tanks + cross pipework + offset smokestack. ~45 m × 25 m × 30 m. Gas Works Park / refinery / generic industrial setpiece.",
             tags=["industrial", "park", "landmark"],
         ),
@@ -1558,7 +1558,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_sign_arch",
             mesh_builder=build_sign_arch_mesh,
             materials=[mat_white, mat_sign_red],
-            catalog="Hoverbike/Landmarks/Signage",
+            catalog="King Tide/Landmarks/Signage",
             description="Vertical sign pillar + horizontal banner + clock face. 8 m × 8 m, emissive red banner. Rotate around Z for a side-of-road gantry vs gateway arch (Pike Place style).",
             tags=["sign", "arch", "landmark", "emissive"],
         ),
@@ -1566,7 +1566,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_mountain_cone",
             mesh_builder=build_mountain_cone_mesh,
             materials=[mat_snow],
-            catalog="Hoverbike/Landmarks/Backdrops",
+            catalog="King Tide/Landmarks/Backdrops",
             description="Massive snow-capped cone for the horizon. ~840 m diameter, 420 m tall. Place at distance (>1 km from the track) for a Mt Rainier / Mt Fuji / generic mountain silhouette. Non-collidable in practice — too big to race against.",
             tags=["mountain", "backdrop", "decoration"],
         ),
@@ -1575,7 +1575,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_tower_cylinder_spiral",
             mesh_builder=build_tower_cylinder_spiral_mesh,
             materials=[mat_white, mat_stripe, mat_steel],
-            catalog="Hoverbike/Landmarks/Towers",
+            catalog="King Tide/Landmarks/Towers",
             description="Cylindrical tower with diagonal stripe pattern + open lamp room. 60 m tall. Drives Hatteras lighthouse (default), Doge's Campanile (re-tint stripes to terracotta), Angkor central spire (criss-cross stone), Cocoon Tower face (criss-cross). Stripe pattern is face-tagged; the runtime material swap retunes per-instance.",
             tags=["tower", "cylinder", "lighthouse", "campanile", "landmark"],
         ),
@@ -1583,7 +1583,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_arch_ruin",
             mesh_builder=build_arch_ruin_mesh,
             materials=[mat_concrete, mat_oxidised],
-            catalog="Hoverbike/Landmarks/Ruins",
+            catalog="King Tide/Landmarks/Ruins",
             description="Half-circle arch with chipped, decayed edges. 60 m span × 22 m rise × 4.5 m thick. Drives the three Maw arches (scale span to taste), Rialto Bridge arch, Two Oceans Aquarium roof remnant, Liberty's broken torch arm (smaller scale). Decay is bmesh-jitter, not a modifier — re-running the seed produces identical jitter per seed.",
             tags=["arch", "ruin", "wave_zone_companion", "landmark"],
         ),
@@ -1591,7 +1591,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_drowned_facade_art_deco",
             mesh_builder=lambda n: build_drowned_facade_mesh(n, style="art_deco", width=30.0, height=12.0, window_cols=8, window_rows=3),
             materials=[mat_facade_deco, mat_facade_deco_band, mat_facade_window],
-            catalog="Hoverbike/Landmarks/Facades",
+            catalog="King Tide/Landmarks/Facades",
             description="South Beach Art Deco hotel frontage. 30 m × 12 m with horizontal accent band + setback step. Pastel cream + turquoise band. Stamp three of these per South Beach hotel cluster.",
             tags=["facade", "art_deco", "south_beach", "landmark"],
         ),
@@ -1599,7 +1599,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_drowned_facade_tokyo",
             mesh_builder=lambda n: build_drowned_facade_mesh(n, style="tokyo", width=24.0, height=80.0, window_cols=5, window_rows=20),
             materials=[mat_facade_tokyo, mat_facade_tokyo_neon, mat_facade_window],
-            catalog="Hoverbike/Landmarks/Facades",
+            catalog="King Tide/Landmarks/Facades",
             description="Shibuya skyscraper face. 24 m × 80 m, dense window grid, emissive top-band signage shelf + vertical neon strip. Use as the Cocoon Tower neighbour / generic Shibuya tower top.",
             tags=["facade", "tokyo", "shibuya", "neon", "emissive", "landmark"],
         ),
@@ -1607,7 +1607,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_drowned_facade_venice",
             mesh_builder=lambda n: build_drowned_facade_mesh(n, style="venice", width=40.0, height=18.0, window_cols=7, window_rows=2),
             materials=[mat_facade_venice, mat_facade_venice_trim, mat_facade_window],
-            catalog="Hoverbike/Landmarks/Facades",
+            catalog="King Tide/Landmarks/Facades",
             description="Venice palazzo frontage. 40 m × 18 m with crown arcade + cornice. Sandstone palette. Stamp around Doge's Drift for the Piazza San Marco palazzi belt.",
             tags=["facade", "venice", "palazzo", "landmark"],
         ),
@@ -1615,7 +1615,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_drowned_facade_nyc",
             mesh_builder=lambda n: build_drowned_facade_mesh(n, style="nyc", width=30.0, height=90.0, window_cols=6, window_rows=22),
             materials=[mat_facade_nyc, mat_facade_nyc_trim, mat_facade_window],
-            catalog="Hoverbike/Landmarks/Facades",
+            catalog="King Tide/Landmarks/Facades",
             description="Manhattan rooftop. 30 m × 90 m brownstone-ish slab with two procedural water-tower clusters on the roof. Stamp across the Liberty Drowned approach for the receding mid-town skyline.",
             tags=["facade", "nyc", "manhattan", "rooftop", "landmark"],
         ),
@@ -1623,7 +1623,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_drowned_facade_tokyo_trim",
             mesh_builder=lambda n: build_drowned_facade_trimmed_mesh(n, style="tokyo", width=24.0, height=80.0),
             materials=[mat_facade_trim_tokyo],
-            catalog="Hoverbike/Landmarks/Facades",
+            catalog="King Tide/Landmarks/Facades",
             description="Trim-sheet variant of the Shibuya tower face. Single material (mat_landmark_trim_tokyo) — windows, kanji, signage, weathering, neon, and ledges are all painted from public/assets/landmarks/trim_tokyo_neon.png via per-face UVs. Lighter geometry than the multi-slot variant (no per-window box meshes). Authors can drop multiple instances + tint the BSDF for variety.",
             tags=["facade", "tokyo", "shibuya", "neon", "trim-sheet", "landmark"],
         ),
@@ -1631,7 +1631,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_glass_tank_broken",
             mesh_builder=build_glass_tank_broken_mesh,
             materials=[mat_glass, mat_steel, mat_glass_shard],
-            catalog="Hoverbike/Landmarks/Tanks",
+            catalog="King Tide/Landmarks/Tanks",
             description="Rectangular glass volume with shattered +Y face. 20 m × 14 m × 10 m. Drives Two Oceans Aquarium predator tank (rotate so the race line enters via the shattered face) and the Shibuya Crossing window-down view (scale smaller). Drop a contents prop (shark, taxis, hachiko) inside the collection post-drag.",
             tags=["glass", "tank", "aquarium", "shatter", "landmark"],
         ),
@@ -1639,7 +1639,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_carved_face_block",
             mesh_builder=build_carved_face_block_mesh,
             materials=[mat_stone, mat_stone_dark],
-            catalog="Hoverbike/Landmarks/Reliefs",
+            catalog="King Tide/Landmarks/Reliefs",
             description="6 m cube block with a smiling-face relief on the +Y face. Drives the Angkor Bayon faces × 16 — instance around the central spire with varied rotations + per-instance scale jitter. Re-seed with different expression_seed values for variation.",
             tags=["relief", "carving", "angkor", "bayon", "landmark"],
         ),
@@ -1647,7 +1647,7 @@ def build_landmarks() -> dict[str, dict]:
             name="landmark_lava_river_strip",
             mesh_builder=build_lava_river_strip_mesh,
             materials=[mat_lava],
-            catalog="Hoverbike/Landmarks/Lava",
+            catalog="King Tide/Landmarks/Lava",
             description="Flat 60 m × 4 m emissive strip for Kilauea's lava waterfall. COLOR_0 carries hot-core mask in R + flow phase in B (override per docs/vertex-attribute-spec.md). Authors are expected to add a Curve modifier post-drag to bend the strip along the lava channel.",
             tags=["lava", "kilauea", "emissive", "landmark"],
         ),
@@ -1681,7 +1681,7 @@ def build_landmarks() -> dict[str, dict]:
             swing_axis="Z",
         )
         _mark_asset(rig_coll,
-                    catalog_path="Hoverbike/Landmarks/Mechanical",
+                    catalog_path="King Tide/Landmarks/Mechanical",
                     description="A-frame base + swinging arm + counterweight + hoist cable. 40 m tall. Drives Marina Bay gantry cranes (default — 12 s swing across deck), Doge's Campanile bell (re-scale small, re-tune swing_period_s short), Liberty torch flame fixture (re-rig as vertical flicker). Arm carries swing_period_s/amplitude_deg/axis extras for future runtime animation — today the runtime ignores them; metadata is in place for the next animation pass.",
                     tags=["mechanical", "crane", "swing", "animated", "landmark"])
         summary["landmark_mechanical_rig"] = {

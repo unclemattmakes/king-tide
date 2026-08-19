@@ -800,7 +800,7 @@ def _add_camera_hero(scene) -> bpy.types.Object:
 # Sky preset — faded sun-bleached Florida miami_pastel.
 # Stamped onto scene properties BEFORE re-export so the addon's
 # ``derive_sky_block`` picks them up. Property names verified against
-# ``tools/blender/hoverbike_addon/sky_preset.py``.
+# ``tools/blender/kingtide_addon/sky_preset.py``.
 # ────────────────────────────────────────────────────────────────────
 
 SKY_PRESET = {
@@ -821,10 +821,10 @@ def _apply_sky_preset(scene: bpy.types.Scene) -> None:
     ``derive_sky_block`` emits the right JSON. Mirrors the Marina Bay /
     Kilauea / Sandbar pattern."""
     try:
-        from hoverbike_addon.sky_preset import set_sky_tint_from_hex
+        from kingtide_addon.sky_preset import set_sky_tint_from_hex
     except ImportError:
         try:
-            from hoverbike_addon_disk.sky_preset import set_sky_tint_from_hex
+            from kingtide_addon_disk.sky_preset import set_sky_tint_from_hex
         except ImportError:
             print("  WARN: sky_preset module not reachable headless — "
                   "JSON stub's sky block will survive instead of being "
@@ -945,7 +945,7 @@ def augment_scene() -> None:
     # state — none of the augmentation lands at runtime until the user
     # manually clicks Export Track to Game.
     print(f"{tag} re-exporting GLB + JSON + manifest")
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(
             f"{tag} export_track (post-augment) failed: {result}"

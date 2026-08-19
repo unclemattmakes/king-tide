@@ -1,6 +1,6 @@
 # Steam Deck — build path + tuning
 
-Live path for shipping Hoverbike to the Steam Deck. The desktop wrapper is
+Live path for shipping King Tide to the Steam Deck. The desktop wrapper is
 Electron (`electron/`); the runtime profile (framerate cap,
 fullscreen-on-launch, pixel ratio, AudioContext resume-after-sleep)
 auto-activates when the boot path detects a Deck. Steamworks SDK hookup is a

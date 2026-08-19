@@ -45,11 +45,11 @@ If something errored mid-export, jump to [Troubleshooting](#troubleshooting).
 
 1. Install the addon **once**:
    *Edit → Preferences → Add-ons → Install…* and pick
-   [`tools/blender/hoverbike_addon/`](../tools/blender/hoverbike_addon).
+   [`tools/blender/kingtide_addon/`](../tools/blender/kingtide_addon).
    Tick the checkbox to enable.
 2. Open or save your track as `tracks-src/<id>.blend` (the basename of
    the file becomes the in-game track id).
-3. In the 3D viewport, press **N** → **Hoverbike** tab → **Export
+3. In the 3D viewport, press **N** → **King Tide** tab → **Export
    Track to Game**. The addon validates the scene, writes
    `public/assets/tracks/<id>.glb`, and on first export creates a
    starter `public/tracks/<id>.json` from the .blend's checkpoints,
@@ -68,7 +68,7 @@ spacing, terrain shader knobs, water wave height/freq, and the
 Editing those knobs in Blender and clicking *Export Track to Game*
 merges them back onto the JSON; the in-app editor's hand-placed gates,
 pickups, props, and sky stay intact. The *Reload from JSON* button in
-the Hoverbike sidebar re-runs the auto-sync on demand, so changes made
+the King Tide sidebar re-runs the auto-sync on demand, so changes made
 in the editor while Blender is already open can be picked up without
 closing the file.
 
@@ -85,7 +85,7 @@ The legacy script still works for scripted runs (CI, batch builds,
 no GUI):
 
 ```bash
-HOVERBIKE_OUTPUT=public/assets/tracks/my-track.glb \
+KINGTIDE_OUTPUT=public/assets/tracks/my-track.glb \
   "C:/Program Files/Blender Foundation/Blender 5.1/blender.exe" \
   --background tracks-src/my-track.blend --python tools/export_track.py
 ```
@@ -178,7 +178,7 @@ A real track typically needs:
   runtime doesn't key off it yet). See [Limitations](#known-limitations)
   for the broadphase caveat.
 - **A water sea level.** Set it on the *Sea level (m)* slider in the
-  Hoverbike → Water sub-panel (scene prop `hoverbike_water_height`).
+  King Tide → Water sub-panel (scene prop `hoverbike_water_height`).
   Round-trips through `water.height` in the JSON. **Optional:** drop a
   `water_volume_main` empty (Add → Empty → Cube) only if you want to
   override `wave_height` / `wave_freq` custom-prop values per track
@@ -211,9 +211,9 @@ complete name-pattern + extras matrix.
 
 ### 4. Export
 
-In Blender, click **Hoverbike → Export Track to Game** in the View3D
+In Blender, click **King Tide → Export Track to Game** in the View3D
 header menu bar (next to View / Select / Add / Object), or press **N**
-to open the sidebar's *Hoverbike* tab and click **Export to Game** in
+to open the sidebar's *King Tide* tab and click **Export to Game** in
 the header. Either way prints to Blender's info bar:
 
 ```
@@ -249,19 +249,19 @@ gameplay placement (gates, pickup spawns) without re-opening Blender,
 switch into edit mode: `?track=my-track&edit=1` (or click **Open…**
 in the editor panel).
 
-## Authoring tools (Hoverbike menu + sidebar)
+## Authoring tools (King Tide menu + sidebar)
 
 Two complementary surfaces:
 
-- **View3D header → Hoverbike menu.** Top-bar dropdown next to View /
+- **View3D header → King Tide menu.** Top-bar dropdown next to View /
   Select / Add / Object. Holds every operator — Export, Add (terrain
   templates, gameplay, environment), Build / Refresh, Spline, Terrain,
   Thumbnail, Utility — plus a *Quick Pie* entry on **Shift+W**. Always
   available regardless of selection; the right place to fish for any
   operator.
 
-- **N-panel sidebar (Hoverbike tab).** Press **N**, switch to the
-  *Hoverbike* tab. The header is always visible (track id, lap stats,
+- **N-panel sidebar (King Tide tab).** Press **N**, switch to the
+  *King Tide* tab. The header is always visible (track id, lap stats,
   missing-essentials scaffold, the **Start / Finish gate** `t`-slider,
   and Export). The per-tool sub-panels below
   are **selection-driven** — Road tool appears when `road_curve_main`
@@ -592,7 +592,7 @@ Miami-flat valley, Nob-Hill-style 56 m grade, Telegraph-Ridge
 A few operators drop a fresh terrain mesh into the current scene without
 needing a fresh `.blend` template:
 
-- **Add Multi-Biome Terrain (Style menu).** Hoverbike → Add → *Multi-Biome
+- **Add Multi-Biome Terrain (Style menu).** King Tide → Add → *Multi-Biome
   Terrain* (or Terrain submenu). Spawns the unified `HV_TemplateTerrain`
   modifier — the wrapper that bundles all four styles. A **Style** menu in
   the modifier panel (Properties → Modifier) swaps the heightfield between
@@ -613,7 +613,7 @@ needing a fresh `.blend` template:
   > yet (today the Style menu evaluates one style at a time). If your
   > seafloor looks squashed, this toggle is on.
 
-- **Add Island Terrain (procedural).** Hoverbike → Add → *Island
+- **Add Island Terrain (procedural).** King Tide → Add → *Island
   Terrain* (or Terrain submenu). The single-biome version: spawns a
   1024×1024 m subdivided plane (~150 k verts) with the `HV_Island`
   Geometry-Nodes modifier and four default peak control empties (one
@@ -791,7 +791,7 @@ The preset list is mirrored in two places:
 `SKY_COLOR_GRADES` in [types.ts](../src/game/tracks/types.ts) (with
 its lookup table in [sky.ts](../src/engine/render/sky.ts)) on the
 runtime side, and `SKY_COLOR_GRADES` in
-`tools/blender/hoverbike_addon/sky_preset.py` on the addon side.
+`tools/blender/kingtide_addon/sky_preset.py` on the addon side.
 Adding a preset means editing both — there's no auto-sync yet.
 
 **Round-trip.** The sky block is fully Blender-owned: any value the
@@ -1021,7 +1021,7 @@ float **any** placed asset prop — a wrecked boat, a crate, a container —
 in another), tag the **placement**, not the asset, in the **Prop
 Placements** panel:
 
-1. **Import Prop Placements** (Hoverbike → Prop Placements) to pull the
+1. **Import Prop Placements** (King Tide → Prop Placements) to pull the
    track's `props[]` into the `_hoverbike_props_preview` collection as
    movable instances of their shipping GLBs.
 2. Select the prop instance(s) you want floating.
@@ -1056,7 +1056,7 @@ done by eye on a water track or in the `?waveriders=1` scene
 A **prop line** is the parametric "asset along a curve" primitive (Epic 2,
 shipped) — repeat a single prop down a Bezier at a chosen spacing instead of
 hand-placing every instance. Author them in the **Prop Lines** sub-panel
-(`HOVERBIKE_PT_prop_lines`): **Add Prop Line** drops a curve + line definition,
+(`KINGTIDE_PT_prop_lines`): **Add Prop Line** drops a curve + line definition,
 **Import Prop Lines** pulls the track's existing `propLines[]` in as editable
 curves, and **Write Prop Lines → JSON** persists back to the track JSON. They
 round-trip through the editor-owned `propLines[]` key, so they survive Blender
@@ -1068,14 +1068,14 @@ is editable in the in-app editor.
 
 A **decal** (`kind = "decal"`) is a thin projected decal mesh — paint markings,
 grime, signage stuck flat to the track surface. Add one with **Add Decal** in the
-**Decals** sub-panel (`HOVERBIKE_PT_track_decals`); it exports as a normal mesh
+**Decals** sub-panel (`KINGTIDE_PT_track_decals`); it exports as a normal mesh
 node tagged `kind=decal`, distinct from collidable `kind=track` geometry. See the
 [Object kinds reference](#object-kinds-reference).
 
 <a id="floating-gates"></a>
 ### Floating gates
 
-Checkpoint gates can ride the swell too. In the Hoverbike panel's **Gates**
+Checkpoint gates can ride the swell too. In the King Tide panel's **Gates**
 section, tick **Float gates on waves** (scene prop `hoverbike_float_gates`,
 round-tripped as the track-level `floatGates` in the JSON). At runtime, on
 that track:
@@ -1378,7 +1378,7 @@ buffer.
    `Collection Info` node in **Instance** mode.
 
 The four export sites (`tools/export_track.py`,
-`tools/blender/common.py`, and the two Hoverbike-addon operators) all
+`tools/blender/common.py`, and the two King Tide-addon operators) all
 pass `export_gpu_instances=True` and `export_gn_mesh=True`. No
 per-track flag toggle needed.
 
@@ -1422,11 +1422,11 @@ terrain mesh. Pairs with the [terrain coloration flow](#vertex-bakes-ao--path-wo
 ### Authoring loop
 
 1. **Paint the biome** — run *Apply Terrain Vertex Colors* on the
-   terrain (Hoverbike → Terrain → Bake to vertex colors). This stamps
+   terrain (King Tide → Terrain → Bake to vertex colors). This stamps
    `COLOR_0` plus a sibling `baked_biome` FLOAT attribute the scatter
    GN graph reads. World-Z thresholds map verts to deep / seafloor /
    beach / jungle buckets.
-2. **Add the palette** — Hoverbike → Add → *Biome Palette Scatter*
+2. **Add the palette** — King Tide → Add → *Biome Palette Scatter*
    (or click *Add Biome Palette Scatter* in the sidebar's Biome scatter
    sub-panel when the terrain is selected). Drops a singleton
    `scatter_biome_palette` Empty + `scatter_biome_palette_surf` Mesh,
@@ -1592,7 +1592,7 @@ the water's edge) without re-tuning the whole biome.
 
 ### Authoring a stroke
 
-1. **Add** — *Hoverbike → Add → Scatter Stroke (curve-bounded grove)*.
+1. **Add** — *King Tide → Add → Scatter Stroke (curve-bounded grove)*.
    The Add operator dialog picks a **prop** (palm / rock / driftwood /
    buoy), a **width** (perpendicular half-extent, default 8 m), and a
    **density** (per m² of ribbon area, default 0.1). Drops a triplet
@@ -1644,7 +1644,7 @@ constraining.
 
 A second smoke-test script lives at
 [`tools/blender/_smoke_scatter_stroke.py`](../tools/blender/_smoke_scatter_stroke.py).
-Runs `hoverbike.add_scatter_stroke` twice (palm + rock) and confirms
+Runs `kingtide.add_scatter_stroke` twice (palm + rock) and confirms
 each emits a non-zero instance count and that adding the second
 stroke doesn't perturb the first.
 
@@ -1664,7 +1664,7 @@ stroke doesn't perturb the first.
   scatters its prop on both sides. Same workaround as above (shape
   the curve), or split into two strokes.
 - **No bespoke Snap-to-Terrain** for stroke curves. The existing
-  `hoverbike.snap_curve_to_terrain` operator is hard-bound to
+  `kingtide.snap_curve_to_terrain` operator is hard-bound to
   `road_curve_main`; Shrinkwrap modifier on the curve is the
   workaround for v1.
 
@@ -1710,13 +1710,13 @@ use `mat_prop_*` and render statically.
    first run, and re-tune in Blender via the modifier panel.
 2. Register `tracks-src/` as an asset library: in Blender, Edit →
    Preferences → File Paths → Asset Libraries → Add… and pick the
-   `tracks-src/` folder. Name it "Hoverbike" (or anything).
+   `tracks-src/` folder. Name it "King Tide" (or anything).
 
 ### Authoring loop
 
 1. Open your track `.blend` (e.g. `tracks-src/<id>.blend`).
 2. Open an Asset Browser editor (split a viewport or use the *Asset
-   Browser* workspace). Select the Hoverbike library and the
+   Browser* workspace). Select the King Tide library and the
    *Track Props* catalogue.
 3. Drag a prop into the viewport. Blender drops it in as a
    **Collection Instance** — a single Empty whose `instance_collection`

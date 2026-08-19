@@ -1,6 +1,6 @@
 name: qa
 
-# Hoverbike QA report — runs the orchestrator on push + PR, uploads
+# King Tide QA report — runs the orchestrator on push + PR, uploads
 # the qa-report/ artifact, writes the Markdown summary into the job's
 # GitHub Step Summary so reviewers don't have to download the artifact
 # to see results. Today this workflow is NON-BLOCKING — failures are

@@ -6,7 +6,7 @@ Invocation (via ``tools/blender/run-lint.mjs``)::
 
 What it does:
 
-  1. Enables the Hoverbike addon (same registration the smoke test
+  1. Enables the King Tide addon (same registration the smoke test
      uses, see ``test_addon_registration.py``).
   2. Calls the addon's existing ``_lint_track`` + ``validate_track_scene``
      against the currently-loaded scene so authoring-time and CI lint
@@ -40,10 +40,10 @@ import sys
 import bpy
 import mathutils
 
-ADDON_MODULE = "hoverbike_addon"
+ADDON_MODULE = "kingtide_addon"
 
 # Mirror the wave-zone authoring contract from
-# ``hoverbike_addon/wave_zone.py``. Each ``wave_zone_NN`` empty needs
+# ``kingtide_addon/wave_zone.py``. Each ``wave_zone_NN`` empty needs
 # positive half-extents (the OBB has to enclose *something*) and a
 # positive ``height_mult`` (zero-mult zones are a footgun — author
 # probably meant to delete the zone instead).
@@ -263,8 +263,8 @@ def _addon_lint() -> tuple[list[str], list[str]]:
     state the runtime would: the addon's *Export to Game* button calls
     ``bake_ai_splines()`` immediately before ``validate_track_scene()``
     (see ``export.py``)."""
-    from hoverbike_addon.track_meta import _lint_track
-    from hoverbike_addon._legacy import bake_ai_splines, validate_track_scene
+    from kingtide_addon.track_meta import _lint_track
+    from kingtide_addon._legacy import bake_ai_splines, validate_track_scene
 
     # Mirror export.py — bake curves into the `points` extras first so
     # the spline-shape check has something to read.

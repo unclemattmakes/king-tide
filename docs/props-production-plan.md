@@ -53,7 +53,7 @@ Raw generated meshes **do not drop into this engine.** Every shippable asset
 must carry:
 
 - `COLOR_0 = (sway, AO, path-worn/phase, biome)` per [vertex-attribute-spec.md](vertex-attribute-spec.md).
-- A `kind` registered in **both** [hoverbike_kinds.py](../tools/blender/hoverbike_kinds.py)
+- A `kind` registered in **both** [kingtide_kinds.py](../tools/blender/kingtide_kinds.py)
   and [asset-kinds.ts](../src/engine/asset-kinds.ts) (CI enforces parity).
 - A primitive collider (box / sphere / cylinder / capsule) — scattered
   instances are render-only.
@@ -92,7 +92,7 @@ pieces**, not a bulk replacement.
 
 The session's Blender MCP is **`blender_mcp`** (projects.blender.org) — a
 code-execution + introspection + screenshot bridge. **No generative AI, no
-asset libraries.** Verified live: Blender 5.1.0, `hoverbike_addon` loaded.
+asset libraries.** Verified live: Blender 5.1.0, `kingtide_addon` loaded.
 
 To get generation, add **[ahujasid/blender-mcp](https://github.com/ahujasid/blender-mcp)**
 alongside it — bundles Hyper3D Rodin (text/image→3D), PolyHaven (CC0

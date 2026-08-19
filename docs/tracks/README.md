@@ -1,4 +1,4 @@
-# Hoverbike — Per-track design docs
+# King Tide — Per-track design docs
 
 > Canonical per-track home for the v1 track set. One doc per track lives
 > in this folder. These docs **supersede** the per-track stat blocks in

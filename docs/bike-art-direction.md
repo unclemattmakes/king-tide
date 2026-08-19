@@ -1,4 +1,4 @@
-# Hoverbike — Bike Art Direction v1
+# King Tide — Bike Art Direction v1
 
 > Per-variant art direction for the five v1 bikes. Sits under
 > [art-direction.md](./art-direction.md) (the "clean stylized toy" register,

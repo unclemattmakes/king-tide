@@ -297,7 +297,7 @@ hero plates (`hero_aerial`, `versace_steps`) are lush and warm.
 **Gap → tasks:**
 - **P0 ✅ DONE (2026-06-05) — flipped normals fixed.** Recalculated-outside on
   **210** inward SB meshes (bmesh, net-inward only; terrain/foliage/horizon
-  skipped), saved the `.blend`, re-exported through `hoverbike.export_track`
+  skipped), saved the `.blend`, re-exported through `kingtide.export_track`
   (JSON merge preserved — empty `git diff`). GLB normals now **+0.46..+0.57
   outward**; posed in-engine capture shows the hotels rendering pastel + glowing
   neon. The hotels now show their pastel — the rest of the SB art pass can

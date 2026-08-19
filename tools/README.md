@@ -47,7 +47,7 @@ tools/
     ├── lib_loader.py            ← append_objects from kit .blends (used by build_prop.py)
     ├── sockets.py               ← runtime socket_* empty creation + validation
     ├── colliders.py             ← primitive collider helpers
-    ├── hoverbike_addon.py       ← in-Blender addon — Hoverbike sidebar with Export Bike/Track to Game
+    ├── kingtide_addon.py       ← in-Blender addon — King Tide sidebar with Export Bike/Track to Game
     ├── inspect_glb.mjs          ← node script — dumps a GLB's nodes + extras
     ├── run.mjs                  ← Node CLI — wraps `blender --background` per spec
     ├── seed_prop_kit.py         ← (re)build tools/blender/lib/prop_kit.blend
@@ -111,7 +111,7 @@ export an already-authored `.blend` directly (e.g. after editing in
 Blender by hand):
 
 ```bash
-HOVERBIKE_OUTPUT=public/assets/tracks/my-track.glb \
+KINGTIDE_OUTPUT=public/assets/tracks/my-track.glb \
   blender --background tracks-src/my-track.blend --python tools/export_track.py
 ```
 

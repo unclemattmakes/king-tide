@@ -68,7 +68,7 @@ export function renderMarkdown(report) {
   const totals = summariseTotals(report.steps)
   const shippable = report.steps.every((s) => s.status !== 'fail' || !s.gate)
 
-  lines.push('# Hoverbike QA Report')
+  lines.push('# King Tide QA Report')
   lines.push('')
   lines.push(`> Run started **${report.runStartedAt}** — ${formatDuration(report.runDurationMs)}.`)
   lines.push('')

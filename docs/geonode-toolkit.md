@@ -8,7 +8,7 @@ onto an object and tune with exposed knobs; they regenerate deterministically.
   (in-repo, reproducible).
 - **Asset library:** `<content-root>/tracks-src/geonode-toolkit/geonode_toolkit.blend`
   (Drive, out of git). The six groups are asset-marked under the
-  **Hoverbike ▸ GeoNode Toolkit** catalog, so they show in the Asset Browser of
+  **King Tide ▸ GeoNode Toolkit** catalog, so they show in the Asset Browser of
   any level `.blend` that scans the content root.
 
 ## The seven tools
@@ -167,7 +167,7 @@ single node then renders all-gray — so it must stay on.)
 
 The track exporter sidesteps this by **realising every visible curve-GN dock to a
 plain frozen mesh** before the glTF write (`_RealizedDockMeshes` in
-`tools/blender/hoverbike_addon/export.py`): `bpy.data.meshes.new_from_object(...,
+`tools/blender/kingtide_addon/export.py`): `bpy.data.meshes.new_from_object(...,
 preserve_all_data_layers=True)` freezes the evaluated mesh (re-marking `COLOR_0`
 active so the vinyl pass doesn't read AO = 0 and darken it), tags it `decoration`
 (deck) / `collider_mesh` (the swept `HV_DockCollider` slab), and hides the original

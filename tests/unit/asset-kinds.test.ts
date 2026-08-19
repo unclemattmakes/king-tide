@@ -6,11 +6,11 @@ import { ExportedKind, resolveNodeKind } from '../../src/engine/asset-kinds'
 
 /**
  * Asserts the TS `ExportedKind` registry stays in sync with the Python
- * `ExportedKind` class in `tools/blender/hoverbike_kinds.py`. Adding a
+ * `ExportedKind` class in `tools/blender/kingtide_kinds.py`. Adding a
  * value to one side without the other fails this test loud.
  */
 
-const PYTHON_REGISTRY = resolve(__dirname, '../../tools/blender/hoverbike_kinds.py')
+const PYTHON_REGISTRY = resolve(__dirname, '../../tools/blender/kingtide_kinds.py')
 
 function parsePythonExportedKind(): Set<string> {
   const src = readFileSync(PYTHON_REGISTRY, 'utf-8')
@@ -28,7 +28,7 @@ function parsePythonExportedKind(): Set<string> {
   const block = src.slice(afterHeader, end)
   // Match `NAME = "value"` (or single quotes). Skip names starting
   // with `_` to mirror the convenience-tuple filter in
-  // hoverbike_kinds.py (private / dunder helpers don't count as
+  // kingtide_kinds.py (private / dunder helpers don't count as
   // public values).
   const values = new Set<string>()
   for (const m of block.matchAll(/^\s+([A-Z][A-Z0-9_]*)\s*=\s*["']([^"']+)["']/gm)) {
@@ -42,7 +42,7 @@ function parsePythonExportedKind(): Set<string> {
   return values
 }
 
-describe('asset-kinds.ts ↔ hoverbike_kinds.py sync', () => {
+describe('asset-kinds.ts ↔ kingtide_kinds.py sync', () => {
   it('TS ExportedKind has the same values as Python ExportedKind', () => {
     const tsValues: Set<string> = new Set(Object.values(ExportedKind))
     const pyValues = parsePythonExportedKind()
@@ -52,7 +52,7 @@ describe('asset-kinds.ts ↔ hoverbike_kinds.py sync', () => {
     expect(
       { missingInTs, extraInTs },
       `ExportedKind drift between Python and TS — both files must be kept in sync. See ` +
-        `tools/blender/hoverbike_kinds.py and src/engine/asset-kinds.ts.`,
+        `tools/blender/kingtide_kinds.py and src/engine/asset-kinds.ts.`,
     ).toEqual({ missingInTs: [], extraInTs: [] })
   })
 

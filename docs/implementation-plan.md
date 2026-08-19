@@ -1,4 +1,4 @@
-# Hoverbike — Implementation Plan v0.1
+# King Tide — Implementation Plan v0.1
 
 > Concrete tech choices, repo layout, and milestones to deliver the Playable Demo MVP defined in [product-plan.md](./product-plan.md).
 >

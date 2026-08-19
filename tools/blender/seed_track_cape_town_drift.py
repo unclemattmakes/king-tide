@@ -733,7 +733,7 @@ def augment_scene() -> None:
     # until the user manually clicks Export Track to Game. Mirrors
     # the pattern in seed_track_hatteras_light.py::_augment_and_reexport.
     print("[cape-town-drift] re-exporting GLB + JSON + manifest")
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(
             f"[cape-town-drift] export_track (post-augment) failed: {result}"

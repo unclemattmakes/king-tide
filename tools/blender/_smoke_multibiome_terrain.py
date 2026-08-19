@@ -1,6 +1,6 @@
 """Smoke test for the in-app multi-biome terrain operator.
 
-Registers the Hoverbike addon, runs ``hoverbike.add_multibiome_terrain``
+Registers the King Tide addon, runs ``kingtide.add_multibiome_terrain``
 in an empty scene, and checks that:
 
   - the operator returns FINISHED
@@ -41,16 +41,16 @@ def _enable_addon() -> None:
     if addons_root not in sys.path:
         sys.path.insert(0, addons_root)
     try:
-        import hoverbike_addon  # type: ignore  # noqa: F401
+        import kingtide_addon  # type: ignore  # noqa: F401
     except ImportError as e:
-        _fail(f"hoverbike_addon import: {e}")
-    if not hasattr(bpy.ops.hoverbike, "add_multibiome_terrain"):
+        _fail(f"kingtide_addon import: {e}")
+    if not hasattr(bpy.ops.kingtide, "add_multibiome_terrain"):
         try:
-            hoverbike_addon.register()
+            kingtide_addon.register()
         except (RuntimeError, ValueError) as e:
             _fail(f"addon register: {e}")
-    if not hasattr(bpy.ops.hoverbike, "add_multibiome_terrain"):
-        _fail("operator hoverbike.add_multibiome_terrain not registered")
+    if not hasattr(bpy.ops.kingtide, "add_multibiome_terrain"):
+        _fail("operator kingtide.add_multibiome_terrain not registered")
 
 
 def _input_identifier(ng, name: str) -> str | None:
@@ -89,7 +89,7 @@ def main() -> None:
     bpy.ops.wm.read_homefile(use_empty=True)
     _enable_addon()
 
-    res = bpy.ops.hoverbike.add_multibiome_terrain()
+    res = bpy.ops.kingtide.add_multibiome_terrain()
     if res != {"FINISHED"}:
         _fail(f"operator returned {res}, expected FINISHED")
 
@@ -112,7 +112,7 @@ def main() -> None:
         _fail(f"Additive default is {add_default!r}, expected False")
 
     # find_island_modifier must accept the wrapper (mod zones / COLOR_0).
-    from hoverbike_addon.island_terrain import find_island_modifier  # type: ignore
+    from kingtide_addon.island_terrain import find_island_modifier  # type: ignore
 
     if find_island_modifier(terrain) is None:
         _fail("find_island_modifier did not recognise HV_TemplateTerrain")

@@ -31,7 +31,7 @@ The `.glb` + `.json` are exported from a raw `<id>.blend` that lives in the
 **not** the repo's `tracks-src/` (templates + `props-library.blend` only).
 
 **Editor-canonical vs Blender-owned (the export merge contract, in
-`hoverbike_addon/_legacy.py`):** on `Export Track`, these JSON keys are
+`kingtide_addon/_legacy.py`):** on `Export Track`, these JSON keys are
 **re-derived from the `.blend` and overwrite the JSON** —
 `BLENDER_OWNED_JSON_KEYS` = `aiSplines`, `waveRiderBuoys`, `checkpoints`,
 `start`, `sky`, `water`, `terrainShader`, `gateSpacing`, `lapsToFinish`,
@@ -160,11 +160,11 @@ mesh datablock, raycast-seat each on a shore (`0.4 ≤ h ≤ ~9`), set
 scale ~3× (props read ~3× small), vary yaw. Put them in a **normal collection**
 (not a `_hoverbike_*` preview) so the export includes them.
 
-**Re-export with the addon `Export Track` operator** (`bpy.ops.hoverbike.export_track()`)
+**Re-export with the addon `Export Track` operator** (`bpy.ops.kingtide.export_track()`)
 — it hides `_hoverbike_*` preview collections, realizes scatter, and writes the
 GLB correctly. A naïve `export_scene.gltf` would wrongly include the gate/buoy/
 water previews. The operator resolves the repo root via addon pref /
-`$HOVERBIKE_REPO_ROOT` → writes to the **git clone**, not the content folder.
+`$KINGTIDE_REPO_ROOT` → writes to the **git clone**, not the content folder.
 
 **The catch:** `export_track` also re-derives + overwrites the Blender-owned JSON
 keys (§1) from the `.blend`'s *current* state. To ship **GLB-only** art without

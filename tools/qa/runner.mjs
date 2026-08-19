@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `pnpm qa` — Hoverbike QA orchestrator.
+ * `pnpm qa` — King Tide QA orchestrator.
  *
  * Single entry point that runs the full QA stack against the current
  * working tree and emits a single Markdown + JSON report under
@@ -138,7 +138,7 @@ async function preflight() {
     ok: portFree,
     message: portFree
       ? `port ${port} is free`
-      : `port ${port} is occupied — Playwright will reuse the existing server, but if it isn't the Hoverbike dev server, specs may fail in strange ways`,
+      : `port ${port} is occupied — Playwright will reuse the existing server, but if it isn't the King Tide dev server, specs may fail in strange ways`,
     fix: `kill the process holding port ${port}, or set E2E_PORT to a free port`,
   })
 

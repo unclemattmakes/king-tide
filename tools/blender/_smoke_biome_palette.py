@@ -1,10 +1,10 @@
 """Smoke test — exercise HV_BiomePalette end-to-end on any track .blend.
 
 Drives the biome-palette scatter from a cold start:
-  1. Confirms the hoverbike addon is registered (or registers it).
-  2. Runs ``hoverbike.apply_terrain_vertex_colors`` to populate
+  1. Confirms the King Tide addon is registered (or registers it).
+  2. Runs ``kingtide.apply_terrain_vertex_colors`` to populate
      ``baked_biome`` on the resolved terrain mesh.
-  3. Runs ``hoverbike.add_biome_palette`` to spawn the palette pair
+  3. Runs ``kingtide.add_biome_palette`` to spawn the palette pair
      + attach the HV_BiomePalette modifier.
   4. Evaluates the modifier on the depsgraph and counts emitted
      instances.
@@ -19,7 +19,7 @@ Invocation:
 
 Useful for catching regressions to either the GN graph (in
 ``seed_props_library.py::build_biome_palette_group``) or the addon
-operator (``hoverbike_addon/biome_palette.py``) without booting the GUI.
+operator (``kingtide_addon/biome_palette.py``) without booting the GUI.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ import bpy
 
 def _enable_addon() -> bool:
     """Add the addon package dir to sys.path and enable it. The user's
-    standard install symlinks ``tools/blender/hoverbike_addon`` into
+    standard install symlinks ``tools/blender/kingtide_addon`` into
     Blender's user scripts dir, but --background sessions may not pick
     it up automatically — explicit enable side-steps the question."""
     # The .blend file lives in <repo>/tracks-src/<id>.blend, so the
@@ -46,17 +46,17 @@ def _enable_addon() -> bool:
     if addons_root not in sys.path:
         sys.path.insert(0, addons_root)
     try:
-        import hoverbike_addon  # type: ignore
+        import kingtide_addon  # type: ignore
     except ImportError as e:
-        print(f"FAIL: hoverbike_addon import: {e}")
+        print(f"FAIL: kingtide_addon import: {e}")
         return False
     # Blender auto-enables the user-installed addon from the symlinked
     # scripts dir, so register() may already have run. Detect that via
     # the operator's presence in bpy.ops; only call register() ourselves
     # when the operator is missing (running from a fresh prefs state).
-    if not hasattr(bpy.ops.hoverbike, "add_biome_palette"):
+    if not hasattr(bpy.ops.kingtide, "add_biome_palette"):
         try:
-            hoverbike_addon.register()
+            kingtide_addon.register()
         except (RuntimeError, ValueError) as e:
             print(f"FAIL: addon register: {e}")
             return False
@@ -71,7 +71,7 @@ def _bake_vertex_colors() -> bool:
     terrain = bpy.data.objects.get("terrain")
     if terrain is None:
         # Try the kind=track fallback
-        from hoverbike_addon._legacy import _largest_terrain_mesh  # type: ignore
+        from kingtide_addon._legacy import _largest_terrain_mesh  # type: ignore
         terrain = _largest_terrain_mesh()
     if terrain is None:
         print("FAIL: no terrain mesh in scene")
@@ -79,12 +79,12 @@ def _bake_vertex_colors() -> bool:
     bpy.context.view_layer.objects.active = terrain
     terrain.select_set(True)
     try:
-        bpy.ops.hoverbike.apply_terrain_vertex_colors()
+        bpy.ops.kingtide.apply_terrain_vertex_colors()
     except RuntimeError as e:
         print(f"FAIL: apply_terrain_vertex_colors: {e}")
         return False
     # Check that baked_biome got populated.
-    from hoverbike_addon.bake import BAKED_BIOME_ATTR  # type: ignore
+    from kingtide_addon.bake import BAKED_BIOME_ATTR  # type: ignore
     if BAKED_BIOME_ATTR not in terrain.data.attributes:
         print(f"FAIL: {BAKED_BIOME_ATTR} not stamped on terrain")
         return False
@@ -100,7 +100,7 @@ def _bake_vertex_colors() -> bool:
 
 def _add_palette() -> bool:
     try:
-        bpy.ops.hoverbike.add_biome_palette()
+        bpy.ops.kingtide.add_biome_palette()
     except RuntimeError as e:
         print(f"FAIL: add_biome_palette: {e}")
         return False

@@ -1,4 +1,4 @@
-"""Reusable Geometry-Nodes prop toolkit for Hoverbike levels.
+"""Reusable Geometry-Nodes prop toolkit for King Tide levels.
 
 Builds a set of parametric, curve- or generator-driven Geometry Nodes
 groups that level designers can drop onto an object in Blender and tune

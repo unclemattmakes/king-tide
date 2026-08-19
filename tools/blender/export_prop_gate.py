@@ -113,7 +113,7 @@ def main() -> int:
         filepath=OUTPUT_PATH,
         export_format="GLB",
         # +Z (Blender) → +Y (three.js) — same convention every other
-        # Hoverbike GLB ships with.
+        # King Tide GLB ships with.
         export_yup=True,
         export_apply=False,  # gate is plain mesh — no modifiers to bake
         use_selection=True,

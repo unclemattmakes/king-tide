@@ -51,7 +51,7 @@ def reset_scene() -> None:
                 pass
 
 
-def read_spec(env_var: str = "HOVERBIKE_SPEC") -> dict[str, Any]:
+def read_spec(env_var: str = "KINGTIDE_SPEC") -> dict[str, Any]:
     """Read the JSON spec referenced by an env var.
 
     The path may be absolute or repo-relative. Returns the parsed dict
@@ -69,7 +69,7 @@ def read_spec(env_var: str = "HOVERBIKE_SPEC") -> dict[str, Any]:
     return spec
 
 
-def output_path(env_var: str = "HOVERBIKE_OUTPUT", default: str | None = None) -> str:
+def output_path(env_var: str = "KINGTIDE_OUTPUT", default: str | None = None) -> str:
     """Resolve the output path from an env var (or default)."""
     raw = os.environ.get(env_var) or default
     if not raw:
