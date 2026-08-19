@@ -179,10 +179,17 @@ export function createEngineTrailSystem(
     })
     // biome-ignore lint/suspicious/noExplicitAny: TSL node assignment to material slots
     material.colorNode = tslTexture(ribbonTex).rgb.mul(attribute('aTint', 'vec3')) as any
+    // Contrast-budget cap: the ribbon is additive AND double-sided, so
+    // every quad contributes twice, and two nozzles × 8 bikes stack to
+    // a white core that outshines actual gameplay signals. Cap the
+    // whole ribbon's energy under the "brightest thing on screen is a
+    // gameplay event" rule (making-of ch. 8).
+    const TRAIL_LUMA_CAP = 0.6
     // biome-ignore lint/suspicious/noExplicitAny: TSL .mul() overloads vs uniform() node type
     material.opacityNode = tslTexture(ribbonTex)
       .a.mul(attribute('aFade', 'float'))
-      .mul(uAlpha as any) as any
+      .mul(uAlpha as any)
+      .mul(TRAIL_LUMA_CAP) as any
 
     const mesh = new THREE.Mesh(geometry, material)
     mesh.frustumCulled = false

@@ -113,7 +113,9 @@ const DUST_GROUND_DIST_MAX = 1.6
 // (held shift OR a boost pickup) ramps the rate up to BOOST_MAX_RATE
 // for that "thruster firing" beat.
 const EXHAUST_THROTTLE_RATE = 35 // particles/sec at full forward throttle
-const EXHAUST_BOOST_RATE = 90 // additional rate while boost is active
+const EXHAUST_BOOST_RATE = 50 // additional rate while boost is active — was 90; with the
+// throttle layer that stacked ~125 additive sprites/sec at one point and the
+// flare swallowed the whole bike (contrast-budget playtest finding)
 const EXHAUST_THROTTLE_MIN = 0.2 // dead-zone — no exhaust on micro inputs
 
 // Missile trail — fired per frame from each in-flight missile. Reads
@@ -329,8 +331,18 @@ function createPool(params: {
    *  Used to tint the water-spray pools toward the sunset warmth at boot —
    *  see `setSprayTint`. Omitted pools keep the texture's baked colour. */
   tint?: ReturnType<typeof uniform>
+  /** Contrast-budget cap (0..1, default 1). The legibility rule is
+   *  "the brightest thing on screen is a gameplay event" (making-of
+   *  ch. 8 / painterly-legibility-plan) — but the exhaust flare and
+   *  spray pools stack dozens of overlapping sprites and saturate to
+   *  a white sheet that swallows the bike at speed. For additive
+   *  pools the cap scales the emitted energy (colorNode); for
+   *  normal-blend pools it scales coverage (opacityNode) so foam
+   *  dims by stacking less, not by turning grey. */
+  intensity?: number
 }): Pool {
   const { capacity, defaultSize, texture, blending, gravity, drag, tint } = params
+  const intensity = Math.max(0, Math.min(1, params.intensity ?? 1))
 
   const positions = new Float32Array(capacity * 3)
   const velocities = new Float32Array(capacity * 3)
@@ -395,15 +407,24 @@ function createPool(params: {
   // math which uses the same value).
   material.scaleNode = attribute('aSize', 'float')
   // Modulate texture alpha by the per-instance aAlpha so each particle
-  // fades over its own lifetime independently.
-  material.opacityNode = tslTexture(texture).a.mul(attribute('aAlpha', 'float'))
+  // fades over its own lifetime independently. Normal-blend pools take
+  // the contrast-budget cap here (less coverage per sprite → stacks
+  // stop saturating to a solid sheet).
+  const baseOpacity = tslTexture(texture).a.mul(attribute('aAlpha', 'float'))
+  material.opacityNode =
+    blending === THREE.NormalBlending && intensity < 1 ? baseOpacity.mul(intensity) : baseOpacity
   // Texture RGB is pre-tinted at canvas creation time. Pools that pass a
   // `tint` uniform multiply it in (water spray warmed toward the sunset);
-  // the rest pass the baked colour through unchanged.
-  material.colorNode = tint
+  // the rest pass the baked colour through unchanged. Additive pools
+  // take the contrast-budget cap on the colour term (their brightness
+  // is accumulated energy, not coverage).
+  const tinted = tint
     ? // biome-ignore lint/suspicious/noExplicitAny: TSL .mul() overload doesn't accept the generic uniform() node type
-      (tslTexture(texture).rgb.mul(tint as any) as typeof material.colorNode)
+      tslTexture(texture).rgb.mul(tint as any)
     : tslTexture(texture).rgb
+  material.colorNode = (
+    blending === THREE.AdditiveBlending && intensity < 1 ? tinted.mul(intensity) : tinted
+  ) as typeof material.colorNode
 
   const mesh = new THREE.Mesh(geometry, material)
   mesh.frustumCulled = false
@@ -531,6 +552,7 @@ export function createFxSystem(
 
   const foam = createPool({
     capacity: FOAM_CAPACITY,
+    intensity: 0.7,
     // Sized to visually match the 2× scale bike's stern footprint.
     defaultSize: 1.0,
     texture: foamTex,
@@ -582,6 +604,7 @@ export function createFxSystem(
   })
   const exhaust = createPool({
     capacity: EXHAUST_CAPACITY,
+    intensity: 0.55,
     defaultSize: 0.45,
     texture: exhaustTex,
     blending: THREE.AdditiveBlending,
@@ -656,6 +679,7 @@ export function createFxSystem(
     gravity: -4.0,
     drag: 1.1,
     tint: sprayTint,
+    intensity: 0.65,
   })
 
   scene.add(foam.mesh)
