@@ -429,6 +429,11 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         }</div>
       </div>
       ${disabled ? `<div class="bc-gate">${escapeHtml(t.gateLabel)}</div>` : ''}
+      ${
+        !disabled && t.art === 'greybox'
+          ? '<div class="bc-early">Early route &middot; art pass coming</div>'
+          : ''
+      }
     `
     if (!disabled) {
       card.addEventListener('click', () => {
@@ -1647,10 +1652,9 @@ function buildRoomUrl(roomId: string): string {
 
 /** Tracks shown in the Leaderboards screen. Combines:
  *
- *  - All v1 ship tracks (so the player can scan the full slate even
- *    before each track ships — empty boards read as "race when this
- *    lands"). Each row carries the v1 accent so the visual identity
- *    matches the track-select tile.
+ *  - v1 tracks that have actually shipped (a board for an unraceable
+ *    venue only makes the screen read dead). Each row carries the v1
+ *    accent so the visual identity matches the track-select tile.
  *  - Procedural + manifest tracks (lagoon, cliffside, every GLB) so
  *    times set on today's playable maps actually have a home. Dev-only
  *    tracks only appear on dev builds, matching the cup-select gating.
@@ -1663,6 +1667,11 @@ function buildLeaderboardTrackList(
   const seen = new Set<string>()
   const out: LeaderboardTrackEntry[] = []
   for (const t of V1_TRACKS) {
+    // Unbuilt venues (status 'pending') used to get rows on the theory
+    // that empty boards read as "race when this lands" — but a board
+    // for a track you *cannot race* only makes the whole screen read
+    // dead. List a venue once a time is actually settable on it.
+    if (t.status !== 'ship') continue
     seen.add(t.id)
     out.push({ id: t.id, name: t.name, accent: t.accent })
   }

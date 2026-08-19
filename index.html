@@ -2791,6 +2791,27 @@
         opacity: 0.7;
       }
 
+      /* Greybox honesty strip — playable venues whose v2 art pass
+         hasn't landed. Same footer-strip grammar as .bc-gate but cool
+         slate (not the gold gate tint) and NOT grayed: the venue is
+         raceable, the card just stops promising neon it can't show. */
+      .bc-early {
+        display: block;
+        margin-top: 10px;
+        padding: 5px 10px;
+        border-radius: 8px;
+        font-family: var(--bc-font-mono);
+        font-size: 10px; letter-spacing: 0.07em;
+        text-transform: uppercase;
+        color: var(--bc-cyan);
+        background: rgba(108, 220, 242, 0.07);
+        border-left: 2px solid rgba(108, 220, 242, 0.55);
+      }
+      .bc-early::before {
+        content: '▲ ';
+        opacity: 0.7;
+      }
+
       /* Compact "Coming soon" chip used on the bike-select grid. */
       .bc-soon {
         align-self: flex-start;

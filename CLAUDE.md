@@ -95,9 +95,15 @@ Three things that are easy to assume wrong from older docs:
 - **Anti-grav is cut** (parked for a possible future DLC). `anti-grav.ts` + HUD +
   Blender tools stay parked; no shipped track places anti-grav zones. Anything
   calling it "shipped" is v1-historical.
-- **`status: 'ship'` means wired/playable, not art-complete.** Only **Mayday Bay**
-  (the tutorial lagoon, slug `sandbar`) and **The Maw** are dressed; the rest are greybox route-stubs awaiting the v2
-  art pass.
+- **`status: 'ship'` means wired/playable, not art-complete.** Dressed today:
+  **Mayday Bay** (the tutorial lagoon, slug `sandbar`), **Mexico City** (Texcoco
+  art pass), and **The Maw** — but The Maw is **deliberately parked to the
+  B-list** (100% open water; pulled from the cups in the no-open-water pass —
+  [docs/tracks/the-maw.md](docs/tracks/the-maw.md)), so it is *not* on the venue
+  card and its absence there is by design, not drift. Everything else is a
+  greybox route-stub awaiting the v2 art pass — playable venue cards badge
+  these "EARLY ROUTE · ART PASS COMING" (`art` field in
+  `src/engine/menus/tracks-catalog.ts`).
 - **Signature mechanic is wave mastery** — the motocross "master the jump" model
   (pitch the takeoff/landing), not the old press-forward-on-crest pump.
 

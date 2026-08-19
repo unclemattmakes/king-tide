@@ -39,6 +39,13 @@ export type V1TrackEntry = {
   /** Hover gate label — shown when the tile is disabled. Empty once the
    *  track has shipped and `status` flips to 'ship'. */
   gateLabel: string
+  /** Art state, orthogonal to `status`: 'ship' means wired + playable,
+   *  NOT art-complete (CLAUDE.md). Greybox venues stay raceable but the
+   *  tile badges them "EARLY ROUTE · ART PASS COMING" so the card's
+   *  promise matches what loads — the playtest's biggest trust break
+   *  was "neon still on" opening onto beige dunes. Flip to 'dressed'
+   *  when the v2 art pass lands. */
+  art: 'dressed' | 'greybox'
   /** Lights up when the track is fully built + AI-lined + audio-set. */
   status: 'ship' | 'pending'
 }
@@ -56,6 +63,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 60,
     laps: 1,
     gateLabel: '',
+    art: 'dressed',
     status: 'ship',
   },
   {
@@ -68,6 +76,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 45,
     laps: 3,
     gateLabel: '',
+    art: 'dressed',
     status: 'ship',
   },
   {
@@ -80,6 +89,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 48,
     laps: 3,
     gateLabel: '',
+    art: 'greybox',
     status: 'ship',
   },
   // ── Harbor Cup (v2) — drowned harbor cities, the antithesis of open
@@ -98,6 +108,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 55,
     laps: 3,
     gateLabel: 'Concept locked · build pending',
+    art: 'greybox',
     status: 'pending',
   },
   {
@@ -110,6 +121,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 58,
     laps: 3,
     gateLabel: '',
+    art: 'greybox',
     status: 'ship',
   },
   {
@@ -122,6 +134,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 60,
     laps: 3,
     gateLabel: 'Concept locked · build pending',
+    art: 'greybox',
     status: 'pending',
   },
   {
@@ -134,6 +147,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 55,
     laps: 3,
     gateLabel: '',
+    art: 'greybox',
     status: 'ship',
   },
   {
@@ -146,6 +160,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 60,
     laps: 3,
     gateLabel: '',
+    art: 'greybox',
     status: 'ship',
   },
   {
@@ -158,6 +173,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 58,
     laps: 3,
     gateLabel: '',
+    art: 'greybox',
     status: 'ship',
   },
   {
@@ -170,6 +186,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 65,
     laps: 3,
     gateLabel: '',
+    art: 'greybox',
     status: 'ship',
   },
   {
@@ -182,6 +199,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 22,
     laps: 5,
     gateLabel: '',
+    art: 'greybox',
     status: 'ship',
   },
   {
@@ -194,6 +212,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 62,
     laps: 3,
     gateLabel: '',
+    art: 'greybox',
     status: 'ship',
   },
   {
@@ -206,6 +225,7 @@ export const V1_TRACKS: V1TrackEntry[] = [
     lapTarget: 70,
     laps: 3,
     gateLabel: '',
+    art: 'greybox',
     status: 'ship',
   },
 ]
