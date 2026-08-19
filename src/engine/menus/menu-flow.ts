@@ -175,7 +175,7 @@ const MODE_TILES: ModeTile[] = [
     id: 'tutorial',
     badge: 'LEARN',
     headline: 'TUTORIAL',
-    desc: 'Seven scripted beats — throttle, cruise, look around, wave pump, drift, anti-grav, finish. Skippable for returning players via Settings → Subtitles.',
+    desc: 'Six scripted beats — throttle, cruise, look around, wave pump, drift, finish. Skippable for returning players via Settings → Subtitles.',
     enabled: true,
   },
 ]
@@ -1085,14 +1085,14 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="bc-card" id="tut-start" role="button" tabindex="0" style="--accent:#ffd27a; cursor: pointer;">
             <div class="label">FRAMEWORK</div>
             <div class="name">FIRST RUN</div>
-            <div class="tag">Seven beats — throttle, cruise, look around, wave pump, drift, anti-grav, finish. Runs on any track. Subtitles toggle in Settings.</div>
+            <div class="tag">Six beats — throttle, cruise, look around, wave pump, drift, finish. Runs on any track. Subtitles toggle in Settings.</div>
             <div class="record">~90s &middot; INTRO DIFFICULTY</div>
             <div class="record" style="color: var(--bc-yellow); margin-top: 6px;">${escapeHtml(ctaLabel)} &rarr;</div>
           </div>
           <div class="bc-card bc-disabled" data-gate="Ships with the Sandbar track in sprint 1 (M13)" style="--accent:#9bdcf2;">
             <div class="label">TRAINING COVE</div>
             <div class="name">SANDBAR</div>
-            <div class="tag">Track-specific scripted scenarios — drift around a buoy, pickup gate, ramp run, anti-grav arch.</div>
+            <div class="tag">Track-specific scripted scenarios — drift around a buoy, pickup gate, ramp run.</div>
             <div class="record">~60s &middot; 1 LAP &middot; SANDBAR-ONLY</div>
             <div class="bc-gate">Ships with the Sandbar track — sprint 1 (M13)</div>
           </div>

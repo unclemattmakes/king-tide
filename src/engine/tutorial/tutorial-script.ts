@@ -9,11 +9,11 @@
  * arms.
  *
  * Beats deliberately have no track-specific dependencies — they look
- * at speed, throttle, wave-pump events, anti-grav engagement, drift
- * angle, look-around. That's enough to validate the framework's
- * primary mechanics without a Sandbar-shaped course; once Sandbar
- * lands (M13) it ships its own track-specific script that uses the
- * same shape but adds checkpoint-region predicates.
+ * at speed, throttle, wave-pump events, drift angle, look-around.
+ * That's enough to validate the framework's primary mechanics without
+ * a Sandbar-shaped course; once Sandbar lands (M13) it ships its own
+ * track-specific script that uses the same shape but adds
+ * checkpoint-region predicates.
  *
  * Failure mode: a beat that never clears is fine. Tutorials don't
  * "fail" — they just hold their prompt up until the player figures it
@@ -43,7 +43,9 @@ export interface TutorialContext {
    *  director clears this counter at every beat arm. */
   pumpEventsThisBeat: number
   /** True while the player is engaged with an anti-grav source
-   *  (override.active && weight > threshold). */
+   *  (override.active && weight > threshold). Parked with anti-grav
+   *  (cut) — no shipped beat reads it, but the field stays so the
+   *  sample/context shape survives a future DLC re-enable. */
   inAntiGrav: boolean
   /** Whether the player held an orbit/look-around input since the
    *  beat armed. Lets a "look around" beat clear on player action. */
@@ -90,13 +92,12 @@ export interface TutorialScript {
 /** v1 framework's canned script. Track-agnostic — works on any
  *  manifest track. Sandbar adds its own scripted scenarios on top.
  *
- *  Seven beats — throttle, cruise, look-around, swell pump, drift,
- *  anti-grav, ready. The drift beat (added once the mini-turbo
- *  mechanic landed) is detected generically off the drift-tier
- *  release signal, so it works on any manifest track without a
- *  buoy-shaped corner. The remaining cathedral-copy beats (pickup,
- *  ramp) are still swapped for what we can detect without a
- *  Sandbar-shaped course. */
+ *  Six beats — throttle, cruise, look-around, swell pump, drift,
+ *  ready. The drift beat (added once the mini-turbo mechanic landed)
+ *  is detected generically off the drift-tier release signal, so it
+ *  works on any manifest track without a buoy-shaped corner. The
+ *  remaining cathedral-copy beats (pickup, ramp) are still swapped for
+ *  what we can detect without a Sandbar-shaped course. */
 export const DEFAULT_TUTORIAL_SCRIPT: TutorialScript = {
   id: 'first-run-intro',
   label: 'INTRO',
@@ -142,14 +143,6 @@ export const DEFAULT_TUTORIAL_SCRIPT: TutorialScript = {
       clearWhen: (ctx) => ctx.driftTierThisBeat >= 1,
       clearAfterSeconds: 25,
       clearMessage: '+TURBO',
-    },
-    {
-      id: 'anti-grav',
-      title: 'ANTI-GRAV',
-      hint: 'Ride a banked wall or arch — gravity follows the surface.',
-      clearWhen: (ctx) => ctx.inAntiGrav,
-      clearAfterSeconds: 30,
-      clearMessage: '+ARCH',
     },
     {
       id: 'race-ready',

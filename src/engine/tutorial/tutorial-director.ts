@@ -45,6 +45,8 @@ export interface TutorialDirectorEvents {
 export interface TutorialSample {
   playerSpeed: number
   throttle: number
+  /** Parked with anti-grav (cut) — no shipped beat reads it; kept so
+   *  the sample shape survives a future DLC re-enable. */
   inAntiGrav: boolean
 }
 
