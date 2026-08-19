@@ -1109,12 +1109,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
             <div class="record">~90s &middot; INTRO DIFFICULTY</div>
             <div class="record" style="color: var(--bc-yellow); margin-top: 6px;">${escapeHtml(ctaLabel)} &rarr;</div>
           </div>
-          <div class="bc-card bc-disabled" data-gate="Opens with the Mayday Bay training run" style="--accent:#9bdcf2;">
+          <div class="bc-card bc-disabled" data-gate="In production — track drills join later this season" style="--accent:#9bdcf2;">
             <div class="label">TRAINING COVE</div>
             <div class="name">SANDBAR</div>
             <div class="tag">Track-specific scripted scenarios — drift around a buoy, pickup gate, ramp run.</div>
             <div class="record">~60s &middot; 1 LAP &middot; SANDBAR-ONLY</div>
-            <div class="bc-gate">Opens with the Mayday Bay training run</div>
+            <div class="bc-gate">In production &middot; joins later this season</div>
           </div>
         </div>
         <div class="bc-actions">

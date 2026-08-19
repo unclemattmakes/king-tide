@@ -55,8 +55,8 @@ export const KEYBOARD_ACTION_LABEL: Readonly<Record<KeyboardAction, string>> = O
   steerRight: 'Steer right',
   pitchUp: 'Pitch up (nose up)',
   pitchDown: 'Pitch down (nose down)',
-  trickLeft: 'Trick / hop (left)',
-  trickRight: 'Trick / hop (right)',
+  trickLeft: 'Drift / trick (left)',
+  trickRight: 'Drift / trick (right)',
   fire: 'Fire pickup',
   boost: 'Boost',
   respawn: 'Respawn to track',
@@ -102,7 +102,7 @@ export const DEFAULT_KEYBOARD_BINDINGS: Readonly<KeyboardBindings> = Object.free
  *  throttle / brake and stay fixed because non-button bindings can't be
  *  captured by "press a button" prompts cleanly.
  *
- *  MK8 layout: L1/R1 own the hop-trick (and eventually drift). Fire +
+ *  MK8 layout: L1/R1 own the drift-hold + hop-trick channel. Fire +
  *  boost relocated to face buttons so the bumpers stay on the trick
  *  channel where the wrist naturally rests during a drift hold. */
 export type GamepadAction = 'fire' | 'boost' | 'trickLeft' | 'trickRight'
@@ -115,8 +115,8 @@ export const GAMEPAD_ACTIONS: readonly GamepadAction[] = [
 ] as const
 
 export const GAMEPAD_ACTION_LABEL: Readonly<Record<GamepadAction, string>> = Object.freeze({
-  trickLeft: 'Trick / hop (left)',
-  trickRight: 'Trick / hop (right)',
+  trickLeft: 'Drift / trick (left)',
+  trickRight: 'Drift / trick (right)',
   fire: 'Fire pickup',
   boost: 'Boost',
 })
