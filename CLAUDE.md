@@ -19,8 +19,13 @@ linked docs — extend those rather than growing this file.
 
 1. **Verify locally before you push — but CI is real signal again (2026-08-13).**
    Always run `pnpm typecheck`, `pnpm test`, `pnpm lint`, `pnpm build` (plus
-   `pnpm test:blender` for Hoverbike-addon changes) before landing; the
-   pre-push hook enforces `pnpm verify`. What changed: every workflow had been
+   `pnpm test:blender` for Hoverbike-addon changes) before landing. The
+   pre-push hook that runs `pnpm verify` is **opt-in and off by default** —
+   `git config core.hooksPath .githooks` once per clone, or nothing gates your
+   push at all. Maintainers can also bypass branch protection on `main`
+   (`enforce_admins` is off), so a direct push runs no remote checks either:
+   see [maintainer-workflow.md](docs/maintainer-workflow.md).
+   What changed: every workflow had been
    dying at setup since 2026-06-25 — `pnpm/action-setup@v6` hard-errors when a
    `version:` input is combined with package.json's `packageManager` pin — so
    the old advice here was "don't trust CI, it aborts on a spending limit".
@@ -134,6 +139,8 @@ supersede the bible's stat blocks where they disagree.
   the bike section of [asset-pipeline-guide](docs/asset-pipeline-guide.md) +
   [bike-art-direction](docs/bike-art-direction.md).
 - QA gates + manual playtest checklist: [qa-playbook.md](docs/qa-playbook.md).
+- Pushing to `main` (who is gated by what, when to PR):
+  [maintainer-workflow.md](docs/maintainer-workflow.md).
 - Judging a dependabot PR: [dependency-triage.md](docs/dependency-triage.md) —
   a green `pnpm verify` is **not** sufficient for a runtime bump (rapier 0.20
   passed every test while moving the bike 47 cm); use the determinism harness.
