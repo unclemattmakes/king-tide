@@ -280,6 +280,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   function renderCrumbs(): void {
     if (!crumbsEl) return
     const steps = stepsForMode()
+    const currentIdx = steps.findIndex((s) => s.id === currentStep)
     crumbsEl.innerHTML = ''
     steps.forEach((s, i) => {
       if (i > 0) {
@@ -288,10 +289,23 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         sep.textContent = '·'
         crumbsEl.appendChild(sep)
       }
-      const c = document.createElement('span')
-      c.className = `bc-crumb${s.id === currentStep ? ' is-current' : ''}`
-      c.textContent = s.label
-      crumbsEl.appendChild(c)
+      // Steps already visited are real buttons — clicking a crumb jumps
+      // back (picks survive a backward jump, so it's just multi-back).
+      // The current + not-yet-reached steps stay inert labels.
+      const visited = currentIdx > 0 && i < currentIdx
+      if (visited) {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = 'bc-crumb bc-crumb-link'
+        b.textContent = s.label
+        b.addEventListener('click', () => showStep(s.id))
+        crumbsEl.appendChild(b)
+      } else {
+        const c = document.createElement('span')
+        c.className = `bc-crumb${s.id === currentStep ? ' is-current' : ''}`
+        c.textContent = s.label
+        crumbsEl.appendChild(c)
+      }
     })
   }
 
@@ -1550,6 +1564,28 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       ) {
         showStep('mode')
         e.preventDefault()
+        return
+      }
+      // Arrow keys / WASD move card focus spatially — same scoring the
+      // gamepad d-pad uses (input-navigability convention: a keyboard
+      // player gets d-pad-grade menus, not Tab-cycling). Parked while
+      // the Settings overlay / Rebind modal own input, mirroring the
+      // gamepad poller's isActive guard.
+      const dir =
+        e.code === 'ArrowUp' || e.code === 'KeyW'
+          ? 'up'
+          : e.code === 'ArrowDown' || e.code === 'KeyS'
+            ? 'down'
+            : e.code === 'ArrowLeft' || e.code === 'KeyA'
+              ? 'left'
+              : e.code === 'ArrowRight' || e.code === 'KeyD'
+                ? 'right'
+                : null
+      if (dir !== null) {
+        if (!isAnyOverlayShown('settings-menu', 'rebind-menu')) {
+          gamepadNav.navigate(dir)
+          e.preventDefault()
+        }
         return
       }
       if (e.code === 'Enter' || e.code === 'NumpadEnter') {

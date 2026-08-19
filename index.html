@@ -1317,6 +1317,21 @@
         animation: bc-wipe-right 360ms var(--ease-out);
       }
       .bc-crumb-sep { opacity: 0.3; }
+      /* Visited crumbs are live buttons — jump back to that step. Reset
+         the button chrome so they sit flush with the inert spans, and
+         give hover/focus a real affordance. */
+      button.bc-crumb-link {
+        appearance: none; background: none; border: none; cursor: pointer;
+        font: inherit; letter-spacing: inherit; color: inherit;
+        text-transform: inherit;
+      }
+      button.bc-crumb-link:hover,
+      button.bc-crumb-link:focus-visible,
+      button.bc-crumb-link.is-menu-focus {
+        color: var(--bc-ink);
+        text-decoration: underline;
+        text-underline-offset: 4px;
+      }
 
       .bc-clock {
         font-family: var(--bc-font-mono);
