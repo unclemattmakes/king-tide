@@ -147,7 +147,7 @@ const MODE_TILES: ModeTile[] = [
     id: 'race',
     badge: 'SOLO',
     headline: 'RACE',
-    desc: 'Pick a track, pick a bike, run a quick race against AI. Twelve ship tracks across four cups light up over the next three sprints.',
+    desc: 'Pick a track, pick a bike, run a quick race against AI. Every venue is a city the sea took back.',
     enabled: true,
   },
   {
@@ -161,7 +161,7 @@ const MODE_TILES: ModeTile[] = [
     id: 'cup',
     badge: 'CIRCUIT',
     headline: 'CUP',
-    desc: 'Four-cup championship: Reef → Harbor → Continental → Drowned. Each cup unlocks when its tracks ship. Dev Cup holds today’s playtest maps.',
+    desc: 'Race a cup back-to-back with points on the line every heat — the Reef Cup headlines today’s card. More cups join as the season unfolds.',
     enabled: true,
   },
   {
@@ -328,13 +328,13 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         setChyron('', '')
         break
       case 'mode':
-        setChyron('', 'Pick a format. Disabled tiles light up as their systems land.')
+        setChyron('', 'Pick a format — more events join the card all season.')
         break
       case 'sp-track':
-        setChyron('', 'All twelve ship tracks are in production — tiles light up sprint by sprint.')
+        setChyron('', 'Locked venues open as new cities join the card.')
         break
       case 'sp-cup':
-        setChyron('', 'Real cups gate on their tracks shipping. Dev Cup is the playtest path.')
+        setChyron('', 'Locked cups open as new cities join the card.')
         break
       case 'sp-cup-tracks':
         setChyron(
@@ -358,10 +358,10 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         setChyron('', 'Host a new room or punch in a friend’s code.')
         break
       case 'tutorial-intro':
-        setChyron('', 'Tutorial framework ships in sprint 1.')
+        setChyron('', 'Learn the ropes — six quick beats, then you are race-ready.')
         break
       case 'leaderboard':
-        setChyron('', 'Time Trial + leaderboard backend ship in M16.')
+        setChyron('', 'Fastest laps — the global top 25 per track, next to your local bests.')
         break
       case 'credits':
         setChyron('', `The artists, musicians and toolmakers behind ${GAME_TITLE_PROSE}.`)
@@ -976,14 +976,14 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       const el = document.createElement('section')
       el.className = 'bc-screen'
       const devHint = dev
-        ? 'Cup &rarr; Dev Cup holds today’s playtest tracks.'
-        : 'Ship tracks roll out sprint by sprint.'
+        ? 'Cup → Dev Cup holds today’s playtest tracks.'
+        : 'New venues join the card all season.'
       el.innerHTML = `
         <div class="bc-section-head">
           <div class="num">02</div>
           <div>
             <div class="title">SELECT TRACK</div>
-            <div class="sub">TWELVE SHIP TRACKS &middot; FOUR CUPS &middot; ${devHint.toUpperCase()}</div>
+            <div class="sub">EVERY TRACK IS A CITY THE SEA TOOK BACK &middot; ${devHint.toUpperCase()}</div>
           </div>
         </div>
         <div class="bc-cards cols-3" id="sp-track-cards"></div>
@@ -1006,7 +1006,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="num">02</div>
           <div>
             <div class="title">SELECT CUP</div>
-            <div class="sub">FOUR-CUP CHAMPIONSHIP &middot; REAL CUPS UNLOCK WHEN THEIR TRACKS SHIP</div>
+            <div class="sub">POINTS ON THE LINE EVERY HEAT &middot; LOCKED CUPS OPEN AS NEW CITIES JOIN THE CARD</div>
           </div>
           ${
             dev
@@ -1066,8 +1066,8 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
      *
      *  - **START** — kicks off the framework on the current track pick
      *    via `?race=1&tutorial=1`. Always enabled.
-     *  - **SANDBAR** — scripted-scenario placeholder, still gated on
-     *    the Sandbar track shipping (M13). */
+     *  - **SANDBAR** — scripted-scenario placeholder, still gated until
+     *    the Mayday Bay (sandbar) training run lands. */
     function buildTutorialIntro(): HTMLElement {
       const el = document.createElement('section')
       el.className = 'bc-screen'
@@ -1089,12 +1089,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
             <div class="record">~90s &middot; INTRO DIFFICULTY</div>
             <div class="record" style="color: var(--bc-yellow); margin-top: 6px;">${escapeHtml(ctaLabel)} &rarr;</div>
           </div>
-          <div class="bc-card bc-disabled" data-gate="Ships with the Sandbar track in sprint 1 (M13)" style="--accent:#9bdcf2;">
+          <div class="bc-card bc-disabled" data-gate="Opens with the Mayday Bay training run" style="--accent:#9bdcf2;">
             <div class="label">TRAINING COVE</div>
             <div class="name">SANDBAR</div>
             <div class="tag">Track-specific scripted scenarios — drift around a buoy, pickup gate, ramp run.</div>
             <div class="record">~60s &middot; 1 LAP &middot; SANDBAR-ONLY</div>
-            <div class="bc-gate">Ships with the Sandbar track — sprint 1 (M13)</div>
+            <div class="bc-gate">Opens with the Mayday Bay training run</div>
           </div>
         </div>
         <div class="bc-actions">
@@ -1351,7 +1351,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         <div class="bc-cards cols-3" id="sp-bike-cards"></div>
         <div class="bc-actions">
           <div class="left"><button class="bc-link" id="sp-bike-back" type="button">&larr; BACK</button></div>
-          <div class="right"><button class="bc-link" id="sp-bike-options" type="button" disabled data-gate="Pre-race overrides ship with the AI / cup wiring (M16)">RACE OPTIONS &middot;&middot;&middot;</button></div>
+          <div class="right"><button class="bc-link" id="sp-bike-options" type="button" disabled data-gate="Race options coming soon">RACE OPTIONS &middot;&middot;&middot;</button></div>
         </div>
       `
       const host = el.querySelector<HTMLElement>('#sp-bike-cards')
