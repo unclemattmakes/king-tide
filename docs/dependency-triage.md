@@ -80,6 +80,34 @@ hover/contact response, then reseed the golden with `UPDATE_GOLDEN=1`.
 
 The ignore is pinned to `0.20.x`, so 0.21+ will still be raised.
 
+## The gap a lockfile refresh can fall through
+
+`pnpm update` cleared the alerts, and every PR gate stayed green — but it broke
+`partykit-deploy` for five consecutive commits before anyone noticed. That job
+is `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`, so it
+**never runs on a pull request**. No PR could have caught it.
+
+The mechanism is worth recognising because it will recur. `package.json` carries
+open-ended security floors like `"undici@<6.24.0": ">=6.24.0"`. An open-ended
+floor does not mean "at least 6.24" — it means "resolve the newest thing that
+satisfies `>=6.24.0`", which was undici 8. It rewrote `miniflare`'s declared
+`^5.28.4` three majors forward, and miniflare then died on CI's Node 20 with
+`TypeError: webidl.util.markAsUncloneable is not a function`. The lockfile had
+been pinning it to 7.26.0; only the refresh let it float.
+
+Fixed with a scoped override — `"miniflare>undici": "^7.29.0"` — which is both
+inside the 7.x band miniflare actually works with and at/above the advisory fix
+version, so it costs no security ground.
+
+Two takeaways:
+
+- **A security floor wants an upper bound**, or it silently becomes "always
+  newest" for every package in the tree that depends on it.
+- **After any lockfile refresh, check the main-only jobs.** `check-and-build`
+  and `docs` gate PRs; `partykit-deploy` does not, so its first run is against
+  already-merged code. `gh api repos/<owner>/<repo>/commits/<sha>/check-runs`
+  right after a merge is the cheap check.
+
 ## Security alerts
 
 All 39 open alerts were transitive **dev** dependencies whose fixed versions were
