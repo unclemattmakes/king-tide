@@ -18,12 +18,19 @@
  * `pnpm qa`. Flip to `true` once the track GLB exists.
  */
 
-/** @typedef {{ id: string, bike: 'cruiser' | 'racer' | 'stunt', enabled: boolean, perfBudget?: { fpsFloor?: number, p95CeilingMs?: number }, note?: string }} QaCell */
+/** @typedef {{ id: string, bike: 'cruiser' | 'racer' | 'stunt', enabled: boolean, perfBudget?: { fpsFloor?: number, p95CeilingMs?: number, bootMs?: number }, note?: string }} QaCell */
 
-/** @type {{ fpsFloor: number, p95CeilingMs: number }} */
+/** @type {{ fpsFloor: number, p95CeilingMs: number, bootMsCeiling: number }} */
 export const GLOBAL_PERF_BUDGET = Object.freeze({
   fpsFloor: 30,
   p95CeilingMs: 50,
+  // Boot budget — ms from navigation start to `__hover.ready`. A
+  // regression tripwire, not a target: mexico-city (the heaviest
+  // dressed track) sits ~17.6s today, so 20s catches a regression
+  // without failing current state. Dressed tracks will want per-cell
+  // `perfBudget.bootMs` overrides as the v2 art pass grows loads —
+  // boot cost is now a per-track budget line, same as fps/p95.
+  bootMsCeiling: 20_000,
 })
 
 /** @type {QaCell[]} */

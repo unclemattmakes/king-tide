@@ -24,12 +24,6 @@ import { enabledCells, GLOBAL_PERF_BUDGET } from '../../tools/qa/matrix.mjs'
 import { waitForPerfReady, waitForReady } from './helpers/boot'
 import { expect, test } from './helpers/console-errors'
 
-// Boot budget — ms from navigation start to `__hover.ready === true`. A
-// regression tripwire, not a target: mexico-city (the heaviest dressed
-// track) sits ~17.6s today, so 20s catches a boot-time regression without
-// failing current state. One knob for every cell.
-const BOOT_READY_BUDGET_MS = 20_000
-
 test.describe('QA track × bike matrix', () => {
   test.skip(process.env.QA_MATRIX !== '1', 'gated on QA_MATRIX=1')
 
@@ -38,6 +32,7 @@ test.describe('QA track × bike matrix', () => {
     test(`${label} boots, autoplays 5s clean, holds perf budget`, async ({
       page,
       consoleErrors,
+      asset404s,
     }) => {
       test.setTimeout(60_000)
 
@@ -53,7 +48,10 @@ test.describe('QA track × bike matrix', () => {
       // Boot budget — time to `__hover.ready === true` from navigation start.
       // waitForPerfReady() calls waitForReady() first, so measure around that
       // ready gate, then let it finish waiting for the perf recorder.
-      await waitForReady(page, { timeout: BOOT_READY_BUDGET_MS })
+      // Per-cell override via `perfBudget.bootMs` (matrix.mjs), same
+      // pattern as the fps/p95 budgets below.
+      const bootBudgetMs = cell.perfBudget?.bootMs ?? GLOBAL_PERF_BUDGET.bootMsCeiling
+      await waitForReady(page, { timeout: bootBudgetMs })
       const readyMs = Date.now() - navStart
       await waitForPerfReady(page)
 
@@ -61,8 +59,8 @@ test.describe('QA track × bike matrix', () => {
       console.log(`qa-matrix:${cell.id}:${cell.bike}:bootMs`, readyMs)
       expect(
         readyMs,
-        `boot budget exceeded: ${cell.id} took ${readyMs}ms to ready (budget ${BOOT_READY_BUDGET_MS}ms)`,
-      ).toBeLessThanOrEqual(BOOT_READY_BUDGET_MS)
+        `boot budget exceeded: ${cell.id} took ${readyMs}ms to ready (budget ${bootBudgetMs}ms)`,
+      ).toBeLessThanOrEqual(bootBudgetMs)
 
       const backend = await page.evaluate(() => window.__hover!.backend())
       expect(['webgpu', 'webgl2']).toContain(backend)
@@ -106,6 +104,12 @@ test.describe('QA track × bike matrix', () => {
 
       // Console gate runs last so a failure carries the full window.
       consoleErrors.assertNone()
+      // Asset gate — any 404'd content request across the WHOLE cell
+      // (boot included; deliberately not cleared at the settle-in
+      // reset). The runtime warns-and-falls-back on missing content,
+      // which is exactly how three phantom ambience refs shipped to
+      // production unnoticed — QA now fails the cell instead.
+      asset404s.assertNone()
     })
   }
 })
