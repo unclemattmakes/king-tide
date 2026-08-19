@@ -864,22 +864,12 @@ AQUALAND_SKY = {
 }
 
 
-# Audio block — OMIT the `music` key entirely. The procedural pad bed
-# plays instead until a licensed track lands. The json-loader
-# validator at src/game/tracks/json-loader.ts:681 rejects
-# `music: null` or `music: ""` ("audio.music must be a non-empty
-# string if present"), so we must not write the key at all.
-AQUALAND_AUDIO = {
-    "ambient": [
-        "waterpark-edm.opus",
-        "pa-loop.opus",
-        "gulls.opus",
-    ],
-    "ambientGains": [0.55, 0.35, 0.3],
-    "music3dEffects": {
-        "duckOnPump": 0.35,
-    },
-}
+# Ambience (waterpark-edm / pa-loop / gulls) is parked until real files
+# exist under public/audio/ambient/ — the old placeholder block made
+# every load 404 against the CDN. Reintroduce an AQUALAND_AUDIO block
+# here only after the assets are pushed. (If a `music` key returns,
+# remember json-loader rejects null/"" — omit the key entirely when
+# there is no track.)
 
 
 def _merge_track_json() -> None:
@@ -898,7 +888,7 @@ def _merge_track_json() -> None:
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     data["sky"] = AQUALAND_SKY
-    data["audio"] = AQUALAND_AUDIO
+    data.pop("audio", None)
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
         f.write("\n")

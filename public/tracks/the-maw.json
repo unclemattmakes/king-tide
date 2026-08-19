@@ -40,21 +40,6 @@
     "cloudTowering": 0.3499999940395355,
     "sunSize": 1
   },
-  "audio": {
-    "ambient": [
-      "surf-heavy.opus",
-      "wind-open.opus",
-      "gulls-distant.opus"
-    ],
-    "ambientGains": [
-      0.7,
-      0.5,
-      0.3
-    ],
-    "music3dEffects": {
-      "duckOnPump": 0.4
-    }
-  },
   "start": {
     "position": {
       "x": -274.9530029296875,

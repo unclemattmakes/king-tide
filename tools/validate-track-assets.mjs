@@ -108,6 +108,25 @@ for (const f of files) {
       }
     }
   }
+  // Audio references 404 softly at runtime (warned, never crashed), which is
+  // exactly how three phantom ambience files shipped to production unnoticed —
+  // so validate them as hard dangles here at authoring time.
+  if (json.audio && typeof json.audio === 'object') {
+    if (typeof json.audio.music === 'string' && json.audio.music) {
+      refs.push({
+        ref: json.audio.music,
+        kind: 'audio.music',
+        path: join(PUBLIC_DIR, 'audio', 'music', json.audio.music),
+      })
+    }
+    if (Array.isArray(json.audio.ambient)) {
+      for (const a of json.audio.ambient) {
+        if (typeof a === 'string' && a) {
+          refs.push({ ref: a, kind: 'audio.ambient', path: join(PUBLIC_DIR, 'audio', 'ambient', a) })
+        }
+      }
+    }
+  }
 
   // A JSON with no asset references (greybox route-stub, test scene) is
   // valid — nothing to dangle.
