@@ -15,6 +15,7 @@
  * meat.
  */
 
+import { assetUrl } from '@/engine/asset-url'
 import { hideLoadingScreen, setLoadingMessage } from './loading-screen'
 
 export type EarlyDispatch = 'handled' | 'continue'
@@ -229,6 +230,17 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     // task does. Once the first attract frame renders, `attract-live`
     // drops the menu's solid backdrop exactly as before.
     hideLoadingScreen()
+    // Painted key-art plate behind the title until the attract feed goes
+    // live — without it, slow machines sit on a half-warmed murky scene
+    // for the whole attract boot. Applied only after the JPG decodes, so
+    // an unhydrated assets dir keeps today's gradient fallback.
+    const plateUrl = assetUrl('/assets/ui/title-backdrop.jpg')
+    const plate = new Image()
+    plate.onload = () => {
+      document.documentElement.style.setProperty('--title-backdrop', `url("${plateUrl}")`)
+      document.body.classList.add('backdrop-plate')
+    }
+    plate.src = plateUrl
     const attractStage = ensureAttractStage()
     const attractPromise = watchAttractLive(
       importAttractStaged().then(({ bootAttractMode }) =>

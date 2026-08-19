@@ -21,8 +21,14 @@
  * without translating units.
  */
 import { enabledCells, GLOBAL_PERF_BUDGET } from '../../tools/qa/matrix.mjs'
-import { waitForPerfReady } from './helpers/boot'
+import { waitForPerfReady, waitForReady } from './helpers/boot'
 import { expect, test } from './helpers/console-errors'
+
+// Boot budget — ms from navigation start to `__hover.ready === true`. A
+// regression tripwire, not a target: mexico-city (the heaviest dressed
+// track) sits ~17.6s today, so 20s catches a boot-time regression without
+// failing current state. One knob for every cell.
+const BOOT_READY_BUDGET_MS = 20_000
 
 test.describe('QA track × bike matrix', () => {
   test.skip(process.env.QA_MATRIX !== '1', 'gated on QA_MATRIX=1')
@@ -41,9 +47,22 @@ test.describe('QA track × bike matrix', () => {
       // Keep this list short; every entry is a deliberate ignore.
       consoleErrors.allow(/^\[vite\]/)
 
+      const navStart = Date.now()
       await page.goto(`/?autostart=1&track=${cell.id}&bike=${cell.bike}`)
 
+      // Boot budget — time to `__hover.ready === true` from navigation start.
+      // waitForPerfReady() calls waitForReady() first, so measure around that
+      // ready gate, then let it finish waiting for the perf recorder.
+      await waitForReady(page, { timeout: BOOT_READY_BUDGET_MS })
+      const readyMs = Date.now() - navStart
       await waitForPerfReady(page)
+
+      // biome-ignore lint/suspicious/noConsole: diagnostic for QA report ingestion
+      console.log(`qa-matrix:${cell.id}:${cell.bike}:bootMs`, readyMs)
+      expect(
+        readyMs,
+        `boot budget exceeded: ${cell.id} took ${readyMs}ms to ready (budget ${BOOT_READY_BUDGET_MS}ms)`,
+      ).toBeLessThanOrEqual(BOOT_READY_BUDGET_MS)
 
       const backend = await page.evaluate(() => window.__hover!.backend())
       expect(['webgpu', 'webgl2']).toContain(backend)

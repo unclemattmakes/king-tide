@@ -1231,7 +1231,26 @@
           linear-gradient(180deg, rgba(7, 30, 38, 0.95) 0%, rgba(2, 6, 16, 0.95) 100%);
         transition: opacity 700ms var(--ease-out);
       }
+      /* Painted key-art plate while the attract feed warms — url-modes sets
+         `--title-backdrop` + `.backdrop-plate` only once the JPG has actually
+         loaded, so a cold cache / missing asset falls back to the gradient
+         above. The scrim keeps the chrome readable over the plate; once
+         attract goes live the whole ::before fades to 0.55 as before. */
+      body.backdrop-plate #menu::before {
+        background:
+          radial-gradient(ellipse 100% 60% at 50% -10%, rgba(108, 255, 200, 0.10), transparent 60%),
+          linear-gradient(180deg, rgba(7, 30, 38, 0.42) 0%, rgba(2, 6, 16, 0.62) 100%),
+          var(--title-backdrop) center / cover no-repeat;
+      }
       body.attract-live #menu::before { opacity: 0.55; }
+      /* Once the live feed is up, hand the backdrop back to the plain gradient
+         veil — the plate ghosting over the game at 0.55 reads as mud. */
+      body.attract-live.backdrop-plate #menu::before {
+        background:
+          radial-gradient(ellipse 100% 60% at 50% -10%, rgba(108, 255, 200, 0.10), transparent 60%),
+          radial-gradient(ellipse 60% 50% at 100% 100%, rgba(255, 122, 58, 0.08), transparent 60%),
+          linear-gradient(180deg, rgba(7, 30, 38, 0.95) 0%, rgba(2, 6, 16, 0.95) 100%);
+      }
       /* Soft top + bottom scrims for type contrast over busy race shots. */
       #menu::after {
         content: ''; position: absolute; inset: 0; z-index: 0;

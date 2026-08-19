@@ -59,6 +59,11 @@ export type RevealOptions = {
   concurrency?: number
   /** Called once every mesh is back. */
   onDone?: () => void
+  /** Called after each pipeline-group reveals (compile path only), with the
+   *  groups done so far / total. Lets a long warm drive a visible counter —
+   *  Mexico City holds the intro loader ~14 s across ~140 groups, and a
+   *  static message reads as a hang. */
+  onProgress?: (done: number, total: number) => void
 }
 
 export type ProgressiveWarm = {
@@ -87,7 +92,7 @@ export function deferSceneryWarm(meshes: THREE.Mesh[]): ProgressiveWarm {
   return {
     count: meshes.length,
     reveal(opts: RevealOptions = {}) {
-      const { perFrame = 2, compile, concurrency = 1, onDone } = opts
+      const { perFrame = 2, compile, concurrency = 1, onDone, onProgress } = opts
       const raf: Raf | null =
         typeof requestAnimationFrame === 'function' ? requestAnimationFrame : null
       if (!raf) {
@@ -96,7 +101,7 @@ export function deferSceneryWarm(meshes: THREE.Mesh[]): ProgressiveWarm {
         return
       }
       if (compile) {
-        void revealCompiled(meshes, compile, raf, onDone, concurrency)
+        void revealCompiled(meshes, compile, raf, onDone, concurrency, onProgress)
         return
       }
       let i = 0
@@ -188,6 +193,7 @@ async function revealCompiled(
   raf: Raf,
   onDone?: () => void,
   concurrency = 1,
+  onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
   const nextFrame = (): Promise<void> => new Promise((resolve) => raf(() => resolve()))
   const CONC = Math.max(1, Math.floor(concurrency))
@@ -196,6 +202,7 @@ async function revealCompiled(
   // per group) — surface it next to deferredScenery/vinylMaterials so a boot
   // trace shows whether a content change actually collapsed groups.
   bootStat('warmGroups', groups.length)
+  let groupsDone = 0
   for (let i = 0; i < groups.length; i += CONC) {
     const batch = groups.slice(i, i + CONC)
     const pending: Array<{ group: THREE.Mesh[]; compiled: Promise<void> | null }> = []
@@ -225,6 +232,8 @@ async function revealCompiled(
         }
       }
       for (const m of group) m.visible = true
+      groupsDone++
+      onProgress?.(groupsDone, groups.length)
     }
     // One batch per frame: spreads the members' first-sight bind-group +
     // geometry-upload work instead of bursting every group into one frame.

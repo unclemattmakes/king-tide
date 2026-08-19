@@ -41,10 +41,10 @@ export const QA_MATRIX = [
   // flip to `status: 'ship'`; expand to all three bikes per track as
   // each cup goes live.
   { id: 'sandbar', bike: 'racer', enabled: true },
-  // Mexico City (Mexico City) replaced South Beach in the opener slot;
-  // it's a locked concept with no geometry yet, so it sits disabled like
-  // the Harbor concepts until its GLB lands.
-  { id: 'mexico-city', bike: 'racer', enabled: false },
+  // Mexico City replaced South Beach in the opener slot. GLB + art pass
+  // landed and it's `status: 'ship'`, so it's live in the matrix — also the
+  // heaviest dressed track, which anchors the boot-time budget.
+  { id: 'mexico-city', bike: 'racer', enabled: true },
   { id: 'cape-town-drift', bike: 'racer', enabled: true },
 
   // Harbor Cup (v2) — drowned harbor cities, replacing the Open Sea

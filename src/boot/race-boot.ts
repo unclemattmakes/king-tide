@@ -1935,6 +1935,11 @@ export async function bootRace(appEl: HTMLElement) {
       // compiles inside the eager pre-warm render above, under the loader,
       // which sidesteps the ~8–12 s first-`createRenderPipelineAsync` stall
       // behind the essential set's driver-side pipeline backlog.
+      //
+      // (The stashed WIP drove a `Dressing the track… n/total` loader message
+      // off `onProgress` here. #408 removed intro deferral entirely, so that
+      // branch can no longer run — the capability is still plumbed through
+      // progressive-warm if a no-intro progress readout is ever wanted.)
       onDone: () => {
         sceneryWarmComplete = true
         bootMark('scenery')
