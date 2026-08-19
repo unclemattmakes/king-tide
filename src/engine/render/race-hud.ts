@@ -551,7 +551,12 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
 
   function drawMinimapDot(ctx: CanvasRenderingContext2D, dot: MinimapDot): void {
     const c = worldToCanvas(dot.x, dot.z)
-    const r = dot.isPlayer ? 5 : dot.isLeader ? 4 : 3.2
+    // The player dot was 5px vs the field's 3.2px with a same-radius
+    // ring — at a glance indistinguishable from the pack (playtest:
+    // "I can't tell which dot is me"). YOU is now bigger AND wears a
+    // detached halo ring, two channels that survive colorblind
+    // palettes and dot-overlap pileups.
+    const r = dot.isPlayer ? 6 : dot.isLeader ? 4 : 3.2
     const palette = currentHudPalette()
     ctx.fillStyle = dot.isPlayer
       ? palette.player
@@ -569,6 +574,13 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     if (dot.isPlayer) {
       ctx.strokeStyle = 'rgba(255, 245, 225, 0.95)'
       ctx.lineWidth = 2
+      ctx.stroke()
+      // Detached halo — clear water between cap ring and halo is what
+      // makes YOU pop out of a cluster of AI dots.
+      ctx.beginPath()
+      ctx.arc(c.cx, c.cy, r + 4, 0, Math.PI * 2)
+      ctx.strokeStyle = 'rgba(255, 245, 225, 0.55)'
+      ctx.lineWidth = 1.5
       ctx.stroke()
     }
   }
