@@ -244,7 +244,7 @@ Or click **Copy Play URL** in the addon panel and paste it into your
 browser.
 
 Hit `T` to enable autoplay and watch the AI follow your spline. Use
-[Backspace] to respawn at start_00 if a bike gets stuck. To tune
+[Backspace] (rebindable) to respawn onto the racing line if a bike gets stuck — and the auto-rescue fires on its own after ~2.5 s wedged. To tune
 gameplay placement (gates, pickup spawns) without re-opening Blender,
 switch into edit mode: `?track=my-track&edit=1` (or click **Open…**
 in the editor panel).
