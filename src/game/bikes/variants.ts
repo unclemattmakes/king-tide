@@ -58,7 +58,7 @@ function withDefaults(overrides: Partial<BikeStatsData>): BikeStatsData {
 export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
   cruiser: {
     id: 'cruiser',
-    riderClip: 'Ride_cruiser',
+    riderClip: 'Ride_racer', // TODO(rider-src): 'Ride_cruiser' exists in the rig but is a byte-copy of Sitting_Idle_Loop (chair-sit -> rider stands at speed); restore once authored
     name: 'Cruiser',
     tagline: 'Top-speed cruiser — fastest flat-out, wide through the turns',
     bodyColor: 0x335599,
@@ -88,7 +88,7 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
   },
   stunt: {
     id: 'stunt',
-    riderClip: 'Ride_stunt',
+    riderClip: 'Ride_racer', // TODO(rider-src): 'Ride_stunt' exists in the rig but is a byte-copy of Sitting_Idle_Loop (chair-sit -> rider stands at speed); restore once authored
     name: 'Stunt',
     tagline: 'Carver — sharpest handling, banks every wave, inside-drift',
     bodyColor: 0x33aa66,
@@ -111,7 +111,7 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
   },
   scout: {
     id: 'scout',
-    riderClip: 'Ride_scout',
+    riderClip: 'Ride_racer', // TODO(rider-src): 'Ride_scout' exists in the rig but is a byte-copy of Sitting_Idle_Loop (chair-sit -> rider stands at speed); restore once authored
     name: 'Scout',
     tagline: 'Big-air bruiser — heaviest chassis, biggest launch off ramps',
     bodyColor: 0xff6633,
@@ -134,7 +134,7 @@ export const BIKE_VARIANTS: Record<BikeVariantId, BikeVariant> = {
   },
   sparrow: {
     id: 'sparrow',
-    riderClip: 'Ride_sparrow',
+    riderClip: 'Ride_racer', // TODO(rider-src): 'Ride_sparrow' exists in the rig but is a byte-copy of Sitting_Idle_Loop (chair-sit -> rider stands at speed); restore once authored
     name: 'Sparrow',
     tagline: 'Sprinter — quickest off the line, forgiving pump, inside-drift',
     bodyColor: 0xddbb44,

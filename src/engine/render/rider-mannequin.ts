@@ -65,6 +65,9 @@ const FACING_YAW = 0
 //   FIT_SCALE  — uniform size.   FACING_YAW (above) — facing.
 const FIT_SCALE = 1.0
 const SEAT_OFFSET = { x: 0, y: -0.4, z: 0 }
+/** Highest bike-local Y a `socket_seat` can plausibly sit at. Authored
+ *  sockets range −0.24..+0.25; see resolveSocketSeat's guard note. */
+const SEAT_SOCKET_MAX_Y = 0.4
 
 // Additive reactive gains — scale the smoothed RiderPoseResponse offsets (±0.5-
 // 0.8 rad) down to a believable body tilt on top of the seated anim. Tunable;
@@ -266,13 +269,23 @@ export function createRiderMannequinSystem(
 
   /** The bike's authored seat anchor (`socket_seat`) in bike-local space, or
    *  null when the bike has no socket / no registry (procedural bikes, tests).
-   *  Per-variant constant — resolved once per rider instance. */
+   *  Per-variant constant — resolved once per rider instance.
+   *
+   *  Sanity band: authored seats sit between −0.24 (racer) and +0.25
+   *  (cruiser) bike-local Y. The stunt GLB's socket is mis-authored at
+   *  +0.715 — nearly a metre above the racer's saddle — which floated
+   *  the whole mannequin clear of the bike (standing-rider playtest
+   *  bug). A socket outside the band is treated as unauthored so the
+   *  hand-tuned SEAT_OFFSET fallback path takes over; fix the empty in
+   *  bikes-src/<variant>.blend and this guard steps aside. */
   function resolveSocketSeat(bikeEid: number): { x: number; y: number; z: number } | null {
     if (!bikeRegistry) return null
     const variantId = BikeStatsStore.get(bikeEid)?.variantId
     const loaded =
       (variantId !== undefined && bikeRegistry.byVariantId[variantId]) || bikeRegistry.default
-    return loaded.seatLocal ?? null
+    const seat = loaded.seatLocal ?? null
+    if (seat && seat.y > SEAT_SOCKET_MAX_Y) return null
+    return seat
   }
 
   /** The seated clip name this bike poses with — the per-variant `riderClip`
