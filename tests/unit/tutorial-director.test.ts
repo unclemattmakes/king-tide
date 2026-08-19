@@ -255,4 +255,21 @@ describe('createTutorialDirector', () => {
     expect(seen).toBeGreaterThan(0.5)
     expect(dir.isCompleted()).toBe(true)
   })
+
+  it("reports 'performed' for predicate clears and 'timeout' for timer/skip clears", () => {
+    const hows: string[] = []
+    const script = makeScript([
+      { id: 'act', title: 'ACT', clearWhen: (ctx) => ctx.playerSpeed > 5 },
+      { id: 'wait', title: 'WAIT', clearWhen: () => false, clearAfterSeconds: 0.1 },
+      { id: 'skipme', title: 'SKIP', clearWhen: () => false },
+    ])
+    const dir = createTutorialDirector(script, {
+      onBeatCleared: (b, how) => hows.push(`${b.id}:${how}`),
+    })
+    dir.tick(0.016, { playerSpeed: 7, throttle: 1, inAntiGrav: false }) // performs 'act'
+    for (let i = 0; i < 10; i += 1) dir.tick(0.02, defaultSample) // times out 'wait'
+    dir.skipCurrentBeat() // skips 'skipme' — counts as timeout, no celebration
+    expect(hows).toEqual(['act:performed', 'wait:timeout', 'skipme:timeout'])
+    expect(dir.isCompleted()).toBe(true)
+  })
 })

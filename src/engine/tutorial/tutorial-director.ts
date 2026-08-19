@@ -22,6 +22,7 @@
  */
 
 import type {
+  BeatClearKind,
   BeatClearResult,
   TutorialBeat,
   TutorialContext,
@@ -29,9 +30,11 @@ import type {
 } from './tutorial-script'
 
 export interface TutorialDirectorEvents {
-  /** Called when a beat clears. The host can play a sound, kick a
-   *  HUD widget, etc. */
-  onBeatCleared?: (beat: TutorialBeat) => void
+  /** Called when a beat clears. `how` distinguishes an actually
+   *  performed action (`'performed'`) from the escape-hatch timer or
+   *  an explicit skip (`'timeout'`), so the host can celebrate the
+   *  first and stay neutral on the second. */
+  onBeatCleared?: (beat: TutorialBeat, how: BeatClearKind) => void
   /** Called when a new beat arms — useful for HUD widget swap. */
   onBeatArmed?: (beat: TutorialBeat) => void
   /** Called once when the script has finished. The host should mark
@@ -97,8 +100,8 @@ export function createTutorialDirector(
     if (beat && events.onBeatArmed) events.onBeatArmed(beat)
   }
 
-  function clearBeat(beat: TutorialBeat): void {
-    if (events.onBeatCleared) events.onBeatCleared(beat)
+  function clearBeat(beat: TutorialBeat, how: BeatClearKind): void {
+    if (events.onBeatCleared) events.onBeatCleared(beat, how)
     if (beatIndex + 1 >= script.beats.length) {
       completed = true
       armed = false
@@ -138,11 +141,11 @@ export function createTutorialDirector(
         driftTierThisBeat,
       }
       if (evaluatePredicate(beat, ctx)) {
-        clearBeat(beat)
+        clearBeat(beat, 'performed')
         return
       }
       if (typeof beat.clearAfterSeconds === 'number' && beatTime >= beat.clearAfterSeconds) {
-        clearBeat(beat)
+        clearBeat(beat, 'timeout')
       }
     },
     notifyPumpEvent() {
@@ -168,7 +171,7 @@ export function createTutorialDirector(
     },
     skipCurrentBeat() {
       const beat = script.beats[beatIndex]
-      if (beat) clearBeat(beat)
+      if (beat) clearBeat(beat, 'timeout')
     },
   }
 }

@@ -22,10 +22,19 @@
  *   - **Skip toggle** — returning players can dismiss the whole
  *     framework via Settings → Gameplay → Subtitles, or via the
  *     `?tutorial=0` URL override.
- *   - **Per-beat timeout** — beats with `clearAfterSeconds` clear
- *     automatically once the timer expires. Useful for the
- *     "look around" beat where there's no objective success signal.
+ *   - **Per-beat timeout** — beats with `clearAfterSeconds` advance
+ *     automatically once the timer expires, so no mechanic is ever a
+ *     hard gate (anti-target: "optional flair before difficulty
+ *     gate"). A timeout is reported as `'timeout'` to
+ *     `onBeatCleared`, and the HUD shows a neutral "moving on" flash
+ *     instead of the success message — the celebration is reserved
+ *     for actually performing the action.
  */
+
+/** How a beat ended: the player performed the action (`performed`),
+ *  or the escape-hatch timer expired / the beat was skipped
+ *  (`timeout`). Drives whether the HUD celebrates or just moves on. */
+export type BeatClearKind = 'performed' | 'timeout'
 
 /** Snapshot the director hands to each beat's `clearWhen` predicate.
  *  Read-only — beats must never mutate sim/render state. */
@@ -122,15 +131,18 @@ export const DEFAULT_TUTORIAL_SCRIPT: TutorialScript = {
       title: 'LOOK AROUND',
       hint: 'Right stick / mouse-drag to peek at the swells ahead.',
       clearWhen: (ctx) => ctx.orbitTouchedThisBeat,
-      clearAfterSeconds: 8,
+      clearAfterSeconds: 12,
       clearMessage: 'EYES UP',
     },
     {
       id: 'wave-pump',
       title: 'WAVE PUMP',
       hint: 'Throttle at the swell crest to launch off the wave.',
+      // Long leash: the timeout is a safety net, not the expected
+      // path — a beat that expires advances with a neutral flash, so
+      // there's no fake "+PUMP" for a pump that never happened.
       clearWhen: (ctx) => ctx.pumpEventsThisBeat >= 1,
-      clearAfterSeconds: 25,
+      clearAfterSeconds: 45,
       clearMessage: '+PUMP',
     },
     {
@@ -139,9 +151,10 @@ export const DEFAULT_TUTORIAL_SCRIPT: TutorialScript = {
       hint: 'Hold Z / C through a corner while steering, then release for a boost.',
       // Clears on any charged release (blue MT or better). The
       // clearAfterSeconds escape hatch keeps the script moving on a
-      // flat track with no real corner to drift through.
+      // flat track with no real corner to drift through — long leash,
+      // neutral flash on expiry (see BeatClearKind).
       clearWhen: (ctx) => ctx.driftTierThisBeat >= 1,
-      clearAfterSeconds: 25,
+      clearAfterSeconds: 45,
       clearMessage: '+TURBO',
     },
     {

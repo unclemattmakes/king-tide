@@ -15,6 +15,7 @@
 
 import { playerSettings } from '@/engine/player-settings'
 import type { ReplayFile } from '@/engine/replay/format'
+import type { AIDifficulty } from '@/game/ai/difficulty'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { type BikeVariant, resolveBikeVariant, variantForAiSlot } from '@/game/bikes/variants'
@@ -54,6 +55,10 @@ export function spawnBikes(opts: {
   activeReplay: ReplayFile | null
   /** Number of AI opponents to spawn (0..NUM_AI). Time Trial passes 0. */
   aiCount?: number
+  /** Force the AI difficulty tier for this spawn, overriding the
+   *  player's setting. Tutorial passes 'casual' so the coached first
+   *  run is an escort ride, not a pack that laps the student. */
+  difficulty?: AIDifficulty
   /** When set, spawn a render-only ghost bike using this variant. The
    *  caller (main.ts) is responsible for installing a `GhostRunner`
    *  against the returned `ghostEid`. */
@@ -129,7 +134,7 @@ export function spawnBikes(opts: {
     // Snapshot the difficulty at spawn time — changing the setting
     // mid-race won't retune already-spawned AIs (matches kart-game
     // precedent + avoids a sudden personality flip mid-lap).
-    const difficulty = playerSettings.aiDifficulty
+    const difficulty = opts.difficulty ?? playerSettings.aiDifficulty
     grid.forEach((slot, i) => {
       const aiPos = resolveGridSlotWorld(startPos, startYaw, slot.dx, slot.dz)
       // Each AI rides the variant its grid slot maps to (slot 0 is the

@@ -728,8 +728,11 @@ export function startGameLoop(opts: GameLoopOpts): void {
             progressLabel: `BEAT ${idx + 1}/${total}`,
           })
         },
-        onBeatCleared: (beat) => {
-          tutorialHud?.flashCleared(beat.clearMessage ?? 'OK')
+        onBeatCleared: (beat, how) => {
+          // Celebrate only what was actually performed; a timed-out
+          // beat moves on with a neutral flash — no "+PUMP" for a
+          // pump that never happened.
+          tutorialHud?.flashCleared(how === 'performed' ? (beat.clearMessage ?? 'OK') : 'MOVING ON')
         },
         onCompleted: () => {
           tutorialHud?.finish(DEFAULT_TUTORIAL_SCRIPT.finishMessage)

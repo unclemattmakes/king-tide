@@ -108,6 +108,10 @@ export interface RaceHudOptions {
    *  `onCountdownTick` callback still fires so an external overlay
    *  (e.g. the F1 start-lights row) can drive the visual instead. */
   hideCountdownBanner?: boolean
+  /** When true, never show the placement board (1st/8). The lap chip
+   *  stays. Tutorial mode sets this — a coached first run shouldn't
+   *  pin "8th/8" on the student while they learn throttle. */
+  hidePositionBoard?: boolean
 }
 
 export function createRaceHud(opts: RaceHudOptions): RaceHud {
@@ -453,9 +457,10 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     const posKey = input.totalRacers > 0 ? input.playerPosition * 1000 + input.totalRacers : 0
     if (posKey !== lastPositionKey) {
       // Solo time trial has no field to place in — hide the board, keep
-      // the lap chip.
-      rpBoard.style.display = input.totalRacers > 1 ? '' : 'none'
-      if (input.totalRacers > 1) {
+      // the lap chip. Tutorial hides it too (hidePositionBoard).
+      const showBoard = input.totalRacers > 1 && !opts.hidePositionBoard
+      rpBoard.style.display = showBoard ? '' : 'none'
+      if (showBoard) {
         rpNum.textContent = String(input.playerPosition)
         rpSuf.textContent = ordinalSuffix(input.playerPosition)
         rpTotal.textContent = `/${input.totalRacers}`
