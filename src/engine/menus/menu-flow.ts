@@ -13,6 +13,7 @@ import {
 } from '@/engine/leaderboard/local'
 import { fetchBoard } from '@/engine/leaderboard/remote'
 import { playerSettings } from '@/engine/player-settings'
+import { DEFAULT_TUTORIAL_TRACK } from '@/engine/tutorial/tutorial-launch'
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
 import { installMenuGamepad, isAnyOverlayShown } from '../input/menu-gamepad'
@@ -1085,7 +1086,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="bc-card" id="tut-start" role="button" tabindex="0" style="--accent:#ffd27a; cursor: pointer;">
             <div class="label">FRAMEWORK</div>
             <div class="name">FIRST RUN</div>
-            <div class="tag">Six beats — throttle, cruise, look around, wave pump, drift, finish. Runs on any track. Subtitles toggle in Settings.</div>
+            <div class="tag">Six beats — throttle, cruise, look around, wave pump, drift, finish. Runs on the Mayday Bay lagoon.</div>
             <div class="record">~90s &middot; INTRO DIFFICULTY</div>
             <div class="record" style="color: var(--bc-yellow); margin-top: 6px;">${escapeHtml(ctaLabel)} &rarr;</div>
           </div>
@@ -1105,10 +1106,14 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       const launchTutorial = (): void => {
         // Reuse the singleplayer commit path so picks → URL handling
         // stays in one place; just stamp the tutorial flag on top.
+        // First Run always teaches on the dressed tutorial lagoon —
+        // a cold boot's picks.trackId is the procedural dev track,
+        // which must never be a new player's first minute. (Replay
+        // on an arbitrary track lives in Settings → Replay tutorial.)
         const url = new URL(window.location.href)
         url.search = ''
         url.searchParams.set('race', '1')
-        url.searchParams.set('track', picks.trackId)
+        url.searchParams.set('track', DEFAULT_TUTORIAL_TRACK)
         url.searchParams.set('bike', picks.bikeId)
         url.searchParams.set('tutorial', '1')
         finish(url.toString())

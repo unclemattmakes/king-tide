@@ -4,12 +4,15 @@
  *
  * Preserves the player's current `track` + `bike` URL params so the
  * tutorial replays on whatever track they were just looking at.
- * Falls back to whatever defaults the page already knows when there
- * are no current params (cold boot from a fresh main-menu open into
- * Settings).
+ * Falls back to the default tutorial venue when there are no current
+ * params (cold boot from a fresh main-menu open into Settings).
  */
 
-const DEFAULT_TUTORIAL_TRACK = 'lagoon'
+/** The venue a fresh tutorial runs on. Mayday Bay (slug `sandbar`) is
+ *  the dressed tutorial lagoon — the docs' "tutorial lagoon" — so a
+ *  brand-new player's first minute lands on real art, not the
+ *  procedural lagoon dev fixture. */
+export const DEFAULT_TUTORIAL_TRACK = 'sandbar'
 
 /** Build the `?race=1&track=…&bike=…&tutorial=1` href that drops
  *  the player into the tutorial-armed game loop. Reads the current
