@@ -98,6 +98,15 @@ const UD_BRUSH_FREQ = 'vinylBrushFreq'
 const UD_BRUSH_WEIGHTS = 'vinylBrushWeights'
 const UD_BAND_SCALE = 'vinylBandScale'
 const UD_OBJECT_SCALE = 'vinylObjectScale'
+/** Per-object base-tint (linear vec3) read at render time when a material is
+ *  built with `tintUserData`. Lets ONE shared vinyl material serve a whole
+ *  field of NON-instanced meshes (skinned rider clones) each with its own
+ *  livery — the tint lives in each rendered mesh's `userData`, so the node
+ *  graph (and thus the pipeline) is identical across meshes. The value shape is
+ *  a plain `{x,y,z}` (three's vec3 uniform upload reads `.x/.y/.z`). Exported so
+ *  a caller can pass it as `tintUserData` AND stamp the same key via
+ *  `stampVinylTint` without duplicating the literal. */
+export const UD_TINT = 'vinylTint'
 /** Raw characteristic size record so a Brush-tuner re-dial can re-derive the
  *  frequency/weights without re-measuring the mesh. */
 const UD_PROP_SIZE = 'vinylPropSize'
@@ -231,6 +240,16 @@ export type VinylOptions = {
    *  per-bike livery — the caller stamps the attribute on each instanced geometry
    *  (see instanced-bikes.ts). Omit → flat `color` (the normal path). */
   tintAttribute?: string
+  /** Read the base albedo tint from each rendered MESH's `userData[name]` (a
+   *  linear `{x,y,z}` / vec3) instead of the material's flat `color`. The
+   *  non-instanced sibling of `tintAttribute`: lets ONE shared vinyl material
+   *  serve a field of skinned/plain mesh CLONES (the rider mannequins) each with
+   *  its own livery, without a new pipeline per colour — the tint is a per-object
+   *  reference read, so the node graph is identical across meshes (same shared
+   *  `userData()` idiom as `sizePerObject`). Every mesh wearing the material MUST
+   *  stamp this key (an unstamped mesh reads 0 → black). Takes precedence over
+   *  the flat `color`; ignored if `tintAttribute` is also set. */
+  tintUserData?: string
   /** With `tintAttribute` set, also drive emissive from that same per-instance
    *  colour — the bike's exhaust glow, whose accent hue must stay per-bike when
    *  the thruster sub-mesh is instanced. Omit → emissive stays the flat value. */
@@ -339,6 +358,7 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   const brushObjectSpace = opts.brushObjectSpace ?? false
   const objectScale = opts.objectScale ?? 1
   const tintAttribute = opts.tintAttribute
+  const tintUserData = opts.tintUserData
   const emissiveFromTint = opts.emissiveFromTint ?? false
   const emissiveAttribute = opts.emissiveAttribute
   const rimColorAttribute = opts.rimColorAttribute
@@ -363,9 +383,15 @@ export function buildVinylMaterial(src: THREE.Material, opts: VinylOptions = {})
   // baseTint is normally the material's flat colour. In instanced mode it reads a
   // per-instance vec3 attribute, so one shared material renders a field of bikes
   // each with its own livery (and, for the exhaust glow, its own emissive accent).
+  // In per-object mode (`tintUserData`) it reads each rendered mesh's userData
+  // instead — the non-instanced path for skinned rider clones sharing one
+  // material (see rider-mannequin.ts); the graph stays identical across meshes so
+  // the pipeline is shared.
   const baseTint = tintAttribute
     ? (attribute(tintAttribute, 'vec3') as Node<'vec3'>)
-    : vec3(next.color.r, next.color.g, next.color.b)
+    : tintUserData
+      ? (nodeObject(userData(tintUserData, 'vec3')) as unknown as Node<'vec3'>)
+      : vec3(next.color.r, next.color.g, next.color.b)
   const mapRgb = std.map ? texture(std.map as THREE.Texture).rgb : vec3(1, 1, 1)
   const albedo = mapRgb.mul(baseTint)
 
@@ -671,6 +697,18 @@ export function stampVinylObjectSize(
   ud[UD_BRUSH_WEIGHTS] = { x: wCoarse, y: wMed, z: wFine }
 }
 
+/** Stamp the per-object base tint a `tintUserData` vinyl material reads at
+ *  render time. `tint` is LINEAR RGB in 0..1 (the shader multiplies it into the
+ *  albedo, which is linear). Every mesh wearing such a material must be stamped
+ *  or it reads 0 → black. Plain `{x,y,z}` so it JSON-roundtrips through
+ *  `Object3D.clone()` and satisfies three's vec3 upload. */
+export function stampVinylTint(
+  obj: THREE.Object3D,
+  tint: { r: number; g: number; b: number },
+): void {
+  ;(obj.userData as Record<string, unknown>)[UD_TINT] = { x: tint.r, y: tint.g, z: tint.b }
+}
+
 /** Re-derive a previously-stamped mesh's freq/weights for new tuner dials,
  *  keeping its recorded size. No-op-ish fallback (REF_PROP_SIZE) if the mesh
  *  was never stamped. */
@@ -789,6 +827,12 @@ export type VinylSceneOptions = {
    *  that MOVES through the world (a bike, a skinned rider). Default false
    *  (world) — correct for static buildings / set-pieces. */
   brushObjectSpace?: boolean
+  /** Read each mesh's base tint from `userData[name]` (linear vec3) instead of
+   *  the source material's flat colour — see `VinylOptions.tintUserData`. Lets
+   *  ONE converted material serve a field of clones (rider mannequins) each with
+   *  its own livery. Callers MUST `stampVinylTint` every mesh that will wear the
+   *  converted material. */
+  tintUserData?: string
 }
 
 /**
@@ -915,6 +959,7 @@ export function applyVinylMaterialToScene(
         ...(opts.brushScale !== undefined ? { brushScale: opts.brushScale } : {}),
         ...(opts.brushPropSizeCap !== undefined ? { brushPropSizeCap: opts.brushPropSizeCap } : {}),
         ...(tintAttr ? { tintAttribute: tintAttr } : {}),
+        ...(opts.tintUserData !== undefined ? { tintUserData: opts.tintUserData } : {}),
         edgeWear,
         brushObjectSpace,
       })

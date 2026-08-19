@@ -1,13 +1,21 @@
-import { query } from 'bitecs'
+import { hasComponent, query } from 'bitecs'
 import * as THREE from 'three'
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { LoadedProp } from '@/game/assets/prop-loader'
 import { resolveBikeVariant } from '@/game/bikes/variants'
-import { BikeStatsStore, TransformStore } from '@/game/components'
+import {
+  BikeStatsStore,
+  GhostTag,
+  PeerControlled,
+  PeerControlledStore,
+  PlayerTag,
+  TransformStore,
+} from '@/game/components'
 import { Rider, type RiderBoneName, RiderStore } from '@/game/components/rider'
-import { applyVinylMaterialToScene } from './painterly-vinyl-material'
+import { applyVinylMaterialToScene, stampVinylTint, UD_TINT } from './painterly-vinyl-material'
 import type { BikeRenderRegistry } from './render-systems'
+import { riderPaletteForSlot } from './rider-palette'
 
 /**
  * Rider mannequin render system — now the **default** rider visual
@@ -163,7 +171,68 @@ export function createRiderMannequinSystem(
   // InstancedMesh (each needs its own skeleton), but they can share a material;
   // skinning is per-mesh, the material is not. brushObjectSpace keeps the strokes
   // riding the skin (bind-pose frame) rather than swimming as the rider moves.
-  applyVinylMaterialToScene(rig.root, { brush: RIDER_BRUSH, brushObjectSpace: true })
+  // `tintUserData` makes the base albedo a per-MESH read (UD_TINT) instead of the
+  // material's flat colour, so every rider clone can carry its own suit tint off
+  // the ONE shared material — no extra pipeline per colour (the field was eight
+  // identical bright-yellow clones before). Each rider's meshes are stamped in
+  // `build`; the player/host/ghost stamp each mesh's ORIGINAL material colour
+  // (captured below, pre-conversion) so their shipped look is byte-faithful.
+  //
+  // Capture each mesh's pre-conversion flat colour first — the shipped look
+  // multiplied it into the baked albedo, and the per-object tint path replaces
+  // exactly that term. Keyed by mesh name (SkeletonUtils.clone preserves names).
+  const originalTintByMesh = new Map<string, THREE.Color>()
+  rig.root.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (!mesh.isMesh) return
+    const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material
+    const color = (mat as Partial<THREE.MeshStandardMaterial> | undefined)?.color
+    originalTintByMesh.set(mesh.name, color ? color.clone() : new THREE.Color(1, 1, 1))
+  })
+  applyVinylMaterialToScene(rig.root, {
+    brush: RIDER_BRUSH,
+    brushObjectSpace: true,
+    tintUserData: UD_TINT,
+  })
+
+  // Deterministic per-slot suit tint. Slot resolution mirrors render-systems.ts
+  // `aiColors`: a peer uses its network peerId, an AI uses a stable spawn-order
+  // cursor (1-based, so AI map onto the same 1..N grid slots the bikes do), and
+  // the local human (PlayerTag / peerId 0) / any ghost gets no jersey — `null`
+  // here means "stamp each mesh's original material colour" (the shipped look).
+  let aiTintCursor = 0
+  const tintByRider = new Map<number, THREE.Color | null>()
+  const WHITE = new THREE.Color(1, 1, 1)
+  function suitTintForRider(riderEid: number, bikeEid: number): THREE.Color | null {
+    const cached = tintByRider.get(riderEid)
+    if (cached !== undefined) return cached
+    let slot: number
+    if (hasComponent(sim, bikeEid, PlayerTag) || hasComponent(sim, bikeEid, GhostTag)) {
+      slot = 0
+    } else if (hasComponent(sim, bikeEid, PeerControlled)) {
+      slot = PeerControlledStore.get(bikeEid)?.peerId ?? 0
+    } else {
+      // AI: next spawn-order slot, 1-based (slot 0 is the player's pole).
+      slot = ++aiTintCursor
+    }
+    const palette = riderPaletteForSlot(slot)
+    // Hex → linear so the multiply lands in the same space as the (linear)
+    // mannequin albedo. new THREE.Color(hex) treats the hex as sRGB and
+    // converts to linear working space, matching the bike livery tint path.
+    const c = palette ? new THREE.Color(palette.suit) : null
+    tintByRider.set(riderEid, c)
+    return c
+  }
+  /** Stamp a rider clone's meshes with its suit tint so the shared per-object
+   *  tint material reads the right colour for every mesh in this rider. A
+   *  `null` tint (player / ghost) stamps each mesh's captured original material
+   *  colour instead — the pre-palette shipped look, exactly. */
+  function stampRiderTint(group: THREE.Object3D, tint: THREE.Color | null): void {
+    group.traverse((o) => {
+      if (!(o as THREE.Mesh).isMesh) return
+      stampVinylTint(o, tint ?? originalTintByMesh.get(o.name) ?? WHITE)
+    })
+  }
 
   let last = 0
 
@@ -245,6 +314,11 @@ export function createRiderMannequinSystem(
     })
     // Material is already painterly-vinyl (converted once on the shared rig above),
     // so the clone references it by reference — no per-rider conversion or compile.
+    // Stamp this rider's per-slot suit tint onto its meshes so the shared
+    // per-object tint material paints the right jersey colour (an unstamped mesh
+    // would read 0 → black); the local human / host / ghost stamps the captured
+    // original material colours — the shipped look, not a jersey.
+    stampRiderTint(group, suitTintForRider(riderEid, bikeEid))
     scene.add(group)
     const mixer = new THREE.AnimationMixer(group)
     const clip = resolveSeatedClip(resolveRiderClip(bikeEid))
@@ -402,6 +476,9 @@ export function createRiderMannequinSystem(
       if (!live.has(eid)) {
         scene.remove(inst.group)
         instances.delete(eid)
+        // Drop the cached tint too so a recycled eid re-resolves its slot
+        // (and the map doesn't grow across a long session).
+        tintByRider.delete(eid)
       }
     }
   }
