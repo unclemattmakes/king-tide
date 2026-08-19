@@ -108,13 +108,15 @@ If lint fails, `pnpm format` will fix most issues.
 ### Local verification gate
 
 Run the checks locally before you push — it's faster than a push-and-wait
-cycle, and the pre-push hook enforces it. **CI is also real signal**: it was
-dead at setup from June to August 2026 (a pnpm/action-setup misconfiguration,
-fixed in #416), so older notes told you to ignore it. Don't. `check-and-build`,
-`docs` and `determinism` are blocking gates; `e2e` and the QA report are
-informational (`continue-on-error`). One caveat for forks: the jobs that boot
-real tracks need the asset-bucket secret, and skip with a `::warning::` when
-it's absent — so a fork's green run means "not exercised", not "passed".
+cycle. The pre-push hook automates it, but note it is **opt-in and off by
+default** (see below), so until you enable it nothing runs these for you.
+**CI is also real signal**: it was dead at setup from June to August 2026 (a
+pnpm/action-setup misconfiguration, fixed in #416), so older notes told you to
+ignore it. Don't. `check-and-build` and `docs` are the checks required to merge;
+`determinism`, `e2e` and the QA report are informational. One caveat for
+forks: the jobs that boot real tracks need the asset-bucket secret, and skip
+with a `::warning::` when it's absent — so a fork's green run means "not
+exercised", not "passed".
 
 Two convenience scripts wrap the commands above:
 
