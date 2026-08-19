@@ -1724,6 +1724,7 @@ export async function bootRace(appEl: HTMLElement) {
     phys,
     track,
     trackId,
+    waveField,
     playerEid,
     playerVariantId: playerVariant.id,
     roomId,

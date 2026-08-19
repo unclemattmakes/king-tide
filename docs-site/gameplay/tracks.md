@@ -74,7 +74,7 @@ Player and AI share the same `ControlIntent` plumbing — auto-play just adds `A
 
 ## Spawning
 
-The player spawns on the racing line at the start gate, facing forward. `Backspace` respawns at start with zero velocity (snap teleport, no fade). Useful when you've yeeted yourself off the world.
+The player spawns on the racing line at the start gate, facing forward. The respawn action (default `Backspace`, rebindable in Settings → Controls) snaps you to the nearest racing-line point with zero velocity — and an automatic rescue fires on its own after ~2.5 s wedged against terrain or riding riderless. Useful when you've yeeted yourself off the world.
 
 ## Track data format
 

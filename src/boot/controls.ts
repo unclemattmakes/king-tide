@@ -4,10 +4,10 @@
  * Owns:
  *   - Pause menu open/close state + button bindings.
  *   - `retryRace` / `exitToMenu` URL builders.
- *   - `respawnPlayer` — snap the player bike to spawn pose with zero
- *     velocity.
+ *   - `respawnPlayer` — snap the player bike back onto the racing
+ *     line (falls back to the spawn pose on splineless scenes).
  *   - The global `keydown` listener that drives Esc / R / Enter / T /
- *     F1 / F2 / M / Backspace.
+ *     F1 / F2 / M / the rebindable respawn action.
  *
  * Returns a small handle the game loop polls for the pause state +
  * mutates when the finish screen shows.
@@ -25,12 +25,16 @@ import {
   TOUCH_MENU_EVENT,
 } from '@/engine/input/touch'
 import { trackDisplayName } from '@/engine/menus/tracks-catalog'
+import { playerSettings } from '@/engine/player-settings'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
+import type { WaveFieldState } from '@/engine/sim/water/wave-field'
 import { RBHandleStore } from '@/game/components'
 import { RacerStore } from '@/game/components/race'
+import { clearCrashTracking } from '@/game/systems/rider-crash'
 import { resetRiderForBike } from '@/game/systems/rider-pose'
 import type { Track } from '@/game/tracks/types'
+import { respawnBikeToLine } from './respawn'
 
 export interface ControlsHandle {
   /** True while the pause overlay is open. Polled by the game loop to
@@ -50,6 +54,9 @@ export interface ControlsOpts {
   phys: PhysicsWorld
   track: Track
   trackId: string
+  /** Live wave-field state — the respawn drop height must clear the
+   *  current tide, not the authored mean (see respawn.ts). */
+  waveField: WaveFieldState
   playerEid: number
   playerVariantId: string
   roomId: string | null
@@ -82,6 +89,7 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     phys,
     track,
     trackId,
+    waveField,
     playerEid,
     playerVariantId,
     roomId,
@@ -249,14 +257,20 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     }
   }
 
-  /** Snap the player back to the spawn pose with zero velocity. Useful after
-   *  collisions leave the bike upside-down, off-track, or unrecoverable. */
+  /** Manual respawn: snap to the nearest racing-line point, heading
+   *  down-course — a mid-race rescue must not cost the lap the way the
+   *  old snap-to-start did. Splineless scenes (dev/spec tracks with no
+   *  'main' AI spline) fall back to the spawn pose. */
   function respawnPlayer(): void {
+    if (respawnBikeToLine({ sim, phys, track, waveField, eid: playerEid })) return
     const handle = RBHandleStore.get(playerEid)
     if (!handle) return
     const rb = phys.world.getRigidBody(handle.handle)
     if (!rb) return
     const halfYaw = track.start.yaw / 2
+    // Forget Δv history before the velocity zero, or the crash detector
+    // reads the stop as a wall hit and ejects the rider next tick.
+    clearCrashTracking(playerEid)
     rb.setTranslation(
       { x: track.start.position.x, y: track.start.position.y, z: track.start.position.z },
       true,
@@ -270,13 +284,22 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     resetRiderForBike(sim, phys, playerEid)
   }
 
+  /** True when a keydown's code matches the (rebindable) respawn
+   *  action. Reads the live bindings so a rebind applies immediately —
+   *  same pattern as the trick-prompt HUD's key hint. */
+  function isRespawnCode(code: string): boolean {
+    const b = playerSettings.keyboardBindings.respawn
+    return code === b.primary || (b.secondary !== null && code === b.secondary)
+  }
+
   // Keys:
   //   Esc — toggle pause menu (in-race only; finish-screen Esc exits)
   //   Enter/R — NEXT/RETRY on the finish screen; on pause menu, Enter
   //             resumes (the focused button's default action) and R
   //             restarts; Q exits to menu.
   //   T/F1 — auto-play; F2 collision / F3 anti-grav / F4 hover-spring debug;
-  //   M — mute; Backspace — respawn.
+  //   M — mute; respawn — rebindable action (default Backspace), snaps
+  //   to the nearest racing-line point.
   window.addEventListener('keydown', (e) => {
     if (finishShown && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
       ;(document.getElementById('finish-next') as HTMLButtonElement | null)?.click()
@@ -332,7 +355,7 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
       e.preventDefault()
     } else if (e.code === 'KeyM') {
       audio.setMuted(!audio.isMuted())
-    } else if (e.code === 'Backspace') {
+    } else if (isRespawnCode(e.code)) {
       respawnPlayer()
       e.preventDefault()
     }

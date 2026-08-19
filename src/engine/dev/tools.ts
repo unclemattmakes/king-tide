@@ -14,6 +14,7 @@
 
 import * as THREE from 'three'
 import { resetDevSettings } from '../dev-settings'
+import { playerSettings } from '../player-settings'
 import { racingLineRibbonEnabled, setRacingLineRibbonEnabled } from '../render/racing-line-ribbon'
 import { getActivePostPipeline } from '../render/renderer-service'
 import { setSignalsEnabled, signalsEnabled } from '../render/signal-state'
@@ -109,11 +110,13 @@ function action(
 
 // ---- one-shot action implementations --------------------------------------
 
-/** Mimic the Backspace respawn keybind (controls.ts). Dispatch keyup too so
- *  the key doesn't linger in the keyboard's held-set. */
+/** Mimic the respawn keybind (controls.ts) at whatever code it's
+ *  currently bound to — a rebind must not strand the palette action.
+ *  Dispatch keyup too so the key doesn't linger in the held-set. */
 function dispatchRespawn(): void {
-  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Backspace' }))
-  window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Backspace' }))
+  const code = playerSettings.keyboardBindings.respawn.primary
+  window.dispatchEvent(new KeyboardEvent('keydown', { code }))
+  window.dispatchEvent(new KeyboardEvent('keyup', { code }))
 }
 
 /** Copy the live camera's world pose as a `CameraPose` JSON blob, ready to
@@ -434,8 +437,8 @@ export function createDevTools(deps: DevToolDeps): DevTool[] {
 
     // ---- Actions (one-shot) ----
     action('action.respawn', 'Respawn player', dispatchRespawn, {
-      hint: 'Reset to start pose · Backspace',
-      keywords: 'reset start',
+      hint: 'Snap to the racing line · Backspace (rebindable)',
+      keywords: 'reset rescue line',
     }),
     action('action.copycam', 'Copy camera pose', () => copyCameraPose(deps.camera), {
       hint: 'CameraPose JSON → clipboard (for setCameraPose)',

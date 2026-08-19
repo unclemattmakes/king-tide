@@ -32,6 +32,7 @@ export type KeyboardAction =
   | 'boost'
   | 'trickLeft'
   | 'trickRight'
+  | 'respawn'
 
 export const KEYBOARD_ACTIONS: readonly KeyboardAction[] = [
   'throttleForward',
@@ -44,6 +45,7 @@ export const KEYBOARD_ACTIONS: readonly KeyboardAction[] = [
   'trickRight',
   'fire',
   'boost',
+  'respawn',
 ] as const
 
 export const KEYBOARD_ACTION_LABEL: Readonly<Record<KeyboardAction, string>> = Object.freeze({
@@ -57,6 +59,7 @@ export const KEYBOARD_ACTION_LABEL: Readonly<Record<KeyboardAction, string>> = O
   trickRight: 'Trick / hop (right)',
   fire: 'Fire pickup',
   boost: 'Boost',
+  respawn: 'Respawn to track',
 })
 
 export type KeyboardBinding = {
@@ -86,6 +89,12 @@ export const DEFAULT_KEYBOARD_BINDINGS: Readonly<KeyboardBindings> = Object.free
   trickRight: { primary: 'KeyC', secondary: null },
   fire: { primary: 'Space', secondary: null },
   boost: { primary: 'ShiftLeft', secondary: 'ShiftRight' },
+  // Was a hardcoded, undocumented Backspace listener in controls.ts —
+  // invisible in the rebind list, so players stuck on rocks had no way
+  // to discover the rescue. Now a first-class, rebindable action.
+  // (Gamepads lean on the automatic wedge/eject rescue —
+  // stuck-rescue.ts — rather than spending a button.)
+  respawn: { primary: 'Backspace', secondary: null },
 })
 
 /** Gamepad buttons we let the player remap. Sticks stay on the W3C

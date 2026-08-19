@@ -28,6 +28,7 @@ import { boostTickSystem, pickupSystem, pickupUseSystem } from './systems/pickup
 import { riderCrashSystem } from './systems/rider-crash'
 import { riderPoseSystem } from './systems/rider-pose'
 import { rubberBandSystem } from './systems/rubber-band'
+import { stuckRescueSystem } from './systems/stuck-rescue'
 import { syncFromPhysics } from './systems/sync-from-physics'
 import { trickHopSystem } from './systems/trick-hop'
 import { wakeUpdateSystem } from './systems/wake-update'
@@ -243,6 +244,10 @@ export function simulateStep(
   // Triggering on Δv catches wall hits, mine blasts, and bike-on-bike
   // sideswipes without needing collision-event subscription.
   riderCrashSystem(sim, phys, phys.fixedDt)
+  // Stuck rescue — after syncFromPhysics + rider crash so it sees this
+  // tick's post-step velocity and rider state. Sets the one-shot
+  // rescue-request flag the render frame consumes.
+  stuckRescueSystem(sim, phys)
 
   if (!inputs.locked) raceTick(sim, phys, phys.fixedDt)
   // Out-of-bounds leash — after the race tick so it sees this tick's finished

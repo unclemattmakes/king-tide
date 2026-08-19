@@ -150,11 +150,11 @@ async function runScenario(
         const samples: Sample[] = []
         let launchY = 0
         let launchVy = 0
-        // Reset to the start pose.
+        // Reset to the start pose. (The player-facing respawn key
+        // snaps to the nearest racing-line point now — specs use the
+        // deterministic to-start debug hook.)
         window.__hover!.setIntentOverride(null)
-        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Backspace' }))
-        await wait(50)
-        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Backspace' }))
+        window.__hover!.respawnToStart()
         await wait(400)
         // Phase stagger: the solo sim is deterministic and the attempt
         // cadence is near-constant, so without this, consecutive retries

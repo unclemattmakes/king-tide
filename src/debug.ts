@@ -36,6 +36,8 @@ import { MineTag, MissileTag, ShieldEffectStore, StunStore } from './game/compon
 import { PickupSlot, PickupSlotStore, type PickupType } from './game/components/pickup'
 import { type RaceTick, simulateStep } from './game/sim-step'
 import { getHeldPickup } from './game/systems/pickup'
+import { clearCrashTracking } from './game/systems/rider-crash'
+import { resetRiderForBike } from './game/systems/rider-pose'
 import { computeStandings, type Standing } from './game/systems/standings'
 import type { Track } from './game/tracks/types'
 
@@ -77,6 +79,12 @@ export type HoverDebug = {
   gamepads(): ReturnType<typeof snapshotGamepads>
   intent(): Intent
   setIntentOverride(i: Intent | null): void
+  /** Teleport the player bike to the track's start pose with zero
+   *  velocity — deterministic scene reset for e2e physics specs. The
+   *  player-facing respawn action snaps to the nearest racing-line
+   *  point instead (boot/respawn.ts), which is wrong for specs that
+   *  need identical run-ups on every attempt. */
+  respawnToStart(): void
   player(): PlayerSnapshot | null
   race(): RaceSnapshot | null
   standings(): Standing[]
@@ -475,6 +483,24 @@ export function installDebugApi(state: DebugState, accessors: DebugAccessors): H
       // the bike held during the start countdown. Skip ahead so the
       // override takes effect immediately.
       if (i !== null) accessors.skipCountdown()
+    },
+    respawnToStart: () => {
+      if (!state.ready) return
+      const phys = accessors.phys()
+      const track = accessors.track()
+      const rbh = RBHandleStore.get(accessors.playerEid())
+      const rb = rbh ? phys.world.getRigidBody(rbh.handle) : null
+      if (!rb) return
+      const halfYaw = track.start.yaw / 2
+      clearCrashTracking(accessors.playerEid())
+      rb.setTranslation(
+        { x: track.start.position.x, y: track.start.position.y, z: track.start.position.z },
+        true,
+      )
+      rb.setRotation({ x: 0, y: Math.sin(halfYaw), z: 0, w: Math.cos(halfYaw) }, true)
+      rb.setLinvel({ x: 0, y: 0, z: 0 }, true)
+      rb.setAngvel({ x: 0, y: 0, z: 0 }, true)
+      resetRiderForBike(accessors.sim(), phys, accessors.playerEid())
     },
     player: () => state.playerSnapshot,
     race: () => state.raceSnapshot,
