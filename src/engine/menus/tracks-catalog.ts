@@ -210,6 +210,15 @@ export const V1_TRACKS: V1TrackEntry[] = [
   },
 ]
 
+/** Player-facing display name for a track id, from the same ship-track
+ *  catalogue the menu tiles render. Returns `undefined` for anything
+ *  not in the v1 slate — procedural + Dev Cup tracks (lagoon, cliffside,
+ *  raw GLBs) have no curated name here, so callers fall back to the raw
+ *  `track.name` slug from the track JSON. */
+export function trackDisplayName(id: string): string | undefined {
+  return V1_TRACKS.find((t) => t.id === id)?.name
+}
+
 export type CupEntry = {
   id: CupId
   name: string

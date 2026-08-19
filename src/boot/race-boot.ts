@@ -24,6 +24,7 @@ import { loadDevSettings } from '@/engine/dev-settings'
 import { emptyIntent, type Intent, installInput } from '@/engine/input'
 import { installCameraLookInput } from '@/engine/input/camera-look'
 import { bindLazyMenuButton } from '@/engine/lazy-menu'
+import { trackDisplayName } from '@/engine/menus/tracks-catalog'
 import { loadPlayerSettings, playerSettings, WAVE_SPRAY_SCALAR } from '@/engine/player-settings'
 import { createAnimatedPropsSystem } from '@/engine/render/animated-props'
 import { createAntiGravDebugRenderer } from '@/engine/render/anti-grav-debug'
@@ -1118,7 +1119,9 @@ export async function bootRace(appEl: HTMLElement) {
     }
     recorder = createReplayRecorder({
       trackId,
-      trackName: track.name,
+      // Curated display name ("Mayday Bay") for the replay's spectator
+      // HUD venue label — falls back to the raw slug for dev tracks.
+      trackName: trackDisplayName(trackId) ?? track.name,
       bikes: recorderBikes,
     })
     recorderStart = performance.now()
@@ -1832,7 +1835,7 @@ export async function bootRace(appEl: HTMLElement) {
     },
   })
   if (backendEl) backendEl.textContent = `backend: ${backend}`
-  if (finishSub) finishSub.textContent = track.name
+  if (finishSub) finishSub.textContent = trackDisplayName(trackId) ?? track.name
 
   // Phase 7b — shader / pipeline pre-warm. WebGPU pipeline compilation
   // on first sight of a material is 5–20 ms each; on WebGL2 the GLSL

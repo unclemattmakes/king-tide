@@ -24,6 +24,7 @@ import {
   TOUCH_AUTOPILOT_EVENT,
   TOUCH_MENU_EVENT,
 } from '@/engine/input/touch'
+import { trackDisplayName } from '@/engine/menus/tracks-catalog'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { RBHandleStore } from '@/game/components'
@@ -141,7 +142,11 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
     if (pauseSubtitleEl) {
       const racer = RacerStore.get(playerEid)
       const lap = racer ? Math.min(racer.lap, track.lapsToFinish) : 1
-      pauseSubtitleEl.textContent = `${track.name.toUpperCase()} · LAP ${lap}/${track.lapsToFinish}`
+      // Prefer the catalogue display name ("Mayday Bay") over the raw
+      // slug the track JSON carries in `track.name` ("sandbar"). Dev /
+      // procedural tracks aren't in the ship catalogue → fall back.
+      const displayName = trackDisplayName(trackId) ?? track.name
+      pauseSubtitleEl.textContent = `${displayName.toUpperCase()} · LAP ${lap}/${track.lapsToFinish}`
     }
     // Focus RESUME so Enter resumes immediately if the player wants.
     ;(document.getElementById('pause-resume') as HTMLButtonElement | null)?.focus({

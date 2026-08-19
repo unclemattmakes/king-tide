@@ -36,6 +36,7 @@ import { type Intent, inputSourceLabel, readPlayerIntent } from '@/engine/input'
 import { tickCameraLook } from '@/engine/input/camera-look'
 import { createJitterTelemetry } from '@/engine/jitter-telemetry'
 import { buildTrackList, nextTrackId } from '@/engine/menus/catalog'
+import { trackDisplayName } from '@/engine/menus/tracks-catalog'
 import {
   decodeInputFrameFrom,
   encodeInputFrameInto,
@@ -2266,8 +2267,12 @@ function showFinishScreen(opts: FinishOpts): void {
           ? 'WINNER'
           : 'FINAL'
   }
+  // Prefer the catalogue display name ("Mayday Bay") over the raw slug
+  // carried in `track.name` ("sandbar"). Dev / procedural tracks aren't
+  // in the ship catalogue → fall back to the raw name.
+  const displayTrackName = trackDisplayName(trackId) ?? track.name
   if (hud.finishSub) {
-    hud.finishSub.textContent = `${track.name.toUpperCase()} · ${playerVariant.name.toUpperCase()}`
+    hud.finishSub.textContent = `${displayTrackName.toUpperCase()} · ${playerVariant.name.toUpperCase()}`
   }
   // Stash a last-race summary for the menu's title-screen recap card.
   // Stored in sessionStorage so it survives the navigation to `?back=1`
@@ -2277,7 +2282,7 @@ function showFinishScreen(opts: FinishOpts): void {
       'hover-last-race',
       JSON.stringify({
         trackId,
-        trackName: track.name,
+        trackName: displayTrackName,
         bikeId: playerVariant.id,
         bikeName: playerVariant.name,
         position: creditedPosition,
