@@ -18,7 +18,7 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 # Import the module directly (NOT through the addon package, whose __init__
 # imports bpy) so this runs under plain CPython.
-sys.path.insert(0, os.path.join(_HERE, "hoverbike_addon"))
+sys.path.insert(0, os.path.join(_HERE, "kingtide_addon"))
 
 import propline_expand  # noqa: E402
 

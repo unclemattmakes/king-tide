@@ -1,6 +1,6 @@
 # Asset storage — raw vs. compiled
 
-Hoverbike's binary assets split into two buckets with different homes. The
+King Tide's binary assets split into two buckets with different homes. The
 goal is a lean git history that still gives every clone the bytes it needs
 to **run** the game, without carrying the much larger authoring sources
 that only matter when **rebuilding** assets.
@@ -38,7 +38,7 @@ outputs land in the content root, the **compiled** GLB in Cloudflare R2.
 | Per-level manifest (prompts/seeds/params — the reproducibility anchor) | `specs/props/ai/<level>.json` (git) |
 
 The content root defaults to `C:\project-content\hoverbike`; override with
-`$HOVERBIKE_CONTENT_ROOT`.
+`$KINGTIDE_CONTENT_ROOT`.
 
 ### Pointing the addon at your repo (authoring outside the clone)
 
@@ -49,9 +49,9 @@ up from the open `.blend` — which fails when the `.blend` lives outside it.
 Tell it where the clone is, either way works:
 
 - **Add-on preference (recommended):** Blender → *Edit → Preferences →
-  Add-ons → "Hoverbike: Export to Game" → Project root* → set it to your
+  Add-ons → "King Tide: Export to Game" → Project root* → set it to your
   clone path (e.g. `C:\dev\hoverbike`). Set once; persists.
-- **Env var:** `HOVERBIKE_REPO_ROOT=C:\dev\hoverbike` before launching
+- **Env var:** `KINGTIDE_REPO_ROOT=C:\dev\hoverbike` before launching
   Blender (handy for headless / scripted runs).
 
 Resolution order is: env var → preference → walk-up (so leaving both blank

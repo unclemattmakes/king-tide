@@ -69,7 +69,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1600, height: 900 } })
   await page.addInitScript(() => {
     try {
-      window.localStorage.removeItem('hoverbike.waterDebug.v10')
+      window.localStorage.removeItem('kingtide.waterDebug.v10')
     } catch {}
   })
   await page.goto(`${BASE}/?race=1&track=${TRACK}`, { waitUntil: 'domcontentloaded' })

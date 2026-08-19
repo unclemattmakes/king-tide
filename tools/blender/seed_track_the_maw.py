@@ -462,10 +462,10 @@ def _spawn_wave_zones(scene: bpy.types.Scene) -> int:
 
     # Refresh the visual gizmos so a follow-up Blender session opens
     # the .blend with the zones already drawn. Best-effort — silent on
-    # ImportError because the seed runs against ``hoverbike_addon_disk``
+    # ImportError because the seed runs against ``kingtide_addon_disk``
     # under a bespoke module name.
     try:
-        from hoverbike_addon.wave_zone import refresh_wave_zone_gizmos
+        from kingtide_addon.wave_zone import refresh_wave_zone_gizmos
         refresh_wave_zone_gizmos(scene)
     except ImportError:
         pass
@@ -633,12 +633,12 @@ def _apply_sky_preset(scene: bpy.types.Scene) -> None:
     coupled to the addon load order beyond what build_track_from_spec
     already established."""
     try:
-        from hoverbike_addon.sky_preset import set_sky_tint_from_hex
+        from kingtide_addon.sky_preset import set_sky_tint_from_hex
     except ImportError:
-        # The track_build_lib loads the addon under "hoverbike_addon_disk".
+        # The track_build_lib loads the addon under "kingtide_addon_disk".
         # Try that path before giving up.
         try:
-            from hoverbike_addon_disk.sky_preset import set_sky_tint_from_hex
+            from kingtide_addon_disk.sky_preset import set_sky_tint_from_hex
         except ImportError:
             print("  WARN: sky_preset module not reachable headless — "
                   "JSON stub's sky block will survive instead of being "
@@ -701,7 +701,7 @@ def augment_scene() -> None:
     # augmentation lands at runtime until the user manually clicks
     # Export Track to Game.
     print(f"{tag} re-exporting GLB + JSON + manifest")
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(f"{tag} export_track (post-augment) failed: {result}")
 

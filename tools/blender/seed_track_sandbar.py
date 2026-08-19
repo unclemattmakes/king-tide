@@ -282,7 +282,7 @@ def _apply_sandbar_sky(scene) -> None:
     Scene properties live on ``scene.hoverbike_sky_*``; the hex tint
     helper lives in the sky_preset module.
     """
-    from hoverbike_addon.sky_preset import set_sky_tint_from_hex
+    from kingtide_addon.sky_preset import set_sky_tint_from_hex
 
     set_sky_tint_from_hex("#ffe0c8")
     scene.hoverbike_sky_cloudiness = 0.2
@@ -372,12 +372,12 @@ def _augment_and_reexport() -> None:
     # open the file later. The refresh helpers are no-ops if the
     # collection / mesh doesn't already exist (they build it).
     try:
-        from hoverbike_addon.wave_zone import refresh_wave_zone_gizmos
+        from kingtide_addon.wave_zone import refresh_wave_zone_gizmos
         refresh_wave_zone_gizmos(scene)
     except ImportError:
         pass
     try:
-        from hoverbike_addon.antigrav import refresh_antigrav_zone_gizmos
+        from kingtide_addon.antigrav import refresh_antigrav_zone_gizmos
         refresh_antigrav_zone_gizmos(scene)
     except ImportError:
         pass
@@ -388,7 +388,7 @@ def _augment_and_reexport() -> None:
     # ran before any of the per-beat empties existed, so the JSON it
     # wrote is missing wave_zones / antigrav_zones / pickups / boost
     # pads / sky. This second export writes the complete picture.
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(f"[seed-track-sandbar] re-export failed: {result}")
 

@@ -258,7 +258,7 @@ def _add_antigrav_corkscrew(scene) -> bool:
     import bpy
 
     # 1. Create the Bezier curve directly. (We don't call the operator
-    # ``hoverbike.add_antigrav_curve`` because operators bake in GUI
+    # ``kingtide.add_antigrav_curve`` because operators bake in GUI
     # context: ``context.scene.cursor.location`` etc. Programmatic
     # creation is robust headless.)
     curve_data = bpy.data.curves.new("antigrav_curve_00", type="CURVE")
@@ -281,16 +281,16 @@ def _add_antigrav_corkscrew(scene) -> bool:
     # rather than the operator so we don't need GUI context. Falls back
     # to the operator if direct import fails.
     try:
-        from hoverbike_addon.antigrav_ribbon import (
+        from kingtide_addon.antigrav_ribbon import (
             build_antigrav_ribbon_from_curve,
             PROFILE_TUBE,
         )
     except ImportError:
-        # The track_build_lib loads "hoverbike_addon_disk" under a
+        # The track_build_lib loads "kingtide_addon_disk" under a
         # bespoke module name — the package import path may not be
         # established. Try the operator path as a fallback.
         try:
-            result = bpy.ops.hoverbike.build_antigrav_surface()
+            result = bpy.ops.kingtide.build_antigrav_surface()
             if "FINISHED" in result:
                 return True
         except (AttributeError, RuntimeError) as e:
@@ -377,7 +377,7 @@ WAVE_ZONES = (
 
 def _add_wave_zones(scene) -> None:
     """Stamp three ``wave_zone_NN`` empties matching the WAVE_ZONES
-    spec. Mirrors the pattern in ``hoverbike_addon.wave_zone`` so the
+    spec. Mirrors the pattern in ``kingtide_addon.wave_zone`` so the
     zones round-trip through the addon's gizmo / export path."""
     import bpy
     for i, z in enumerate(WAVE_ZONES):
@@ -404,7 +404,7 @@ def _add_wave_zones(scene) -> None:
     # Refresh the visual box gizmos so a follow-up Blender session opens
     # the .blend with the zones already drawn.
     try:
-        from hoverbike_addon.wave_zone import refresh_wave_zone_gizmos
+        from kingtide_addon.wave_zone import refresh_wave_zone_gizmos
         refresh_wave_zone_gizmos(scene)
     except ImportError:
         pass
@@ -592,7 +592,7 @@ def _augment_and_reexport() -> None:
     """Open .blend → drop lighthouse + corkscrew + wave zones + camera
     + pickups → save → re-export the GLB/JSON so the new geometry +
     zones are picked up. The track_build_lib already invokes
-    ``hoverbike.export_track`` once; we re-run it after our edits."""
+    ``kingtide.export_track`` once; we re-run it after our edits."""
     import bpy
 
     scene = bpy.context.scene
@@ -627,7 +627,7 @@ def _augment_and_reexport() -> None:
     # the wave / anti-grav zones. The lint pass runs again inside the
     # export operator.
     print("[seed-track-hatteras-light] re-exporting GLB + JSON + manifest")
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(
             f"[seed-track-hatteras-light] export_track (post-augment) failed: {result}"

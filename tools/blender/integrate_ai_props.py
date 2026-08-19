@@ -19,7 +19,7 @@ Why per-file (the smallest-blast-radius model):
   * The folder *is* the library: the content root's ``tracks-src/`` is
     already a registered Blender asset library, and its **recursive** scan
     aggregates every ``tracks-src/props/ai/*.blend`` next to the procedural
-    props under the shared ``Hoverbike/Track Props`` catalogue. No central
+    props under the shared ``King Tide/Track Props`` catalogue. No central
     file to open or merge.
   * ``hv_locked`` is stamped for consistency + intent (a standalone file is
     never re-seeded, so it is structurally safe already, but the marker
@@ -62,7 +62,7 @@ from tools.blender.condition_ai_mesh import _import_any, condition_object  # noq
 from tools.blender.seed_merge import LOCK, write_seedbak  # noqa: E402
 from tools.blender.seed_props_library import CATALOG_UUIDS  # noqa: E402
 
-CATALOG_ROOT = "Hoverbike/Track Props"
+CATALOG_ROOT = "King Tide/Track Props"
 
 
 def _spec_path() -> str:
@@ -119,7 +119,7 @@ def main() -> None:
         return
 
     # The per-prop blends land under <content-root>/tracks-src/props/ai/ (the
-    # Drive-synced raw-source tree, out of git). Merge the Hoverbike/Track
+    # Drive-synced raw-source tree, out of git). Merge the King Tide/Track
     # Props catalogue rows into THAT tree's blender_assets.cats.txt — the one
     # the Asset Browser scans alongside the user's other blends — so each
     # per-file blend's catalog_id resolves. Idempotent; preserves existing

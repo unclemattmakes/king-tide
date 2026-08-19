@@ -1,4 +1,4 @@
-# Hoverbike — Art Direction v2
+# King Tide — Art Direction v2
 
 > The visual-language layer on top of the locked world frame. Where
 > [product-plan.md](./product-plan.md) and [track-themes.md](./track-themes.md)

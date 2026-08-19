@@ -1,8 +1,8 @@
 """Headless bike GLB builder. ``bikes-src/<id>.blend`` → GLB.
 
 Run:
-    HOVERBIKE_SPEC=specs/bikes/racer.json \\
-    HOVERBIKE_OUTPUT=public/assets/bikes/racer.glb \\
+    KINGTIDE_SPEC=specs/bikes/racer.json \\
+    KINGTIDE_OUTPUT=public/assets/bikes/racer.glb \\
       blender --background --python tools/blender/build_bike.py
 
 Mirrors the track pipeline: every bike has a standalone ``.blend`` at

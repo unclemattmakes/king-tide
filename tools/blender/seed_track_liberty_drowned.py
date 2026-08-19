@@ -847,13 +847,13 @@ def _add_antigrav_crown_loop(scene) -> bool:
     scene.collection.objects.link(curve_obj)
 
     try:
-        from hoverbike_addon.antigrav_ribbon import (
+        from kingtide_addon.antigrav_ribbon import (
             build_antigrav_ribbon_from_curve,
             PROFILE_TUBE,
         )
     except ImportError:
         try:
-            result = bpy.ops.hoverbike.build_antigrav_surface()
+            result = bpy.ops.kingtide.build_antigrav_surface()
             if "FINISHED" in result:
                 return True
         except (AttributeError, RuntimeError) as e:
@@ -964,13 +964,13 @@ def _add_antigrav_torch_arm(scene) -> bool:
     scene.collection.objects.link(curve_obj)
 
     try:
-        from hoverbike_addon.antigrav_ribbon import (
+        from kingtide_addon.antigrav_ribbon import (
             build_antigrav_ribbon_from_curve,
             PROFILE_BANKED_STRIP,
         )
     except ImportError:
         try:
-            result = bpy.ops.hoverbike.build_antigrav_surface()
+            result = bpy.ops.kingtide.build_antigrav_surface()
             if "FINISHED" in result:
                 return True
         except (AttributeError, RuntimeError) as e:
@@ -1212,10 +1212,10 @@ def _apply_sky_preset(scene: bpy.types.Scene) -> None:
     ``derive_sky_block`` emits the right JSON on export. Mirrors the
     Shibuya / Marina Bay / Kilauea pattern."""
     try:
-        from hoverbike_addon.sky_preset import set_sky_tint_from_hex
+        from kingtide_addon.sky_preset import set_sky_tint_from_hex
     except ImportError:
         try:
-            from hoverbike_addon_disk.sky_preset import set_sky_tint_from_hex
+            from kingtide_addon_disk.sky_preset import set_sky_tint_from_hex
         except ImportError:
             print("  WARN: sky_preset module not reachable headless — "
                   "JSON stub's sky block will survive instead of being "
@@ -1361,9 +1361,9 @@ def augment_scene() -> None:
     # aren't reachable in this Blender session.
     print(f"{tag} shifting spline off downtown obstacles")
     try:
-        bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
-        bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
-        bpy.ops.hoverbike.snap_spline_to_terrain()
+        bpy.ops.kingtide.shift_spline_off_obstacles(margin=4.0)
+        bpy.ops.kingtide.shift_spline_off_obstacles(margin=4.0)
+        bpy.ops.kingtide.snap_spline_to_terrain()
     except (AttributeError, RuntimeError) as e:
         print(f"{tag} WARN: spline-shift not reachable headless ({e})")
 
@@ -1375,7 +1375,7 @@ def augment_scene() -> None:
     # ── Re-export (gotcha #3) — without this the GLB/JSON misses
     # everything we just authored ────────────────────────────────
     print(f"{tag} re-exporting GLB + JSON + manifest")
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(
             f"{tag} export_track (post-augment) failed: {result}"

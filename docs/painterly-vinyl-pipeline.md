@@ -1,4 +1,4 @@
-# Hoverbike — Painterly-Vinyl Pipeline
+# King Tide — Painterly-Vinyl Pipeline
 
 > How we **achieve** the painterly-vinyl look ([art-direction.md](./art-direction.md) v2)
 > in the engine, and how we **ingest** meshes at any readiness state — shape-only

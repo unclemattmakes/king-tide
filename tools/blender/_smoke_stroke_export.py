@@ -27,13 +27,13 @@ def _enable_addon() -> bool:
     if addons_root not in sys.path:
         sys.path.insert(0, addons_root)
     try:
-        import hoverbike_addon  # type: ignore # noqa: F401
+        import kingtide_addon  # type: ignore # noqa: F401
     except ImportError as e:
-        print(f"FAIL: hoverbike_addon import: {e}", flush=True)
+        print(f"FAIL: kingtide_addon import: {e}", flush=True)
         return False
-    if not hasattr(bpy.ops.hoverbike, "export_track"):
+    if not hasattr(bpy.ops.kingtide, "export_track"):
         try:
-            hoverbike_addon.register()
+            kingtide_addon.register()
         except (RuntimeError, ValueError) as e:
             print(f"FAIL: addon register: {e}", flush=True)
             return False
@@ -53,7 +53,7 @@ def main() -> int:
     if not _enable_addon():
         return 1
 
-    from hoverbike_addon._legacy import derive_asset_id, find_repo_root  # type: ignore
+    from kingtide_addon._legacy import derive_asset_id, find_repo_root  # type: ignore
 
     track_id = derive_asset_id("hoverbike_track_id")
     repo = find_repo_root(bpy.data.filepath)
@@ -69,12 +69,12 @@ def main() -> int:
 
     try:
         # Add a palm stroke and a rock stroke at the cursor.
-        bpy.ops.hoverbike.add_scatter_stroke(prop="palm")
+        bpy.ops.kingtide.add_scatter_stroke(prop="palm")
         print("smoke: added palm stroke", flush=True)
-        bpy.ops.hoverbike.add_scatter_stroke(prop="rock")
+        bpy.ops.kingtide.add_scatter_stroke(prop="rock")
         print("smoke: added rock stroke", flush=True)
 
-        result = bpy.ops.hoverbike.export_track()
+        result = bpy.ops.kingtide.export_track()
         print(f"smoke: export_track returned {result}", flush=True)
         if "FINISHED" not in result:
             return 1

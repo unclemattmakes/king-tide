@@ -275,26 +275,26 @@ def reset_scene() -> None:
 
 
 def _load_addon_module():
-    """Load the in-repo Hoverbike addon package by file path, register
+    """Load the in-repo King Tide addon package by file path, register
     it so the export operator's scene-property reads have something to
-    read. Post-2026-05 the addon is a package (``hoverbike_addon/`` with
+    read. Post-2026-05 the addon is a package (``kingtide_addon/`` with
     submodules); ``submodule_search_locations`` makes the package's
     ``from . import water, ...`` lines resolve under the disk alias."""
     import sys
-    pkg_dir = os.path.join(SCRIPT_DIR, "hoverbike_addon")
+    pkg_dir = os.path.join(SCRIPT_DIR, "kingtide_addon")
     init_file = os.path.join(pkg_dir, "__init__.py")
     if not os.path.exists(init_file):
         print(f"[seed-tunnel-island] WARNING: {init_file} not found")
         return None
     spec = importlib.util.spec_from_file_location(
-        "hoverbike_addon_disk",
+        "kingtide_addon_disk",
         init_file,
         submodule_search_locations=[pkg_dir],
     )
     if spec is None or spec.loader is None:
         return None
     addon = importlib.util.module_from_spec(spec)
-    sys.modules["hoverbike_addon_disk"] = addon
+    sys.modules["kingtide_addon_disk"] = addon
     spec.loader.exec_module(addon)
     # Register so the export operator's scene-property reads (terrain
     # shader, gate spacing, etc.) have something to read. Safe — the
@@ -400,7 +400,7 @@ def add_tunnels(addon) -> int:
     Returns the count of tunnels successfully built."""
     if addon is None:
         return 0
-    from hoverbike_addon import tunnel as tunnel_mod
+    from kingtide_addon import tunnel as tunnel_mod
 
     scene = bpy.context.scene
     terrain = bpy.data.objects.get("terrain")
@@ -631,7 +631,7 @@ def add_previews(addon) -> None:
 
 def headless_export(addon) -> bool:
     """Export the GLB + JSON for the seeded track. Mirrors
-    ``HOVERBIKE_OT_export_track.execute`` minus the manifest upsert
+    ``KINGTIDE_OT_export_track.execute`` minus the manifest upsert
     (which we still call separately) and the merge-with-existing-JSON
     behaviour (this is a fresh seed)."""
     if addon is None:

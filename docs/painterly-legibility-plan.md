@@ -1,4 +1,4 @@
-# Hoverbike — Painterly Aesthetic & Style-as-Legibility Plan
+# King Tide — Painterly Aesthetic & Style-as-Legibility Plan
 
 > Research + roadmap for two linked goals: (1) deepen the procedural **painterly**
 > look toward the Sea of Thieves × TF2 × Arkane target, and (2) **use that style

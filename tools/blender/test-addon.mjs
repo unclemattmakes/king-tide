@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url'
 const __filename = fileURLToPath(import.meta.url)
 const SCRIPT_DIR = path.dirname(__filename)
 const TEST_SCRIPTS = [
-  // Registration smoke — every HOVERBIKE_OT/PT class declared in source
+  // Registration smoke — every KINGTIDE_OT/PT class declared in source
   // is registered with Blender. Catches the "class skipped in register()"
   // foot-gun.
   path.join(SCRIPT_DIR, 'test_addon_registration.py'),

@@ -550,13 +550,13 @@ def _add_antigrav_caldera_loop(scene) -> bool:
     # we don't need GUI context. Falls back to the operator if the
     # direct import path isn't reachable.
     try:
-        from hoverbike_addon.antigrav_ribbon import (
+        from kingtide_addon.antigrav_ribbon import (
             build_antigrav_ribbon_from_curve,
             PROFILE_BANKED_STRIP,
         )
     except ImportError:
         try:
-            result = bpy.ops.hoverbike.build_antigrav_surface()
+            result = bpy.ops.kingtide.build_antigrav_surface()
             if "FINISHED" in result:
                 return True
         except (AttributeError, RuntimeError) as e:
@@ -607,7 +607,7 @@ LAVA_BEACH_WAVE = {
 
 def _spawn_lava_beach_wave_zone(scene) -> bpy.types.Object:
     """Stamp the single lava-beach wave zone. Mirrors the wave_zone
-    empty contract in ``hoverbike_addon.wave_zone`` so the addon's
+    empty contract in ``kingtide_addon.wave_zone`` so the addon's
     gizmo + export pass round-trip cleanly."""
     z = LAVA_BEACH_WAVE
     obj = bpy.data.objects.new(z["name"], None)
@@ -836,7 +836,7 @@ def augment_scene() -> None:
     # and the JSON merges the wave/anti-grav zone blocks. Without this
     # step the GLB only matches the post-build state.
     print(f"{tag} re-exporting GLB + JSON + manifest")
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(
             f"{tag} export_track (post-augment) failed: {result}"

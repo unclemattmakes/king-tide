@@ -484,13 +484,13 @@ def _add_antigrav_campanile_climb(scene) -> bool:
     scene.collection.objects.link(curve_obj)
 
     try:
-        from hoverbike_addon.antigrav_ribbon import (
+        from kingtide_addon.antigrav_ribbon import (
             build_antigrav_ribbon_from_curve,
             PROFILE_TUBE,
         )
     except ImportError:
         try:
-            result = bpy.ops.hoverbike.build_antigrav_surface()
+            result = bpy.ops.kingtide.build_antigrav_surface()
             if "FINISHED" in result:
                 return True
         except (AttributeError, RuntimeError) as e:
@@ -713,10 +713,10 @@ def _apply_sky_preset(scene: bpy.types.Scene) -> None:
     ``derive_sky_block`` emits the right JSON. Mirrors the Maw /
     Kilauea / Sandbar pattern."""
     try:
-        from hoverbike_addon.sky_preset import set_sky_tint_from_hex
+        from kingtide_addon.sky_preset import set_sky_tint_from_hex
     except ImportError:
         try:
-            from hoverbike_addon_disk.sky_preset import set_sky_tint_from_hex
+            from kingtide_addon_disk.sky_preset import set_sky_tint_from_hex
         except ImportError:
             print("  WARN: sky_preset module not reachable headless — "
                   "JSON stub's sky block will survive instead of being "
@@ -791,9 +791,9 @@ def augment_scene() -> None:
     # semantics are preserved without needing a name exclusion.
     # Two passes catch overlapping-bbox secondaries.
     print(f"{tag} shifting spline off Venetian obstacles")
-    bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
-    bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
-    bpy.ops.hoverbike.snap_spline_to_terrain()
+    bpy.ops.kingtide.shift_spline_off_obstacles(margin=4.0)
+    bpy.ops.kingtide.shift_spline_off_obstacles(margin=4.0)
+    bpy.ops.kingtide.snap_spline_to_terrain()
 
     output_blend = os.path.join(REPO_ROOT, "tracks-src", f"{SPEC.track_id}.blend")
     bpy.ops.wm.save_as_mainfile(filepath=output_blend)
@@ -807,7 +807,7 @@ def augment_scene() -> None:
     # *Export Track to Game* manually. Mirrors the pattern in
     # seed_track_hatteras_light.py + seed_track_cape_town_drift.py.
     print(f"{tag} re-exporting GLB + JSON + manifest")
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(
             f"{tag} export_track (post-augment) failed: {result}"

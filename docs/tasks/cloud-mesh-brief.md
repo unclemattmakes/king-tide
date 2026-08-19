@@ -69,14 +69,14 @@ base lobes + rounded crown bumps).
 - **No `kind` tag required** (the GLB is clouds-only; the loader takes all
   `cloud*` meshes). *Optional:* if you want it self-describing, tag each
   `kind="cloud"` — but then add `CLOUD = "cloud"` to **both**
-  `tools/blender/hoverbike_kinds.py` and `src/engine/asset-kinds.ts`
+  `tools/blender/kingtide_kinds.py` and `src/engine/asset-kinds.ts`
   (`tests/unit/asset-kinds.test.ts` fails if they drift). Not needed.
 
 ## Files + export
 
 - **Raw `.blend`:** content-root `clouds-src/clouds.blend` (the Google-Drive
   folder, out of git — sibling of `tracks-src/` / `bikes-src/`). Point the addon
-  at the repo clone via its *Project root* pref / `$HOVERBIKE_REPO_ROOT`.
+  at the repo clone via its *Project root* pref / `$KINGTIDE_REPO_ROOT`.
 - **Compiled GLB:** `public/assets/sky/clouds.glb` — Git LFS covers it
   automatically (`public/assets/**/*.glb`); ensure `git lfs install` has run.
 - **Export flags:** `export_yup=True`, `export_apply=True` (bake modifiers — so

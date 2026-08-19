@@ -166,7 +166,7 @@ const meta = {
   cpu: `${cpus()[0]?.model?.trim() ?? 'unknown'} × ${cpus().length}`,
 }
 const lines = []
-lines.push('# Hoverbike production-build benchmark (`?bench=1` panel rows)')
+lines.push('# King Tide production-build benchmark (`?bench=1` panel rows)')
 lines.push('')
 lines.push(`- **Date:** ${meta.date}`)
 lines.push(`- **Host:** ${meta.host}`)

@@ -744,10 +744,10 @@ def _apply_sky_preset(scene: bpy.types.Scene) -> None:
     ``derive_sky_block`` emits the right JSON. Mirrors the Maw / Kilauea
     / Sandbar pattern."""
     try:
-        from hoverbike_addon.sky_preset import set_sky_tint_from_hex
+        from kingtide_addon.sky_preset import set_sky_tint_from_hex
     except ImportError:
         try:
-            from hoverbike_addon_disk.sky_preset import set_sky_tint_from_hex
+            from kingtide_addon_disk.sky_preset import set_sky_tint_from_hex
         except ImportError:
             print("  WARN: sky_preset module not reachable headless — "
                   "JSON stub's sky block will survive instead of being "
@@ -798,8 +798,8 @@ def augment_scene() -> None:
     # gauntlet straight. Snapped back to terrain afterwards to recover
     # any z drift from the XY push.
     print("[marina-bay-7] shifting spline off industrial obstacles")
-    bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
-    bpy.ops.hoverbike.snap_spline_to_terrain()
+    bpy.ops.kingtide.shift_spline_off_obstacles(margin=4.0)
+    bpy.ops.kingtide.snap_spline_to_terrain()
 
     # Save .blend with augmentation in place. build_track_from_spec
     # already saved + exported before we got here; this second save
@@ -815,7 +815,7 @@ def augment_scene() -> None:
     # until the user manually clicks Export Track to Game. Mirrors
     # the pattern in seed_track_cape_town_drift::augment_scene.
     print("[marina-bay-7] re-exporting GLB + JSON + manifest")
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(
             f"[marina-bay-7] export_track (post-augment) failed: {result}"

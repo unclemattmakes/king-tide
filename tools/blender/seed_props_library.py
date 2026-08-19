@@ -20,7 +20,7 @@ history to recover from).
 ### What the seed produces
 
 Five **collections**, each marked as a Blender Asset under the
-``Hoverbike/Track Props`` catalogue:
+``King Tide/Track Props`` catalogue:
 
 | Collection | Catalogue sub-tree | Base geometry | Procedural knobs |
 |---|---|---|---|
@@ -64,7 +64,7 @@ the seed nukes hand-edits.
 A ``blender_assets.cats.txt`` file is written alongside the .blend in
 ``tracks-src/``. Blender picks it up automatically when the user adds
 that folder as an asset library (Edit → Preferences → File Paths →
-Asset Libraries → Add → tracks-src/). One Hoverbike library, five
+Asset Libraries → Add → tracks-src/). One King Tide library, five
 sub-categories.
 """
 
@@ -103,31 +103,31 @@ from tools.blender.seed_merge import (  # noqa: E402
 OUTPUT_PATH = os.path.join(REPO_ROOT, "tracks-src", "props-library.blend")
 CATALOG_PATH = os.path.join(REPO_ROOT, "tracks-src", "blender_assets.cats.txt")
 
-CATALOG_ROOT = "Hoverbike/Track Props"
+CATALOG_ROOT = "King Tide/Track Props"
 
 # Catalogue UUIDs are deterministic so re-running the seed produces a
 # stable catalogue file. The Asset Browser keys on the UUID, not the
 # path, so stability lets authors save user-side catalog selections.
 CATALOG_UUIDS = {
-    "Hoverbike":                       "11111111-1111-4111-8111-000000000001",
-    "Hoverbike/Track Props":           "11111111-1111-4111-8111-000000000002",
-    "Hoverbike/Track Props/Rocks":     "11111111-1111-4111-8111-000000000010",
-    "Hoverbike/Track Props/Palms":     "11111111-1111-4111-8111-000000000011",
-    "Hoverbike/Track Props/Buoys":     "11111111-1111-4111-8111-000000000012",
-    "Hoverbike/Track Props/Logs":      "11111111-1111-4111-8111-000000000027",
-    "Hoverbike/Track Props/Gates":     "11111111-1111-4111-8111-000000000013",
-    "Hoverbike/Track Props/Indicators":"11111111-1111-4111-8111-000000000014",
+    "King Tide":                       "11111111-1111-4111-8111-000000000001",
+    "King Tide/Track Props":           "11111111-1111-4111-8111-000000000002",
+    "King Tide/Track Props/Rocks":     "11111111-1111-4111-8111-000000000010",
+    "King Tide/Track Props/Palms":     "11111111-1111-4111-8111-000000000011",
+    "King Tide/Track Props/Buoys":     "11111111-1111-4111-8111-000000000012",
+    "King Tide/Track Props/Logs":      "11111111-1111-4111-8111-000000000027",
+    "King Tide/Track Props/Gates":     "11111111-1111-4111-8111-000000000013",
+    "King Tide/Track Props/Indicators":"11111111-1111-4111-8111-000000000014",
     # Phase γ biome kits — keep UUIDs stable so Asset-Browser
     # bookmarks survive re-runs.
-    "Hoverbike/Track Props/Urban":     "11111111-1111-4111-8111-000000000020",
-    "Hoverbike/Track Props/Industrial":"11111111-1111-4111-8111-000000000021",
-    "Hoverbike/Track Props/Volcanic":  "11111111-1111-4111-8111-000000000022",
-    "Hoverbike/Track Props/Jungle":    "11111111-1111-4111-8111-000000000023",
+    "King Tide/Track Props/Urban":     "11111111-1111-4111-8111-000000000020",
+    "King Tide/Track Props/Industrial":"11111111-1111-4111-8111-000000000021",
+    "King Tide/Track Props/Volcanic":  "11111111-1111-4111-8111-000000000022",
+    "King Tide/Track Props/Jungle":    "11111111-1111-4111-8111-000000000023",
     # Final biome kits (Phase γ #8 follow-up — closes the remaining biome
     # gaps from `docs/level-visual-quality-research.md` Layer C / Phase γ).
-    "Hoverbike/Track Props/Venetian":  "11111111-1111-4111-8111-000000000024",
-    "Hoverbike/Track Props/Waterpark": "11111111-1111-4111-8111-000000000025",
-    "Hoverbike/Track Props/Open Sea":  "11111111-1111-4111-8111-000000000026",
+    "King Tide/Track Props/Venetian":  "11111111-1111-4111-8111-000000000024",
+    "King Tide/Track Props/Waterpark": "11111111-1111-4111-8111-000000000025",
+    "King Tide/Track Props/Open Sea":  "11111111-1111-4111-8111-000000000026",
 }
 
 
@@ -2426,7 +2426,7 @@ def _mark_collection_asset(coll: bpy.types.Collection, *, catalog_path: str, des
     # catalog the UUID points to (resolved from blender_assets.cats.txt).
     ad.catalog_id = CATALOG_UUIDS[catalog_path]
     ad.description = description
-    ad.author = "Hoverbike"
+    ad.author = "King Tide"
     # Refresh tags
     for t in list(ad.tags):
         ad.tags.remove(t)
@@ -2608,7 +2608,7 @@ def build_props() -> dict:
         position=PROP_POSITIONS["prop_rock"],
     )
     _mark_collection_asset(rock_coll,
-                            catalog_path="Hoverbike/Track Props/Rocks",
+                            catalog_path="King Tide/Track Props/Rocks",
                             description="Procedural rock — distorted icosphere with FBM noise. Tune Size, Jaggedness, Noise Scale, Seed on the HV_Prop modifier.",
                             tags=["rock", "static", "scatterable"])
     summary["rock"] = {"verts": len(rock_mesh.vertices)}
@@ -2629,7 +2629,7 @@ def build_props() -> dict:
         centroid_z = sum(palm_mesh.vertices[i].co.z for i in poly.vertices) / len(poly.vertices)
         poly.material_index = 1 if centroid_z > frond_threshold else 0
     _mark_collection_asset(palm_coll,
-                            catalog_path="Hoverbike/Track Props/Palms",
+                            catalog_path="King Tide/Track Props/Palms",
                             description="Procedural palm — tapered trunk + radial fronds. Sway gradient pre-stamped in COLOR_0.R so the foliage shader animates the leaves. Scale knob on the HV_Prop modifier.",
                             tags=["palm", "foliage", "sway", "scatterable"])
     summary["palm"] = {"verts": len(palm_mesh.vertices)}
@@ -2647,7 +2647,7 @@ def build_props() -> dict:
         wave_rider_archetype="buoy",
     )
     _mark_collection_asset(buoy_coll,
-                            catalog_path="Hoverbike/Track Props/Buoys",
+                            catalog_path="King Tide/Track Props/Buoys",
                             description="Marker buoy — pylon with emissive top. Wave-rider: bobs on the wave surface and reacts to bike impacts at runtime via the kinematic-body system (see src/game/components/wave-rider.ts).",
                             tags=["buoy", "water", "emissive", "wave-rider"])
     summary["buoy"] = {"verts": len(buoy_mesh.vertices)}
@@ -2665,7 +2665,7 @@ def build_props() -> dict:
         wave_rider_archetype="log",
     )
     _mark_collection_asset(log_coll,
-                            catalog_path="Hoverbike/Track Props/Logs",
+                            catalog_path="King Tide/Track Props/Logs",
                             description="Drift log — horizontal cylinder. Wave-rider: half-submerged, rolls with the surface normal and reacts to bike impacts (heavier feel than the buoy archetype).",
                             tags=["log", "water", "wave-rider"])
     summary["log"] = {"verts": len(log_mesh.vertices)}
@@ -2677,7 +2677,7 @@ def build_props() -> dict:
         position=PROP_POSITIONS["prop_gate"],
     )
     _mark_collection_asset(gate_coll,
-                            catalog_path="Hoverbike/Track Props/Gates",
+                            catalog_path="King Tide/Track Props/Gates",
                             description="Real gate mesh at canonical 28m x 6m gizmo dimensions. Use for decorative or fixed-position gates; spline-driven race gates remain JSON-owned.",
                             tags=["gate", "static"])
     summary["gate"] = {"verts": len(gate_mesh.vertices)}
@@ -2689,7 +2689,7 @@ def build_props() -> dict:
         position=PROP_POSITIONS["prop_turn_indicator"],
     )
     _mark_collection_asset(ti_coll,
-                            catalog_path="Hoverbike/Track Props/Indicators",
+                            catalog_path="King Tide/Track Props/Indicators",
                             description="Static chevron — for fixed-position turn hints. Curvature-driven placement lives in the addon panel (Rebuild Turn Indicators).",
                             tags=["indicator", "static", "emissive"])
     summary["turn_indicator"] = {"verts": len(ti_mesh.vertices)}
@@ -2779,35 +2779,35 @@ def build_props() -> dict:
     _add_kit("prop_lamp_post",
              build_lamp_post_mesh("prop_lamp_post_mesh"),
              [urban_metal_mat, urban_lamp_mat],
-             "Hoverbike/Track Props/Urban",
+             "King Tide/Track Props/Urban",
              "Slim street-light pole + emissive lampshade. Reads as urban dressing at race speed.",
              ["urban", "lamp", "emissive", "scatterable"])
 
     _add_kit("prop_antenna_mast",
              build_antenna_mast_mesh("prop_antenna_mast_mesh"),
              [urban_metal_mat],
-             "Hoverbike/Track Props/Urban",
+             "King Tide/Track Props/Urban",
              "Rooftop comm-tower lattice. Tall thin silhouette for skyline density.",
              ["urban", "antenna", "tall", "scatterable"])
 
     _add_kit("prop_vent_stack",
              build_vent_stack_mesh("prop_vent_stack_mesh"),
              [urban_metal_mat],
-             "Hoverbike/Track Props/Urban",
+             "King Tide/Track Props/Urban",
              "Rooftop vent with mushroom cap. HVAC clutter for urban rooftops.",
              ["urban", "vent", "scatterable"])
 
     _add_kit("prop_ac_unit",
              build_ac_unit_mesh("prop_ac_unit_mesh"),
              [urban_metal_mat],
-             "Hoverbike/Track Props/Urban",
+             "King Tide/Track Props/Urban",
              "Rooftop AC condenser unit. Boxy clutter — pairs with prop_vent_stack.",
              ["urban", "ac", "scatterable"])
 
     _add_kit("prop_signage_panel",
              build_signage_panel_mesh("prop_signage_panel_mesh"),
              [urban_sign_mat, urban_sign_emi_mat],
-             "Hoverbike/Track Props/Urban",
+             "King Tide/Track Props/Urban",
              "Billboard / signage panel on stub posts. +Y face emissive for neon-lit feel.",
              ["urban", "signage", "emissive", "scatterable"])
 
@@ -2815,21 +2815,21 @@ def build_props() -> dict:
     _add_kit("prop_container",
              build_container_mesh("prop_container_mesh"),
              [container_mat],
-             "Hoverbike/Track Props/Industrial",
+             "King Tide/Track Props/Industrial",
              "20-ft shipping container. Pairs with prop_oil_drum for harbour debris.",
              ["industrial", "container", "scatterable"])
 
     _add_kit("prop_oil_drum",
              build_oil_drum_mesh("prop_oil_drum_mesh"),
              [drum_mat],
-             "Hoverbike/Track Props/Industrial",
+             "King Tide/Track Props/Industrial",
              "55-gallon drum with rim bands. Small enough to scatter densely along docks.",
              ["industrial", "drum", "scatterable"])
 
     _add_kit("prop_mooring_bollard",
              build_mooring_bollard_mesh("prop_mooring_bollard_mesh"),
              [bollard_mat],
-             "Hoverbike/Track Props/Industrial",
+             "King Tide/Track Props/Industrial",
              "Dock mooring bollard. Reads as harbour at a glance.",
              ["industrial", "mooring", "harbor", "scatterable"])
 
@@ -2837,21 +2837,21 @@ def build_props() -> dict:
     _add_kit("prop_basalt_boulder",
              build_basalt_boulder_mesh("prop_basalt_boulder_mesh"),
              [basalt_mat],
-             "Hoverbike/Track Props/Volcanic",
+             "King Tide/Track Props/Volcanic",
              "Angular basalt boulder — beveled icosphere. Cooled-lava chunks for Kilauea.",
              ["volcanic", "rock", "scatterable"])
 
     _add_kit("prop_ash_heap",
              build_ash_heap_mesh("prop_ash_heap_mesh"),
              [ash_mat],
-             "Hoverbike/Track Props/Volcanic",
+             "King Tide/Track Props/Volcanic",
              "Low ash drift mound. Pairs with prop_basalt_boulder for caldera floors.",
              ["volcanic", "ash", "scatterable"])
 
     _add_kit("prop_scorched_stump",
              build_scorched_stump_mesh("prop_scorched_stump_mesh"),
              [scorched_mat],
-             "Hoverbike/Track Props/Volcanic",
+             "King Tide/Track Props/Volcanic",
              "Burned tree stump with jagged top. Adds vertical interest in volcanic flats.",
              ["volcanic", "stump", "scatterable"])
 
@@ -2860,7 +2860,7 @@ def build_props() -> dict:
     _add_kit("prop_fern_clump",
              fern_mesh,
              [fern_mat],
-             "Hoverbike/Track Props/Jungle",
+             "King Tide/Track Props/Jungle",
              "Ground fern cluster with sway gradient on COLOR_0.R. Foliage shader picks it up "
              "via the mat_foliage_* material name.",
              ["jungle", "foliage", "sway", "scatterable"])
@@ -2868,14 +2868,14 @@ def build_props() -> dict:
     _add_kit("prop_mossy_boulder",
              build_mossy_boulder_mesh("prop_mossy_boulder_mesh"),
              [mossy_mat],
-             "Hoverbike/Track Props/Jungle",
+             "King Tide/Track Props/Jungle",
              "Mossy rounded boulder. Softer silhouette than the volcanic basalt boulder.",
              ["jungle", "rock", "scatterable"])
 
     _add_kit("prop_fallen_pillar",
              build_fallen_pillar_mesh("prop_fallen_pillar_mesh"),
              [pillar_mat],
-             "Hoverbike/Track Props/Jungle",
+             "King Tide/Track Props/Jungle",
              "Toppled stone column lying on its side. Broken end + intact end for variety.",
              ["jungle", "pillar", "ruin", "scatterable"])
 
@@ -2883,35 +2883,35 @@ def build_props() -> dict:
     _add_kit("prop_gondola",
              build_gondola_mesh("prop_gondola_mesh"),
              [gondola_mat],
-             "Hoverbike/Track Props/Venetian",
+             "King Tide/Track Props/Venetian",
              "Stylised gondola — flat-bottom canoe with upturned ferro prow. Sits at waterline.",
              ["venetian", "boat", "water", "scatterable"])
 
     _add_kit("prop_venetian_mooring",
              build_venetian_mooring_mesh("prop_venetian_mooring_mesh"),
              [venet_post_mat, venet_stripe_mat],
-             "Hoverbike/Track Props/Venetian",
+             "King Tide/Track Props/Venetian",
              "Venice palina (mooring post) — pale stake with mid-band stripe. Pairs with prop_gondola in canals.",
              ["venetian", "mooring", "water", "scatterable"])
 
     _add_kit("prop_canal_lantern",
              build_canal_lantern_mesh("prop_canal_lantern_mesh"),
              [lantern_iron_mat, lantern_lit_mat],
-             "Hoverbike/Track Props/Venetian",
+             "King Tide/Track Props/Venetian",
              "Wrought-iron canal lantern on a short stub. Four emissive glass panes for night Venice.",
              ["venetian", "lantern", "emissive", "scatterable"])
 
     _add_kit("prop_paving_slab",
              build_paving_slab_mesh("prop_paving_slab_mesh"),
              [paving_mat],
-             "Hoverbike/Track Props/Venetian",
+             "King Tide/Track Props/Venetian",
              "Broken Istrian-stone paving slab with one chipped corner. Canal-edge rubble dressing.",
              ["venetian", "paving", "rubble", "scatterable"])
 
     _add_kit("prop_ivy_patch",
              build_ivy_patch_mesh("prop_ivy_patch_mesh"),
              [ivy_mat],
-             "Hoverbike/Track Props/Venetian",
+             "King Tide/Track Props/Venetian",
              "Wall-clinging ivy cluster of flat leaf cards. Sway gradient stamped via mat_foliage_*.",
              ["venetian", "foliage", "sway", "scatterable"])
 
@@ -2919,35 +2919,35 @@ def build_props() -> dict:
     _add_kit("prop_beach_ball",
              build_beach_ball_mesh("prop_beach_ball_mesh"),
              [beach_ball_mat],
-             "Hoverbike/Track Props/Waterpark",
+             "King Tide/Track Props/Waterpark",
              "Low-poly beach ball. Bright single colour today; trim-sheet stripes in a later pass.",
              ["waterpark", "inflatable", "small", "scatterable"])
 
     _add_kit("prop_pool_noodle",
              build_pool_noodle_mesh("prop_pool_noodle_mesh"),
              [pool_noodle_mat],
-             "Hoverbike/Track Props/Waterpark",
+             "King Tide/Track Props/Waterpark",
              "Foam pool noodle laid along +X. Bright plastic clutter for Aqualand lagoons.",
              ["waterpark", "noodle", "small", "scatterable"])
 
     _add_kit("prop_inflatable_ring",
              build_inflatable_ring_mesh("prop_inflatable_ring_mesh"),
              [ring_mat],
-             "Hoverbike/Track Props/Waterpark",
+             "King Tide/Track Props/Waterpark",
              "Pool inflatable donut — coarse torus. Sits at the waterline.",
              ["waterpark", "inflatable", "scatterable"])
 
     _add_kit("prop_slide_piece",
              build_slide_piece_mesh("prop_slide_piece_mesh"),
              [slide_mat],
-             "Hoverbike/Track Props/Waterpark",
+             "King Tide/Track Props/Waterpark",
              "Half-pipe waterslide segment — open U-channel. Broken-off Aqualand infrastructure.",
              ["waterpark", "slide", "structure", "scatterable"])
 
     _add_kit("prop_faded_sign",
              build_faded_sign_mesh("prop_faded_sign_mesh"),
              [faded_sign_mat],
-             "Hoverbike/Track Props/Waterpark",
+             "King Tide/Track Props/Waterpark",
              "Crooked single-post billboard, no emission — pre-flood leftover signage.",
              ["waterpark", "signage", "scatterable"])
 
@@ -2955,35 +2955,35 @@ def build_props() -> dict:
     _add_kit("prop_sea_stack",
              build_sea_stack_mesh("prop_sea_stack_mesh"),
              [sea_stack_mat],
-             "Hoverbike/Track Props/Open Sea",
+             "King Tide/Track Props/Open Sea",
              "Eroded sea-stack — irregular columnar rock with noise-fractured facets, height-scaled lean, waterline undercut, and a broken flat crown. Big Sur / 12-Apostles silhouette. Re-seed the builder for cluster variety.",
              ["open-sea", "rock", "tall", "scatterable"])
 
     _add_kit("prop_nav_marker",
              build_nav_marker_mesh("prop_nav_marker_mesh"),
              [nav_marker_body_mat, nav_marker_lit_mat],
-             "Hoverbike/Track Props/Open Sea",
+             "King Tide/Track Props/Open Sea",
              "Channel-marker buoy with lit triangle topmark. Pairs with prop_buoy in open water.",
              ["open-sea", "buoy", "emissive", "scatterable"])
 
     _add_kit("prop_kelp_strand",
              build_kelp_strand_mesh("prop_kelp_strand_mesh"),
              [kelp_mat],
-             "Hoverbike/Track Props/Open Sea",
+             "King Tide/Track Props/Open Sea",
              "Submerged kelp strand with vertical sway gradient. Scatter with z_max < 0 so it stays underwater.",
              ["open-sea", "foliage", "sway", "scatterable"])
 
     _add_kit("prop_foam_tuft",
              build_foam_tuft_mesh("prop_foam_tuft_mesh"),
              [foam_mat],
-             "Hoverbike/Track Props/Open Sea",
+             "King Tide/Track Props/Open Sea",
              "Surface-foam tuft — flat disc near the waterline with a faint sway. Reads as wind-driven foam.",
              ["open-sea", "foam", "sway", "scatterable"])
 
     _add_kit("prop_gull_crag",
              build_gull_crag_mesh("prop_gull_crag_mesh"),
              [gull_crag_mat],
-             "Hoverbike/Track Props/Open Sea",
+             "King Tide/Track Props/Open Sea",
              "Squat rocky outcrop — adds micro-relief between sea-stacks in open-water stretches.",
              ["open-sea", "rock", "scatterable"])
 

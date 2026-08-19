@@ -91,7 +91,7 @@ the rest. Get this wrong and you lose work, so internalize it:
 > `gateSpacing` auto-spaces them from Blender, or hand-place `cp` gates in the editor —
 > hand-placed gates are editor-owned and survive re-export.)
 
-The canonical key list lives in `tools/blender/hoverbike_addon/_legacy.py`
+The canonical key list lives in `tools/blender/kingtide_addon/_legacy.py`
 (`BLENDER_OWNED_JSON_KEYS`); the `Track` type is in
 [`src/game/tracks/types.ts`](../src/game/tracks/types.ts).
 
@@ -104,7 +104,7 @@ from the **`tracks-src/` folder name** — and that folder can be either:
 
 - **inside your clone** (simplest — just save there), or
 - a **Drive-synced `tracks-src/` outside the clone** (the team's setup; exports still
-  land in the clone via the addon's *Project root* pref / `$HOVERBIKE_REPO_ROOT`).
+  land in the clone via the addon's *Project root* pref / `$KINGTIDE_REPO_ROOT`).
 
 Either way the per-track `.blend` is **gitignored** — only the compiled
 `public/assets/tracks/<slug>.glb` and `public/tracks/<slug>.json` are committed. Raw

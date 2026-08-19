@@ -44,14 +44,14 @@ def main():
     if root not in sys.path:
         sys.path.insert(0, root)
 
-    import hoverbike_addon
+    import kingtide_addon
 
     try:
-        hoverbike_addon.register()
+        kingtide_addon.register()
     except Exception as e:  # noqa: BLE001 — tolerate already-registered
         print(f"[smoke] register() note: {e}")
 
-    from hoverbike_addon._legacy import bake_ai_splines, derive_track_json
+    from kingtide_addon._legacy import bake_ai_splines, derive_track_json
 
     sp = bpy.data.objects.get("ai_spline_main")
     if sp is None:
@@ -78,7 +78,7 @@ def main():
         # the export reads start_00's actual position, and the gate-0
         # rotation re-pins to it, so the starts MUST be at t for the
         # finish line to land on the start.
-        bpy.ops.hoverbike.snap_starts_to_spline()
+        bpy.ops.kingtide.snap_starts_to_spline()
         bake_ai_splines()
         j = derive_track_json("cape-town-drift", "https://x/cape-town-drift.glb")
         cps = j["checkpoints"]

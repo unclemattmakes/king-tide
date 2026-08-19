@@ -2,7 +2,7 @@
 
 Runs the same rendering logic the addon's *Render Track Hero* operator
 runs, but invokable from the command line for CI / batch builds. The
-addon module ``hoverbike_addon.thumbnail`` is the single source of
+addon module ``kingtide_addon.thumbnail`` is the single source of
 truth; this script just loads the package + delegates.
 
 Usage (from the repo root):
@@ -58,9 +58,9 @@ def main() -> int:
     # need the operators registered — we call the headless render_track_hero
     # helper directly, which is just a function.
     try:
-        from hoverbike_addon.thumbnail import find_camera_hero, render_track_hero
+        from kingtide_addon.thumbnail import find_camera_hero, render_track_hero
     except ImportError as e:
-        print(f"[render_track_thumbnail] couldn't import hoverbike_addon: {e}", file=sys.stderr)
+        print(f"[render_track_thumbnail] couldn't import kingtide_addon: {e}", file=sys.stderr)
         return 2
 
     import bpy

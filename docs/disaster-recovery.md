@@ -86,7 +86,7 @@ Wire it to cron / Task Scheduler / a CI nightly. `rclone sync` is one-way
 Every level and bike authoring source (`tracks-src/*.blend`,
 `bikes-src/*.blend`, AI-prop `.blend`s, concept art) lives only in the
 Google-Drive-synced content root (default `C:\project-content\hoverbike`,
-override `$HOVERBIKE_CONTENT_ROOT`). These are **gitignored** — git has none
+override `$KINGTIDE_CONTENT_ROOT`). These are **gitignored** — git has none
 of them. Drive for Desktop auto-syncs on save, so it's a live backup, but it's
 **one account**: lose the account (or a sync deletes-propagate accident) and
 every source is gone. Compiled GLBs in R2 are *not* re-authorable — they're
@@ -96,7 +96,7 @@ exports, not sources.
 
 - **Account intact, local copy lost:** reinstall Google Drive for Desktop and
   sign in; the folder reappears. Re-point the addon at your clone (add-on
-  pref "Project root" or `HOVERBIKE_REPO_ROOT`) per asset-storage.md.
+  pref "Project root" or `KINGTIDE_REPO_ROOT`) per asset-storage.md.
 - **Files deleted in Drive:** Google Drive Trash holds deletions ~30 days;
   restore from there, or from the offsite copy below.
 - **No copy anywhere:** the shipped R2 GLBs are the only recoverable artifact

@@ -1,8 +1,8 @@
 """Headless track GLB builder. Spec → .blend → GLB.
 
 Run:
-    HOVERBIKE_SPEC=specs/tracks/calibration.json \\
-    HOVERBIKE_OUTPUT=public/assets/tracks/calibration.glb \\
+    KINGTIDE_SPEC=specs/tracks/calibration.json \\
+    KINGTIDE_OUTPUT=public/assets/tracks/calibration.glb \\
       blender --background --python tools/blender/build_track.py
 
 Replaces ``tools/build_calibration_scene.py``. Reads the JSON spec,
@@ -10,12 +10,12 @@ constructs the scene programmatically (matching the legacy script's
 output one-for-one for spec.id="calibration"), saves a `.blend` to
 ``tracks-src/<id>.blend`` for human follow-up authoring, then invokes
 the existing track exporter (``tools/export_track.py``) to produce the
-GLB at ``HOVERBIKE_OUTPUT``.
+GLB at ``KINGTIDE_OUTPUT``.
 
-The save path can be overridden via ``HOVERBIKE_BLEND`` (e.g. for CI
+The save path can be overridden via ``KINGTIDE_BLEND`` (e.g. for CI
 runs that don't want to write into the source tree). To skip the
 .blend save entirely (GLB-only mode), set
-``HOVERBIKE_SKIP_BLEND_SAVE=1``.
+``KINGTIDE_SKIP_BLEND_SAVE=1``.
 """
 
 from __future__ import annotations
@@ -256,8 +256,8 @@ def build() -> None:
     # Save the .blend so authors can open and tweak. The legacy
     # build_calibration_scene.py wrote to tracks-src/<id>.blend; we
     # preserve that path for compatibility.
-    skip_blend_save = os.environ.get("HOVERBIKE_SKIP_BLEND_SAVE") == "1"
-    blend_override = os.environ.get("HOVERBIKE_BLEND")
+    skip_blend_save = os.environ.get("KINGTIDE_SKIP_BLEND_SAVE") == "1"
+    blend_override = os.environ.get("KINGTIDE_BLEND")
     if blend_override:
         blend_path = (
             blend_override
@@ -277,9 +277,9 @@ def build() -> None:
     # so we use the export logic directly.
     export_track_path = os.path.join(REPO_ROOT, "tools", "export_track.py")
     if os.path.exists(export_track_path):
-        # Pass HOVERBIKE_OUTPUT through; export_track.py reads it for the
+        # Pass KINGTIDE_OUTPUT through; export_track.py reads it for the
         # output path and validates the in-memory scene.
-        os.environ["HOVERBIKE_OUTPUT"] = out_glb
+        os.environ["KINGTIDE_OUTPUT"] = out_glb
         with open(export_track_path, "r", encoding="utf-8") as f:
             code = compile(f.read(), export_track_path, "exec")
         # Run as __main__ so its `if __name__ == "__main__"` block fires.
@@ -298,15 +298,15 @@ def build() -> None:
     # `public/tracks/<id>.json`. We DON'T overwrite an existing file by
     # default — once the in-app editor has saved a tuned version, the
     # spec is no longer the source of truth for gameplay placement.
-    # Override with HOVERBIKE_FORCE_GAMEPLAY_JSON=1 to overwrite.
+    # Override with KINGTIDE_FORCE_GAMEPLAY_JSON=1 to overwrite.
     gameplay_path = os.path.join(REPO_ROOT, "public", "tracks", f"{track_id}.json")
     glb_rel_url = f"/assets/tracks/{track_id}.glb"
     body = emit_gameplay_json(spec, glb_rel_url)
-    force = os.environ.get("HOVERBIKE_FORCE_GAMEPLAY_JSON") == "1"
+    force = os.environ.get("KINGTIDE_FORCE_GAMEPLAY_JSON") == "1"
     if os.path.exists(gameplay_path) and not force:
         print(
             f"[build-track] preserving existing {gameplay_path} "
-            f"(set HOVERBIKE_FORCE_GAMEPLAY_JSON=1 to overwrite)"
+            f"(set KINGTIDE_FORCE_GAMEPLAY_JSON=1 to overwrite)"
         )
     else:
         os.makedirs(os.path.dirname(gameplay_path), exist_ok=True)

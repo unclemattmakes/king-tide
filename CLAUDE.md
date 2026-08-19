@@ -1,4 +1,4 @@
-# Claude project notes — Hoverbike
+# Claude project notes — King Tide
 
 Loaded into every Claude session in this repo, so keep it short: an **index** of
 where to look, plus the few rules that prevent real mistakes. Detail lives in the
@@ -19,7 +19,7 @@ linked docs — extend those rather than growing this file.
 
 1. **Verify locally before you push — but CI is real signal again (2026-08-13).**
    Always run `pnpm typecheck`, `pnpm test`, `pnpm lint`, `pnpm build` (plus
-   `pnpm test:blender` for Hoverbike-addon changes) before landing. The
+   `pnpm test:blender` for King Tide-addon changes) before landing. The
    pre-push hook that runs `pnpm verify` is **opt-in and off by default** —
    `git config core.hooksPath .githooks` once per clone, or nothing gates your
    push at all. Maintainers can also bypass branch protection on `main`
@@ -75,7 +75,7 @@ linked docs — extend those rather than growing this file.
    GLBs/thumbs/opus. Full convention: [docs/asset-storage.md](docs/asset-storage.md).
 
 5. **Asset `kind` constants are mirrored** across
-   `tools/blender/hoverbike_kinds.py` and `src/engine/asset-kinds.ts`;
+   `tools/blender/kingtide_kinds.py` and `src/engine/asset-kinds.ts`;
    `tests/unit/asset-kinds.test.ts` fails if they drift. Add a value to **both**
    sides and use the `ExportedKind.*` constants, not string literals.
 
@@ -163,7 +163,7 @@ via `SkySystem.setTimeOfDay` ([sky.ts](src/engine/render/sky.ts)).
 ## Blender
 
 - **Install the addon once:** `pnpm install:blender-addon` symlinks
-  `tools/blender/hoverbike_addon/` into Blender's addons dir so code changes are
+  `tools/blender/kingtide_addon/` into Blender's addons dir so code changes are
   picked up on the next *Reload Scripts*. Re-run it if N-panel operators disappear
   after a pull. Scripts live in `tools/blender/`; `build_*.py` regenerate `.blend`s
   from JSON specs.

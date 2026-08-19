@@ -89,8 +89,8 @@ ASSET_DIR = os.path.join(REPO_ROOT, "public", "assets", "props", "ai")
 # track/landmark sources. One asset-marked .blend per prop; the content
 # root's tracks-src/ is already a registered (recursive) Blender asset
 # library, so these show up next to the procedural props automatically.
-# Override with $HOVERBIKE_CONTENT_ROOT (matches tools/convert-music.mjs).
-CONTENT_ROOT = os.environ.get("HOVERBIKE_CONTENT_ROOT", r"C:\project-content\hoverbike")
+# Override with $KINGTIDE_CONTENT_ROOT (matches tools/convert-music.mjs).
+CONTENT_ROOT = os.environ.get("KINGTIDE_CONTENT_ROOT", r"C:\project-content\hoverbike")
 LIB_BLEND_DIR = os.path.join(CONTENT_ROOT, "tracks-src", "props", "ai")
 # Concept art (the SDXL PNGs + the review contact sheet) is raw authoring
 # too — it lives in the content root's concept-art folder (Drive-backed, out

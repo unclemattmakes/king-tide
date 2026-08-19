@@ -5,8 +5,8 @@ Run from the repo root:
     blender --background tracks-src/calibration.blend --python tools/export_track.py
 
 By default, writes to public/assets/tracks/<basename>.glb. Override the output
-path via the HOVERBIKE_OUTPUT environment variable:
-    HOVERBIKE_OUTPUT=public/assets/tracks/calibration.glb \
+path via the KINGTIDE_OUTPUT environment variable:
+    KINGTIDE_OUTPUT=public/assets/tracks/calibration.glb \
       blender --background tracks-src/calibration.blend --python tools/export_track.py
 
 Validation:
@@ -39,7 +39,7 @@ NAME_PATTERNS = [
 ]
 
 
-# Mirror of PREVIEW_COLLECTION_PREFIX / SUFFIX in tools/blender/hoverbike_addon.py.
+# Mirror of PREVIEW_COLLECTION_PREFIX / SUFFIX in tools/blender/kingtide_addon.py.
 # Any view-layer collection whose name matches the addon's preview prefix is
 # author-only (wave-displaced water plane, gate gizmos, racer silhouettes,
 # turn indicators) and must not ride into the .glb.
@@ -178,7 +178,7 @@ def validate_scene() -> list[str]:
 
 
 def output_path() -> str:
-    override = os.environ.get("HOVERBIKE_OUTPUT")
+    override = os.environ.get("KINGTIDE_OUTPUT")
     if override:
         if os.path.isabs(override):
             return override

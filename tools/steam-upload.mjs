@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * SteamPipe upload orchestrator — Hoverbike (Windows depot).
+ * SteamPipe upload orchestrator — King Tide (Windows depot).
  *
  * Renders steam/*.vdf templates from env vars, stages the Windows game tree
  * into steam/content/windows/, and invokes `steamcmd +run_app_build` to push
@@ -113,7 +113,7 @@ function shortShaOrUnknown() {
 // ---- 2. Locate the Windows bundle ------------------------------------------
 //
 // The Windows depot ships an electron-builder unpacked tree (Chromium
-// bundled). Steam copies it wholesale and launches Hoverbike.exe directly.
+// bundled). Steam copies it wholesale and launches King Tide.exe directly.
 // The Deck runs this same build via Proton — there's no native Linux depot.
 
 const ELECTRON_WINDOWS_DIR = path.join(REPO_ROOT, 'dist-electron', 'win-unpacked')

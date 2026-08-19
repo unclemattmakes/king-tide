@@ -137,7 +137,7 @@ with yaw in radians), and pickups. `pnpm gen:tracks` builds:
     start pose, water tuning) the runtime loads first. **Existing
     files are preserved** by default — once you've tuned a track in
     the in-app editor, the spec is no longer the source of truth for
-    placement. Set `HOVERBIKE_FORCE_GAMEPLAY_JSON=1` to overwrite.
+    placement. Set `KINGTIDE_FORCE_GAMEPLAY_JSON=1` to overwrite.
 
 The track surface is built as a 1m-thick **slab** (configurable via
 `surface.thickness`) rather than a 0-thickness plane — that gives the
@@ -165,14 +165,14 @@ remains the higher-level entry point — that file references an
 ### Edit a bike directly (one-click flow)
 
 1. Install the addon once with `pnpm install:blender-addon` — it symlinks
-   the `tools/blender/hoverbike_addon/` package into Blender's addons dir;
-   enable **Hoverbike** under *Edit → Preferences → Add-ons*. (The addon is a
+   the `tools/blender/kingtide_addon/` package into Blender's addons dir;
+   enable **King Tide** under *Edit → Preferences → Add-ons*. (The addon is a
    package directory, not a single `.py` file.)
 2. Open `bikes-src/<id>.blend` (e.g. `bikes-src/racer.blend`).
 3. Edit. Move `bike_fairing`, sculpt `bike_body`, drag `socket_seat`,
    recolour materials — whatever the variant needs. Each variant is
    independent; nothing propagates between them.
-4. Press **N** → **Hoverbike** tab → **Export Bike to Game**. The
+4. Press **N** → **King Tide** tab → **Export Bike to Game**. The
    addon validates (one `bike_root`, all five required sockets, at
    least one collider), writes `public/assets/bikes/<id>.glb`, and on
    first export materialises a starter `specs/bikes/<id>.json` from
@@ -286,7 +286,7 @@ Notes:
    (or leave it — the addon backfills from the filename on first
    export).
 3. Edit the variant: sculpt, recolour, drag sockets, etc.
-4. **Hoverbike → Export Bike to Game**. The addon writes the GLB and
+4. **King Tide → Export Bike to Game**. The addon writes the GLB and
    creates a starter `specs/bikes/<new-id>.json` derived from extras
    + materials.
 5. The new bike appears in the manifest. Wire it into

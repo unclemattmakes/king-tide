@@ -1,7 +1,7 @@
 /**
  * Object-extras `kind` values that flow Blender → glTF → runtime.
  *
- * Mirror of the `ExportedKind` class in `tools/blender/hoverbike_kinds.py`.
+ * Mirror of the `ExportedKind` class in `tools/blender/kingtide_kinds.py`.
  * The unit test `tests/unit/asset-kinds.test.ts` parses the Python file
  * and asserts both sides stay in sync — adding a value here without a
  * matching entry there (or vice versa) fails the test.

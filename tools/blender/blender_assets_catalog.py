@@ -49,7 +49,7 @@ def merge_catalog_file(path: str, uuid_to_catalog_path: Mapping[str, str]) -> No
         path: Absolute path to ``blender_assets.cats.txt``.
         uuid_to_catalog_path: Mapping from canonical Blender catalog
             UUID strings to forward-slash catalog paths
-            (``"Hoverbike/Track Props/Palms"`` style). The simple name
+            (``"King Tide/Track Props/Palms"`` style). The simple name
             is derived as the path with ``/`` replaced by ``-``, which
             matches Blender's expectation.
     """

@@ -714,13 +714,13 @@ def _add_antigrav_spire_climb(scene) -> bool:
     scene.collection.objects.link(curve_obj)
 
     try:
-        from hoverbike_addon.antigrav_ribbon import (
+        from kingtide_addon.antigrav_ribbon import (
             build_antigrav_ribbon_from_curve,
             PROFILE_TUBE,
         )
     except ImportError:
         try:
-            result = bpy.ops.hoverbike.build_antigrav_surface()
+            result = bpy.ops.kingtide.build_antigrav_surface()
             if "FINISHED" in result:
                 return True
         except (AttributeError, RuntimeError) as e:
@@ -804,9 +804,9 @@ def _spawn_wave_zone(scene: bpy.types.Scene) -> bpy.types.Object:
 #
 # Per the brief: "jungle motes emitter — use the existing emitter
 # authoring kind from Phase A." `emitter` is a valid ExportedKind
-# (hoverbike_kinds.py::ExportedKind.EMITTER). Drop ONE emitter empty
+# (kingtide_kinds.py::ExportedKind.EMITTER). Drop ONE emitter empty
 # over the inner courtyards with conservative tunables — slow yellow
-# motes that fade. Schema mirrors the comment block in hoverbike_kinds.
+# motes that fade. Schema mirrors the comment block in kingtide_kinds.
 
 EMITTER_CONFIG: dict = {
     "name": "emitter_00_jungle_motes",
@@ -1014,10 +1014,10 @@ def _apply_sky_preset(scene: bpy.types.Scene) -> None:
     ``derive_sky_block`` emits the right JSON on export. Mirrors the
     Doge's Drift / Marina / Kilauea pattern."""
     try:
-        from hoverbike_addon.sky_preset import set_sky_tint_from_hex
+        from kingtide_addon.sky_preset import set_sky_tint_from_hex
     except ImportError:
         try:
-            from hoverbike_addon_disk.sky_preset import set_sky_tint_from_hex
+            from kingtide_addon_disk.sky_preset import set_sky_tint_from_hex
         except ImportError:
             print("  WARN: sky_preset module not reachable headless — "
                   "JSON-merge step below will land the sky block anyway.")
@@ -1131,9 +1131,9 @@ def augment_scene() -> None:
     # template-alpine reach the shift. Two passes catch overlapping-
     # bbox secondaries. Then snap the spline back onto terrain.
     print(f"{tag} shifting spline off template-alpine obstacles")
-    bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
-    bpy.ops.hoverbike.shift_spline_off_obstacles(margin=4.0)
-    bpy.ops.hoverbike.snap_spline_to_terrain()
+    bpy.ops.kingtide.shift_spline_off_obstacles(margin=4.0)
+    bpy.ops.kingtide.shift_spline_off_obstacles(margin=4.0)
+    bpy.ops.kingtide.snap_spline_to_terrain()
 
     output_blend = os.path.join(REPO_ROOT, "tracks-src", f"{SPEC.track_id}.blend")
     bpy.ops.wm.save_as_mainfile(filepath=output_blend)
@@ -1147,7 +1147,7 @@ def augment_scene() -> None:
     # *Export Track to Game* manually. Mirrors the pattern in
     # seed_track_doges_drift / seed_track_kilauea_crown.
     print(f"{tag} re-exporting GLB + JSON + manifest")
-    result = bpy.ops.hoverbike.export_track()
+    result = bpy.ops.kingtide.export_track()
     if "FINISHED" not in result:
         raise RuntimeError(
             f"{tag} export_track (post-augment) failed: {result}"

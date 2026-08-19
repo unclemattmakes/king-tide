@@ -1,4 +1,4 @@
-# Hoverbike — Prop Art Direction v1
+# King Tide — Prop Art Direction v1
 
 > **v1→v2 note:** the v1 "clean stylized toy" register below is superseded by the
 > v2 **painterly-vinyl** look. The per-family lane logic, prompts, and material-state

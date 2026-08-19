@@ -66,9 +66,9 @@ def reset_scene() -> None:
 
 
 def _load_addon_package():
-    """Load + register the ``hoverbike_addon`` package so the seed can
+    """Load + register the ``kingtide_addon`` package so the seed can
     reach into ``antigrav_ribbon.build_antigrav_ribbon_from_curve`` etc.
-    The package lives at ``tools/blender/hoverbike_addon/`` — adding
+    The package lives at ``tools/blender/kingtide_addon/`` — adding
     ``SCRIPT_DIR`` to ``sys.path`` (done above) makes the package
     importable from a clean Blender ``--background`` instance.
 
@@ -76,9 +76,9 @@ def _load_addon_package():
     writes the .blend, just without the built surfaces. Authors can
     then hit Build Anti-Grav Surface manually after opening it."""
     try:
-        import hoverbike_addon as addon
+        import kingtide_addon as addon
     except ImportError as e:
-        print(f"[seed-antigrav-showcase] hoverbike_addon import failed: {e}")
+        print(f"[seed-antigrav-showcase] kingtide_addon import failed: {e}")
         return None
     try:
         addon.register()
@@ -254,7 +254,7 @@ def build_demo_surfaces(addon) -> int:
     if addon is None:
         print("[seed-antigrav-showcase] addon missing — skipping surface builds")
         return 0
-    from hoverbike_addon import antigrav_ribbon as agr
+    from kingtide_addon import antigrav_ribbon as agr
 
     scene = bpy.context.scene
     built = 0

@@ -184,7 +184,7 @@ geometry, identical downstream (same instancing / material / drift):
   → `public/assets/sky/clouds.glb` (auto-LFS) → load with `GLTFLoader` + swap
   to our node material (cf. [foliage-sway.ts:251](../../src/engine/render/foliage-sway.ts)).
   Swapping the geometry source is a one-function change. (If we tag the meshes,
-  add `CLOUD="cloud"` to both `hoverbike_kinds.py` and `asset-kinds.ts` — the
+  add `CLOUD="cloud"` to both `kingtide_kinds.py` and `asset-kinds.ts` — the
   unit test enforces the mirror.)
 
 > This sequencing respects the "toy mesh" *look* choice while keeping the

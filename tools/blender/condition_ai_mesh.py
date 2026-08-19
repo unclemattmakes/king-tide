@@ -1,4 +1,4 @@
-"""Condition an AI-generated mesh into a pipeline-legal Hoverbike prop.
+"""Condition an AI-generated mesh into a pipeline-legal King Tide prop.
 
 AI text/image-to-3D generators (Hyper3D Rodin, Meshy, Tripo, TRELLIS,
 Hunyuan3D) emit dense, un-instanced, arbitrary-topology meshes with none
@@ -46,8 +46,8 @@ Two ways to run it:
 
   • HEADLESS (batch) — condition a file straight to a GLB::
 
-        HOVERBIKE_INPUT=raw/coral_fan.glb HOVERBIKE_PROP_ID=coral_fan \\
-        HOVERBIKE_OUTPUT=public/assets/props/coral_fan.glb \\
+        KINGTIDE_INPUT=raw/coral_fan.glb KINGTIDE_PROP_ID=coral_fan \\
+        KINGTIDE_OUTPUT=public/assets/props/coral_fan.glb \\
           blender --background --python tools/blender/condition_ai_mesh.py
 
 Authoring frame matches build_prop.py / build_bike.py: Blender X=right,
@@ -67,7 +67,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from tools.blender.hoverbike_kinds import ExportedKind  # noqa: E402
+from tools.blender.kingtide_kinds import ExportedKind  # noqa: E402
 from tools.blender.vertex_attrs import (  # noqa: E402
     DEFAULT_TERRAIN,
     set_color_attr,
@@ -480,24 +480,24 @@ def _import_any(path: str) -> bpy.types.Object:
 def main() -> None:
     from tools.blender.common import export_glb, reset_scene
 
-    inp = os.environ["HOVERBIKE_INPUT"]
-    prop_id = os.environ["HOVERBIKE_PROP_ID"]
-    out = os.environ.get("HOVERBIKE_OUTPUT")
+    inp = os.environ["KINGTIDE_INPUT"]
+    prop_id = os.environ["KINGTIDE_PROP_ID"]
+    out = os.environ.get("KINGTIDE_OUTPUT")
     reset_scene()
 
     obj = _import_any(inp)
     root = condition_object(
         obj,
         prop_id=prop_id,
-        family=os.environ.get("HOVERBIKE_FAMILY", "prop"),
-        target_tris=int(os.environ.get("HOVERBIKE_TARGET_TRIS", "400")),
-        target_height=(float(os.environ["HOVERBIKE_TARGET_HEIGHT"])
-                       if os.environ.get("HOVERBIKE_TARGET_HEIGHT") else None),
-        source_up=os.environ.get("HOVERBIKE_SOURCE_UP", "Z"),
-        collider=os.environ.get("HOVERBIKE_COLLIDER", "box"),
-        tint=os.environ.get("HOVERBIKE_TINT"),
-        foliage=os.environ.get("HOVERBIKE_FOLIAGE", "0") == "1",
-        keep_material=os.environ.get("HOVERBIKE_KEEP_MATERIAL", "0") == "1",
+        family=os.environ.get("KINGTIDE_FAMILY", "prop"),
+        target_tris=int(os.environ.get("KINGTIDE_TARGET_TRIS", "400")),
+        target_height=(float(os.environ["KINGTIDE_TARGET_HEIGHT"])
+                       if os.environ.get("KINGTIDE_TARGET_HEIGHT") else None),
+        source_up=os.environ.get("KINGTIDE_SOURCE_UP", "Z"),
+        collider=os.environ.get("KINGTIDE_COLLIDER", "box"),
+        tint=os.environ.get("KINGTIDE_TINT"),
+        foliage=os.environ.get("KINGTIDE_FOLIAGE", "0") == "1",
+        keep_material=os.environ.get("KINGTIDE_KEEP_MATERIAL", "0") == "1",
     )
 
     if out:
@@ -505,7 +505,7 @@ def main() -> None:
         export_glb(out)
         print(f"[condition] exported → {out}")
     else:
-        print(f"[condition] conditioned {root.name} (no HOVERBIKE_OUTPUT — not exported)")
+        print(f"[condition] conditioned {root.name} (no KINGTIDE_OUTPUT — not exported)")
 
 
 if __name__ == "__main__":

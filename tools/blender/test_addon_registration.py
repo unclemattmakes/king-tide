@@ -1,4 +1,4 @@
-"""Headless smoke test: confirm the Hoverbike addon registers every
+"""Headless smoke test: confirm the King Tide addon registers every
 operator and panel it claims to.
 
 Run from a Node wrapper (``pnpm test:blender``) which feeds this script
@@ -7,7 +7,7 @@ to a background Blender. The test:
   1. Enables the addon (fails the run if enable itself raises).
   2. Walks every ``.py`` file inside the addon (or just the file if
      the addon is still a single .py) and finds every class declared
-     with the ``HOVERBIKE_OT_…`` / ``HOVERBIKE_PT_…`` prefix.
+     with the ``KINGTIDE_OT_…`` / ``KINGTIDE_PT_…`` prefix.
   3. Asserts each declared class is actually present in
      ``bpy.types.Operator.__subclasses__()`` or
      ``bpy.types.Panel.__subclasses__()``. Catches the silent
@@ -19,7 +19,7 @@ This shape works through the in-progress monolith → package refactor:
 during the migration each module owns its own ``register()`` /
 ``unregister()``, so there's no single ``_classes`` tuple to read.
 Walking source declarations is the durable contract — anything you
-``class HOVERBIKE_OT_foo`` must end up registered, period.
+``class KINGTIDE_OT_foo`` must end up registered, period.
 
 Exits 0 on success, 1 on any failure (with a per-class report).
 """
@@ -33,9 +33,9 @@ from typing import Iterable
 
 import bpy
 
-ADDON_MODULE = "hoverbike_addon"
-EXPECTED_PREFIXES = ("HOVERBIKE_OT_", "HOVERBIKE_PT_")
-CLASS_DECL_PATTERN = re.compile(r"^class\s+(HOVERBIKE_(?:OT|PT)_\w+)\s*\(", re.MULTILINE)
+ADDON_MODULE = "kingtide_addon"
+EXPECTED_PREFIXES = ("KINGTIDE_OT_", "KINGTIDE_PT_")
+CLASS_DECL_PATTERN = re.compile(r"^class\s+(KINGTIDE_(?:OT|PT)_\w+)\s*\(", re.MULTILINE)
 
 
 def _fail(msg: str) -> None:
@@ -64,11 +64,11 @@ def _addon_source_files(module) -> list[str]:
     """Every .py file that contributes to the addon. Handles both
     layouts:
 
-      * single-file addon (legacy): ``hoverbike_addon.py``
-      * package addon: ``hoverbike_addon/__init__.py`` + siblings
+      * single-file addon (legacy): ``kingtide_addon.py``
+      * package addon: ``kingtide_addon/__init__.py`` + siblings
 
     For a package we walk recursively under the package root so a
-    future ``hoverbike_addon/road/operators.py`` would still be scanned.
+    future ``kingtide_addon/road/operators.py`` would still be scanned.
     """
     files: list[str] = []
     if hasattr(module, "__path__"):
@@ -84,7 +84,7 @@ def _addon_source_files(module) -> list[str]:
 
 
 def _scan_declared_classes(module) -> set[str]:
-    """All HOVERBIKE_OT/PT classes declared anywhere in the addon's
+    """All KINGTIDE_OT/PT classes declared anywhere in the addon's
     source tree. Raw lexical scan — doesn't care about indentation /
     conditional definition; if it looks like a class declaration, we
     expect it to register."""
@@ -126,7 +126,7 @@ def main() -> int:
 
     failures: list[str] = []
 
-    # Every declared HOVERBIKE_OT/PT class must actually be registered.
+    # Every declared KINGTIDE_OT/PT class must actually be registered.
     # Catches:
     #   * Class defined but not added to any module's register() — the
     #     manual-tuple foot-gun.
@@ -141,8 +141,8 @@ def main() -> int:
     layout = "package" if hasattr(module, "__path__") else "single-file"
     location = getattr(module, "__path__", [module.__file__])[0]
     print(f"[addon-smoke] addon module: {ADDON_MODULE} ({layout}) at {location}")
-    print(f"[addon-smoke] HOVERBIKE_OT/PT classes declared in source: {len(declared)}")
-    print(f"[addon-smoke] HOVERBIKE_OT/PT classes registered with Blender: {len(registered)}")
+    print(f"[addon-smoke] KINGTIDE_OT/PT classes declared in source: {len(declared)}")
+    print(f"[addon-smoke] KINGTIDE_OT/PT classes registered with Blender: {len(registered)}")
 
     if failures:
         for f in failures:
@@ -150,7 +150,7 @@ def main() -> int:
         print(f"[addon-smoke] FAILED ({len(failures)} issue(s))", file=sys.stderr)
         return 1
 
-    _ok(f"all {len(declared)} HOVERBIKE_OT/PT classes register cleanly")
+    _ok(f"all {len(declared)} KINGTIDE_OT/PT classes register cleanly")
     return 0
 
 

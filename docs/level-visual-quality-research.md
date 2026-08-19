@@ -151,7 +151,7 @@ scatter graph.**
    emits `EXT_mesh_gpu_instancing`. The runtime already lifts these
    into `THREE.InstancedMesh` with no client-side change.
 
-2. Add an addon operator **`Hoverbike → Add → Scatter Zone`** that
+2. Add an addon operator **`King Tide → Add → Scatter Zone`** that
    drops a `scatter_<name>` Empty + a target mesh child with
    `HV_Scatter` pre-attached, defaults driven by which biome
    template is active (palms+rocks on island, palms+driftwood on
@@ -514,7 +514,7 @@ texture work. The shipped pipeline gets used to its existing capacity.
 ### Phase β — Scatter system + first conversion (3–4 days)
 
 5. ✅ Author `HV_Scatter` GN group + addon operator. — `seed_props_library.py::build_scatter_group`
-   + `hoverbike_addon/scatter.py` (commits 990b2b7 + fe1ad51 closed
+   + `kingtide_addon/scatter.py` (commits 990b2b7 + fe1ad51 closed
    the exporter realize-pass gap).
 6. ✅ Convert South Beach from 16 hand-placed palms to a 400-palm
    scatter zone + sand-edge rock scatter; document as the
@@ -564,7 +564,7 @@ filler.
     (`public/assets/decals/atlas.png`, 16 procedural placeholder cells —
     rebuild with `pnpm gen:decal-atlas`). Addon ships an *Add Decal*
     operator + sub-panel with a re-cell picker
-    ([`hoverbike_addon/decal.py`](../tools/blender/hoverbike_addon/decal.py)).
+    ([`kingtide_addon/decal.py`](../tools/blender/kingtide_addon/decal.py)).
 11. ⚠️ Author the first biome trim sheet (Shibuya — highest visual ROI)
     + re-UV the affected landmarks. — **First half shipped**:
     `pnpm gen:trim-sheets` builds

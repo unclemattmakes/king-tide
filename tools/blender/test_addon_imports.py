@@ -1,4 +1,4 @@
-"""Headless smoke test: resolve every lazy import inside the Hoverbike
+"""Headless smoke test: resolve every lazy import inside the King Tide
 addon, fail fast if any references a name that isn't actually exported.
 
 Background. The addon does ``from ._legacy import _foo`` inside
@@ -35,7 +35,7 @@ from typing import Iterable
 
 import bpy
 
-ADDON_MODULE = "hoverbike_addon"
+ADDON_MODULE = "kingtide_addon"
 
 
 def _fail(msg: str) -> None:

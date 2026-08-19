@@ -96,7 +96,7 @@ async function bootRacePage(browser, extra = '') {
   // Stored water tuning would skew every row — measure constructor defaults.
   await page.addInitScript(() => {
     try {
-      window.localStorage.removeItem('hoverbike.waterDebug.v10')
+      window.localStorage.removeItem('kingtide.waterDebug.v10')
     } catch {}
   })
   const url = `${BASE}/?race=1&track=${TRACK}&bike=${BIKE}&perf=1${extra}`

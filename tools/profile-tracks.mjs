@@ -267,7 +267,7 @@ function fmt(n, digits = 1) {
  */
 function renderMarkdown(results, meta) {
   const lines = []
-  lines.push('# Hoverbike desktop perf profile')
+  lines.push('# King Tide desktop perf profile')
   lines.push('')
   lines.push(`- **Date:** ${meta.date}`)
   lines.push(`- **Host:** ${meta.host}`)

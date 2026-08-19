@@ -28,7 +28,7 @@ corners.
 6. **Camera tilt + skid audio.** Sells the slide more than the physics do.
 7. **Anti-snake mechanics** (minimum hold time, cooldown). Required to prevent straightaway abuse.
 
-## Hoverbike fit — the tension
+## King Tide fit — the tension
 
 The signature mechanic is *already* called "wave mastery" but it's the
 **trick-hop** system (vertical/timing). MK drift is **lateral/spatial**.

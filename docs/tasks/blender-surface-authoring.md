@@ -33,7 +33,7 @@ push to `claude/pensive-cray-K7PTt`.
 - **`src/engine/render/glb-track.ts`** `attachTrackColliders()` already
   reads `obj.userData.surface` (validated via `asSurfaceType`, unknowns
   ignored) and tags the collider in the surface registry.
-- **`tools/blender/hoverbike_addon/export.py`** already exports with
+- **`tools/blender/kingtide_addon/export.py`** already exports with
   `export_extras=True` (two call sites). So **any
   `obj["surface"] = "ice"` custom property automatically flows into the
   glTF extras → `userData.surface` at runtime.** No export-pipeline
@@ -42,7 +42,7 @@ push to `claude/pensive-cray-K7PTt`.
 ## What to build
 
 ### 1. Python `SurfaceType` mirror
-Add a `SurfaceType` class to `tools/blender/hoverbike_kinds.py`
+Add a `SurfaceType` class to `tools/blender/kingtide_kinds.py`
 alongside `ExportedKind`, with the same six values as the TS side.
 Follow the existing `ExportedKind` docstring/style. This becomes the
 single source of truth for the Python side. Use these constants (not
@@ -51,7 +51,7 @@ string literals) at all new call sites.
 ### 2. Sync test (definition-of-done gate)
 Add `tests/unit/surface-kinds-sync.test.ts` (or extend
 `tests/unit/asset-kinds.test.ts`) that parses `class SurfaceType:` out
-of `hoverbike_kinds.py` and asserts it matches
+of `kingtide_kinds.py` and asserts it matches
 `Object.values(SurfaceType)` from `src/engine/sim/surface-types.ts`.
 **Copy the parsing approach in `tests/unit/asset-kinds.test.ts`** —
 its `parsePythonExportedKind()` slices the class body up to the next
@@ -61,8 +61,8 @@ sets for a precise drift error. Run with `pnpm test`.
 ### 3. Addon UI
 Add a panel control + operator(s) that set `obj["surface"]` on the
 selected mesh object(s). Follow the module pattern in
-`tools/blender/hoverbike_addon/boost_pad.py` / `decal.py`:
-- a `HOVERBIKE_OT_*` operator, `bl_idname = "hoverbike.set_surface"`,
+`tools/blender/kingtide_addon/boost_pad.py` / `decal.py`:
+- a `KINGTIDE_OT_*` operator, `bl_idname = "kingtide.set_surface"`,
   registered via the module's `register()`,
 - surfaced in `panel.py` (selection-driven sub-panel is fine — it's a
   per-mesh property),
@@ -71,7 +71,7 @@ selected mesh object(s). Follow the module pattern in
 - a "clear surface tag" action that **deletes** the key (so the
   runtime falls back to DEFAULT) rather than setting `"default"`.
 
-Optionally surface it in the top-bar Hoverbike menu (`menu.py`) +
+Optionally surface it in the top-bar King Tide menu (`menu.py`) +
 Quick Pie if it fits the existing categorisation, but the N-panel
 control is the must-have.
 
@@ -98,7 +98,7 @@ control is the must-have.
 
 ## Acceptance checklist
 
-- [ ] `SurfaceType` exists in `hoverbike_kinds.py` with all six values.
+- [ ] `SurfaceType` exists in `kingtide_kinds.py` with all six values.
 - [ ] Sync test passes and fails loud on drift between the two sides.
 - [ ] Addon panel can tag **and** clear a mesh's surface;
       `pnpm install:blender-addon` picks it up.
@@ -115,9 +115,9 @@ control is the must-have.
 |---|---|
 | `src/engine/sim/surface-types.ts` | TS source of truth (do not edit) |
 | `src/engine/render/glb-track.ts` | runtime read of `userData.surface` |
-| `tools/blender/hoverbike_addon/export.py` | `export_extras=True` (already done) |
-| `tools/blender/hoverbike_kinds.py` | add `SurfaceType` here |
+| `tools/blender/kingtide_addon/export.py` | `export_extras=True` (already done) |
+| `tools/blender/kingtide_kinds.py` | add `SurfaceType` here |
 | `tests/unit/asset-kinds.test.ts` | copy the sync-test parsing approach |
-| `tools/blender/hoverbike_addon/boost_pad.py` | operator + custom-prop template |
-| `tools/blender/hoverbike_addon/panel.py` | where panel sections register |
+| `tools/blender/kingtide_addon/boost_pad.py` | operator + custom-prop template |
+| `tools/blender/kingtide_addon/panel.py` | where panel sections register |
 | `docs/drift-deep-dive.md` | full surface-system design |

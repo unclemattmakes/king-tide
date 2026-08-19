@@ -32,8 +32,8 @@
  *   node tools/convert-music.mjs <srcDir> [--force] [--bitrate 128k]
  *
  * Env overrides:
- *   HOVERBIKE_MUSIC_SRC     source dir of .mp3s (else <content>/audio/music)
- *   HOVERBIKE_CONTENT_ROOT  content root (default C:/project-content/hoverbike)
+ *   KINGTIDE_MUSIC_SRC     source dir of .mp3s (else <content>/audio/music)
+ *   KINGTIDE_CONTENT_ROOT  content root (default C:/project-content/hoverbike)
  *   FFMPEG_EXE              explicit ffmpeg path (else PATH, else winget glob)
  *   MUSIC_OPUS_BITRATE      target bitrate (default 112k)
  */
@@ -54,9 +54,9 @@ const bitrate =
     : process.env.MUSIC_OPUS_BITRATE || '112k'
 const positional = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--bitrate')
 
-const contentRoot = process.env.HOVERBIKE_CONTENT_ROOT || 'C:/project-content/hoverbike'
+const contentRoot = process.env.KINGTIDE_CONTENT_ROOT || 'C:/project-content/hoverbike'
 const srcDir =
-  positional[0] || process.env.HOVERBIKE_MUSIC_SRC || join(contentRoot, 'audio', 'music')
+  positional[0] || process.env.KINGTIDE_MUSIC_SRC || join(contentRoot, 'audio', 'music')
 const outDir = join(repoRoot, 'public', 'audio', 'music')
 const manifestPath = join(repoRoot, 'src', 'engine', 'audio', 'soundtrack.generated.ts')
 
@@ -130,7 +130,7 @@ if (!ffmpeg) {
 }
 if (!existsSync(srcDir)) {
   console.error(`[music] source dir not found: ${srcDir}`)
-  console.error('        Set HOVERBIKE_MUSIC_SRC or pass the dir as the first argument.')
+  console.error('        Set KINGTIDE_MUSIC_SRC or pass the dir as the first argument.')
   process.exit(1)
 }
 mkdirSync(outDir, { recursive: true })

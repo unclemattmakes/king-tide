@@ -99,7 +99,7 @@ and going destructive.
 4. Tweak modifier-panel global knobs for shelf depth, erosion, etc.
 5. When the silhouette reads right, **Apply the modifier** (Object →
    Convert → Mesh), edit the AI spline / gates / starts on top, then
-   export via the Hoverbike addon's *Export Track to Game* button.
+   export via the King Tide addon's *Export Track to Game* button.
 
 ### COLOR_0 stamp (per the Item 6 vertex-attribute spec)
 
@@ -242,7 +242,7 @@ def build_terrain_mesh() -> bpy.types.Object:
         anchor.data[i].color = (1.0, 1.0, 1.0, 1.0)
     # Mark it as the *active* color attribute so glTF export picks it
     # up — combined with ``export_vertex_color="ACTIVE"`` in
-    # ``hoverbike.export_track`` this guarantees the GN-stamped
+    # ``kingtide.export_track`` this guarantees the GN-stamped
     # COLOR_0 (added on the evaluated mesh) actually rides into the
     # .glb. The Mesh API requires going through ``active_color`` (the
     # attribute reference) rather than the int index here.
@@ -590,7 +590,7 @@ def build_template_island_group(sub: bpy.types.NodeTree) -> bpy.types.NodeTree:
     # with "No results found". HV_PeakProfile (the per-peak sub-group)
     # has no Geometry sockets and is never attached directly, so it
     # stays is_modifier=False. The load_post migration in
-    # hoverbike_addon/handlers.py flips this flag on legacy .blends
+    # kingtide_addon/handlers.py flips this flag on legacy .blends
     # whose groups were created before this fix.
     g.is_modifier = True
 
@@ -1191,7 +1191,7 @@ def build_terrain_material(terrain: bpy.types.Object) -> None:
 
     The full node-graph (≈19 nodes: two altitude ColorRamps mixed by
     slope, with variation noise + wet-band darken) lives in the addon
-    at ``hoverbike_addon/terrain_material.py``. The same builder is
+    at ``kingtide_addon/terrain_material.py``. The same builder is
     also called by the addon's ``apply_terrain_vertex_colors`` operator
     when an author-rolled terrain (ANT Landscape, heightmap, sculpt)
     needs the material for its viewport preview — so the seed script
@@ -1208,7 +1208,7 @@ def build_terrain_material(terrain: bpy.types.Object) -> None:
     if addon is None:
         print("[seed-template-island] WARNING: addon not loadable; skipping terrain material")
         return
-    from hoverbike_addon_disk import terrain_material  # type: ignore[import-not-found]
+    from kingtide_addon_disk import terrain_material  # type: ignore[import-not-found]
 
     mat = terrain_material.ensure_mat_terrain_main(rebuild=True)
     if terrain.data.materials:
@@ -1253,23 +1253,23 @@ def organize_collections() -> None:
 
 
 def _load_addon_module():
-    """Import the in-repo ``hoverbike_addon`` package via its file path
+    """Import the in-repo ``kingtide_addon`` package via its file path
     rather than the registered-addon name. The installed-addons copy at
-    ``%APPDATA%/.../addons/hoverbike_addon/`` may lag the working tree
+    ``%APPDATA%/.../addons/kingtide_addon/`` may lag the working tree
     on a fresh seed run; loading by file path guarantees we get the
     current source's preview helpers regardless of what Blender has
     registered. Post-2026-05 the addon is a package, not a single
-    ``hoverbike_addon.py``; ``submodule_search_locations`` makes the
+    ``kingtide_addon.py``; ``submodule_search_locations`` makes the
     internal ``from . import ...`` lines resolve under the disk alias."""
     import importlib.util
     import sys
-    pkg_dir = os.path.join(SCRIPT_DIR, "hoverbike_addon")
+    pkg_dir = os.path.join(SCRIPT_DIR, "kingtide_addon")
     init_file = os.path.join(pkg_dir, "__init__.py")
     if not os.path.exists(init_file):
         print(f"[seed-template-island] WARNING: {init_file} not found; skipping previews")
         return None
     spec = importlib.util.spec_from_file_location(
-        "hoverbike_addon_disk",
+        "kingtide_addon_disk",
         init_file,
         submodule_search_locations=[pkg_dir],
     )
@@ -1277,7 +1277,7 @@ def _load_addon_module():
         print(f"[seed-template-island] WARNING: could not load spec for {init_file}; skipping previews")
         return None
     addon = importlib.util.module_from_spec(spec)
-    sys.modules["hoverbike_addon_disk"] = addon
+    sys.modules["kingtide_addon_disk"] = addon
     spec.loader.exec_module(addon)
     return addon
 
@@ -1290,7 +1290,7 @@ def add_previews() -> None:
 
     All previews live in their own ``_hoverbike_*_preview`` collections
     which the export-track operator excludes from GLB output (see
-    ``_PreviewCollectionsHidden`` in hoverbike_addon.py), so this is
+    ``_PreviewCollectionsHidden`` in kingtide_addon.py), so this is
     pure authoring sugar."""
     addon = _load_addon_module()
     if addon is None:

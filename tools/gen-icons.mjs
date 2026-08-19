@@ -37,7 +37,7 @@ const ICONS_DIR = path.resolve(
 
 mkdirSync(ICONS_DIR, { recursive: true })
 
-// Hoverbike-teal placeholder color.
+// King Tide-teal placeholder color.
 const R = 0x00
 const G = 0xb4
 const B = 0xb4

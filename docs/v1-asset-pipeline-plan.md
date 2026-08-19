@@ -1,4 +1,4 @@
-# Hoverbike — v1 Asset Pipeline & Production Plan
+# King Tide — v1 Asset Pipeline & Production Plan
 
 > Tech-artist read of the work outlined in
 > [v1-work-breakdown.md](./v1-work-breakdown.md) and the content
@@ -86,7 +86,7 @@ wave_zone_NN  (empty cube)
 
 Render side: sample zones in the existing OceanFFT amplitude pass.
 Sim side: same lookup in `wave-field.ts`. Authoring side: a `WaveZone`
-section in the Hoverbike sidebar with `Add Wave Zone` / live wireframe
+section in the King Tide sidebar with `Add Wave Zone` / live wireframe
 preview that scrubs amplitude in viewport.
 
 **Unblocks:** every wave-heavy track (Maw, Hatteras, Aqualand, Liberty,
@@ -352,7 +352,7 @@ These rules govern *how* the asset work happens, not what gets built:
    handles every concrete tower; vertex-color masks differentiate.
    Same rule for `mat_facade_*`, `mat_water_*`, `mat_foliage_*`.
 6. **Stay inside the export contract.** New kinds get added to
-   `hoverbike_kinds.py` AND `asset-kinds.ts` in the same PR — the CI
+   `kingtide_kinds.py` AND `asset-kinds.ts` in the same PR — the CI
    test enforces parity.
 7. **Cap fidelity at "reads correctly at 40 m/s, 60 fps."** The
    target framerate is the design budget; chasing screenshots above
@@ -479,7 +479,7 @@ the obstacle collector now backstops `_largest_terrain_mesh` with a
 out-sized the actual ground plane), and `_OBSTACLE_NAME_EXCLUDES`
 gained `antigrav_` + `_rim` so ridable swept surfaces and ring-shaped
 colliders (Kilauea's caldera rim) no longer false-positive. Shibuya,
-Marina, Doge's seeds now call `hoverbike.shift_spline_off_obstacles`
+Marina, Doge's seeds now call `kingtide.shift_spline_off_obstacles`
 in their augment pass to auto-nudge any downtown-plinth-clipping
 anchors. End state: **all five tracks lint clean (0 errors, 0
 warnings)**. Animated gantry-crane runtime + lava emissive shader
