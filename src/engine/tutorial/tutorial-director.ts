@@ -65,6 +65,11 @@ export interface TutorialDirector {
    *  (1 = MT, 2 = SMT, 3 = UMT). The director keeps the max tier
    *  seen this beat. */
   notifyDrift(tier: number): void
+  /** Out-of-band: launchGradeSystem graded a takeoff this frame. */
+  notifyLaunch(quality: number): void
+  /** Out-of-band: launchGradeSystem graded a landing this frame. The
+   *  director keeps the best quality seen this beat. */
+  notifyLanding(quality: number): void
   /** Current beat being shown (or `null` if completed / not started). */
   currentBeat(): TutorialBeat | null
   /** Index of the current beat in the script's beat list. */
@@ -86,6 +91,8 @@ export function createTutorialDirector(
   let pumpEventsThisBeat = 0
   let orbitTouchedThisBeat = false
   let driftTierThisBeat = 0
+  let launchesThisBeat = 0
+  let bestLandingQualityThisBeat = 0
   let completed = false
   let armed = false
 
@@ -95,6 +102,8 @@ export function createTutorialDirector(
     pumpEventsThisBeat = 0
     orbitTouchedThisBeat = false
     driftTierThisBeat = 0
+    launchesThisBeat = 0
+    bestLandingQualityThisBeat = 0
     armed = true
     const beat = script.beats[idx]
     if (beat && events.onBeatArmed) events.onBeatArmed(beat)
@@ -139,6 +148,8 @@ export function createTutorialDirector(
         inAntiGrav: sample.inAntiGrav,
         orbitTouchedThisBeat,
         driftTierThisBeat,
+        launchesThisBeat,
+        bestLandingQualityThisBeat,
       }
       if (evaluatePredicate(beat, ctx)) {
         clearBeat(beat, 'performed')
@@ -157,6 +168,14 @@ export function createTutorialDirector(
     notifyDrift(tier) {
       if (!completed && armed && tier > driftTierThisBeat) {
         driftTierThisBeat = Math.max(0, Math.min(3, Math.floor(tier)))
+      }
+    },
+    notifyLaunch(quality) {
+      if (!completed && armed && quality >= 0) launchesThisBeat += 1
+    },
+    notifyLanding(quality) {
+      if (!completed && armed && quality > bestLandingQualityThisBeat) {
+        bestLandingQualityThisBeat = Math.min(1, quality)
       }
     },
     currentBeat() {

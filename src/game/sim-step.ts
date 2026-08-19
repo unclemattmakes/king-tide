@@ -22,6 +22,7 @@ import {
 import { driftSystem } from './systems/drift'
 import { hoverSystem } from './systems/hover'
 import { applyPeerInputs, EMPTY_PEER_INPUTS } from './systems/input-apply'
+import { launchGradeSystem } from './systems/launch-grade'
 import { type OobConfig, outOfBoundsSystem } from './systems/out-of-bounds'
 import { boostTickSystem, pickupSystem, pickupUseSystem } from './systems/pickup'
 import { riderCrashSystem } from './systems/rider-crash'
@@ -213,6 +214,10 @@ export function simulateStep(
   // Applying the vertical impulse here (before `phys.step()` below)
   // means the bike's lift integrates this tick rather than next.
   trickHopSystem(sim, phys)
+  // Launch/landing grade — right after trick-hop so it reads the same
+  // fresh HoverState edges, and before boostMeterSystem so a landing
+  // reward integrates into the meter this same tick.
+  launchGradeSystem(sim, phys)
   // Drift state machine — runs after trick-hop so the small-hop
   // (drift initiator's visible tell) has already fired its impulse,
   // and reads the same fresh `HoverState.isGrounded`. Doesn't apply

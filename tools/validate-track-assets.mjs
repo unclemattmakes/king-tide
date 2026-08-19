@@ -122,7 +122,11 @@ for (const f of files) {
     if (Array.isArray(json.audio.ambient)) {
       for (const a of json.audio.ambient) {
         if (typeof a === 'string' && a) {
-          refs.push({ ref: a, kind: 'audio.ambient', path: join(PUBLIC_DIR, 'audio', 'ambient', a) })
+          refs.push({
+            ref: a,
+            kind: 'audio.ambient',
+            path: join(PUBLIC_DIR, 'audio', 'ambient', a),
+          })
         }
       }
     }

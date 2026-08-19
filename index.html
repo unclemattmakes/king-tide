@@ -2579,12 +2579,14 @@
       body[data-large-text="1"] #hud-audio,
       body[data-large-text="1"] #hud-room,
       body[data-large-text="1"] .wp-shell,
+      body[data-large-text="1"] .lg-shell,
       body[data-large-text="1"] .ag-shell,
       body[data-large-text="1"] .tut-shell {
         font-size: 125%;
       }
       /* biome-ignore-start lint/complexity/noImportantStyles: required to defeat per-feature HUD shell rules of higher specificity. */
       body[data-high-contrast="1"] .wp-shell,
+      body[data-high-contrast="1"] .lg-shell,
       body[data-high-contrast="1"] .ag-shell,
       body[data-high-contrast="1"] .tut-shell {
         background: #000 !important;
@@ -2592,6 +2594,7 @@
         border: 1px solid #fff !important;
       }
       body[data-reduced-flash="1"] .wp-shell,
+      body[data-reduced-flash="1"] .lg-shell,
       body[data-reduced-flash="1"] .ag-shell,
       body[data-reduced-flash="1"] .tut-shell {
         animation: none !important;
@@ -2608,6 +2611,13 @@
       }
       body[data-cb="tritanopia"] .wp-shell {
         --wp-accent: #33cccc !important; /* swap yellow accent → cyan along the resolvable axis */
+      }
+      body[data-cb="deuteranopia"] .lg-shell,
+      body[data-cb="protanopia"] .lg-shell {
+        --lg-accent: #ff8800 !important; /* verdict accent → high-luma orange */
+      }
+      body[data-cb="tritanopia"] .lg-shell {
+        --lg-accent: #33cccc !important; /* verdict accent → cyan along the resolvable axis */
       }
       /* biome-ignore-end lint/complexity/noImportantStyles: HUD shells set their own --accent inline; we have to win the cascade. */
 
@@ -2885,6 +2895,63 @@
         40% { transform: scale(1.5); opacity: 1; }
         100% { transform: scale(1); opacity: 1; }
       }
+      /* Launch-grade verdict chyron — one band above the wave-pump
+         slot so a trick flash and a jump verdict never overprint.
+         Same shell grammar as the pump widget; the verdict tier tints
+         the accent (clean = gold, ok = cyan, sloppy = dim slate) so
+         the read works from color alone at speed. */
+      #hud-launch-grade {
+        bottom: 29%; left: 50%; transform: translateX(-50%);
+        min-width: 200px; min-height: 12px;
+      }
+      #hud-launch-grade .lg-shell {
+        display: flex; align-items: center; gap: 10px;
+        opacity: 0;
+        transition: opacity 220ms var(--ease-out);
+        --lg-strength: 0.5;
+        --lg-accent: var(--bc-cyan);
+      }
+      #hud-launch-grade .lg-shell.lg-clean { --lg-accent: var(--bc-yellow); }
+      #hud-launch-grade .lg-shell.lg-sloppy { --lg-accent: #7d95a3; }
+      #hud-launch-grade .lg-shell.lg-active { opacity: 1; }
+      #hud-launch-grade .lg-dot {
+        width: 10px; height: 10px;
+        background: var(--lg-accent);
+        box-shadow: 0 0 calc(8px + 12px * var(--lg-strength)) var(--lg-accent);
+      }
+      #hud-launch-grade .lg-flash {
+        display: flex; flex-direction: column; gap: 4px;
+        padding: 7px 14px 6px;
+        border-radius: var(--r-chip);
+        background: linear-gradient(180deg, rgba(13,43,54,0.85), rgba(7,30,38,0.85));
+        border: 1px solid color-mix(in srgb, var(--lg-accent) 45%, transparent);
+        border-left: 3px solid var(--lg-accent);
+        box-shadow:
+          0 0 calc(14px + 18px * var(--lg-strength)) color-mix(in srgb, var(--lg-accent) 30%, transparent),
+          0 6px 22px rgba(0,0,0,0.45);
+      }
+      #hud-launch-grade .lg-label {
+        font-family: var(--bc-font-display);
+        font-size: 15px; letter-spacing: 0.11em;
+        color: var(--bc-ink);
+      }
+      #hud-launch-grade .lg-shell.lg-clean .lg-label { color: var(--bc-yellow); }
+      #hud-launch-grade .lg-bar {
+        height: 3px; width: 180px;
+        background: rgba(255,255,255,0.08);
+        overflow: hidden;
+      }
+      #hud-launch-grade .lg-bar > i {
+        display: block; height: 100%;
+        width: 0;
+        background: linear-gradient(90deg, var(--bc-cyan), var(--lg-accent));
+        box-shadow: 0 0 12px var(--lg-accent);
+      }
+      #hud-launch-grade .lg-shell.lg-full .lg-flash { animation: wp-pop 420ms var(--ease-out); }
+      #hud-launch-grade .lg-shell.lg-full .lg-dot { display: none; }
+      #hud-launch-grade .lg-shell.lg-subtle .lg-flash { display: none; }
+      #hud-launch-grade .lg-shell.lg-subtle .lg-dot { animation: wp-dot-pulse 600ms var(--ease-out); }
+
       /* Perfect-trick tier — beefier flash with a magenta-gold accent
          that reads distinct from the cyan normal-pump palette. The
          label is also swapped from "PUMP +" to "TRICK !" by the JS
@@ -3914,6 +3981,7 @@
          menu-active state so the chrome stays clean. -->
     <div id="hud-scaffold" aria-hidden="true">
       <div id="hud-wave-pump" class="hud-slot" data-system="wave-pump" hidden></div>
+      <div id="hud-launch-grade" class="hud-slot" data-system="launch-grade" hidden></div>
       <div id="hud-trick-prompt" class="hud-slot" data-system="trick-prompt" hidden></div>
       <div id="hud-boost-meter" class="hud-slot" data-system="boost-meter" hidden></div>
       <div id="hud-drift" class="hud-slot" data-system="drift" hidden></div>

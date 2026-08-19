@@ -176,7 +176,7 @@ const MODE_TILES: ModeTile[] = [
     id: 'tutorial',
     badge: 'LEARN',
     headline: 'TUTORIAL',
-    desc: 'Six scripted beats — throttle, cruise, look around, wave pump, drift, finish. Skippable for returning players via Settings → Subtitles.',
+    desc: 'Seven scripted beats — throttle, cruise, look, launch, land, drift, finish. Runs on the Mayday Bay lagoon.',
     enabled: true,
   },
 ]
@@ -1079,14 +1079,14 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="num">02</div>
           <div>
             <div class="title">TUTORIAL</div>
-            <div class="sub">SCRIPTED PROMPTS &middot; ANY TRACK &middot; SKIPPABLE</div>
+            <div class="sub">SCRIPTED PROMPTS &middot; MAYDAY BAY &middot; NO PRESSURE</div>
           </div>
         </div>
         <div class="bc-cards cols-2">
           <div class="bc-card" id="tut-start" role="button" tabindex="0" style="--accent:#ffd27a; cursor: pointer;">
             <div class="label">FRAMEWORK</div>
             <div class="name">FIRST RUN</div>
-            <div class="tag">Six beats — throttle, cruise, look around, wave pump, drift, finish. Runs on the Mayday Bay lagoon.</div>
+            <div class="tag">Seven beats — throttle, cruise, look, launch, land, drift, finish. Runs on the Mayday Bay lagoon.</div>
             <div class="record">~90s &middot; INTRO DIFFICULTY</div>
             <div class="record" style="color: var(--bc-yellow); margin-top: 6px;">${escapeHtml(ctaLabel)} &rarr;</div>
           </div>

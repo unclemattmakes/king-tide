@@ -61,6 +61,7 @@ import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import { shouldRenderFrame } from '@/engine/render/frame-cap'
 import { createGpuProfiler } from '@/engine/render/gpu-profiler'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
+import { createLaunchGradeHud } from '@/engine/render/launch-grade-hud'
 import { updateLavaTime } from '@/engine/render/lava-river-material'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
 import { createOobHud } from '@/engine/render/oob-hud'
@@ -111,6 +112,7 @@ import {
   ControlIntentStore,
   DriftStateStore,
   HoverStateStore,
+  LaunchGradeStore,
   RBHandleStore,
   TransformStore,
   TrickStateStore,
@@ -705,6 +707,9 @@ export function startGameLoop(opts: GameLoopOpts): void {
   const driftTierHud = createDriftTierHud()
   const tuckHud = createTuckHud(TUCK_SWEET_SPOT)
   const trickPromptHud = createTrickPromptHud()
+  // Launch/landing verdict chyron — the wave-mastery feedback loop's
+  // render half. Sim decides (launchGradeSystem); this only announces.
+  const launchGradeHud = createLaunchGradeHud()
 
   // Anti-grav HUD widget. Reads the player bike's AntiGravOverride
   // each render frame and fades the indicator in/out. The chase
@@ -1642,6 +1647,28 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // Flatground small hops (where the sim never opened the window)
     // never fire here — the lift impulse comes from trickHopSystem
     // but none of the trick FX runs.
+    // Launch/landing verdicts — the wave-mastery loop's announce step.
+    // Sim already graded the edge + paid the meter (launchGradeSystem);
+    // here we flash the chyron, chime a clean landing, and let the
+    // tutorial's LAUNCH / LAND beats graduate. Skipped on autopilot —
+    // the pilot isn't the player.
+    if (!control.isAutoPlay()) {
+      const grade = LaunchGradeStore.get(playerEid)
+      if (grade?.firedThisTick) {
+        launchGradeHud.flash(grade.firedKind, grade.firedQuality)
+        if (grade.firedKind === 'landing') {
+          tutorialDirector?.notifyLanding(grade.firedQuality)
+          // Audio receipt on the landing only (takeoff already has
+          // wind + engine); clean landings get the perfect sparkle.
+          if (playerSettings.wavePumpIntensity !== 'off' && grade.firedQuality >= 0.4) {
+            audio.wavePump(grade.firedQuality, grade.firedQuality >= 0.72)
+          }
+        } else {
+          tutorialDirector?.notifyLaunch(grade.firedQuality)
+        }
+      }
+    }
+
     if (!control.isAutoPlay() && state.playerSnapshot) {
       const hoverState = HoverStateStore.get(playerEid)
       const intent = ControlIntentStore.get(playerEid)

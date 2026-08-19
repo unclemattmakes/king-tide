@@ -15,9 +15,9 @@
 
 import { playerSettings } from '@/engine/player-settings'
 import type { ReplayFile } from '@/engine/replay/format'
-import type { AIDifficulty } from '@/game/ai/difficulty'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
+import type { AIDifficulty } from '@/game/ai/difficulty'
 import { type BikeVariant, resolveBikeVariant, variantForAiSlot } from '@/game/bikes/variants'
 import { RBHandleStore } from '@/game/components'
 import { createBike } from '@/game/entities/bike'
