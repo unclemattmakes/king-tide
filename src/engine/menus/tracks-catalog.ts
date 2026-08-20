@@ -67,10 +67,14 @@ export const V1_TRACKS: V1TrackEntry[] = [
     status: 'ship',
   },
   {
+    // Slug stays `mexico-city`: the GLB, the track JSON, the R2 asset
+    // keys and the Blender seed all key off it, and the leaderboard
+    // ledger is written against it. Only the player-facing name moved
+    // fictional — same divergence `sandbar` → "Mayday Bay" already has.
     id: 'mexico-city',
-    name: 'Mexico City',
-    location: 'Drowned Mexico City — the lake returns',
-    setPiece: 'El Ángel — Reforma freeway launch',
+    name: 'Angel Basin',
+    location: 'A drowned highland capital — the lake came back',
+    setPiece: 'El Ángel — gilded boulevard launch',
     cup: 'reef',
     accent: '#e4007c',
     lapTarget: 45,
@@ -80,10 +84,11 @@ export const V1_TRACKS: V1TrackEntry[] = [
     status: 'ship',
   },
   {
+    // Slug stays `cape-town-drift` for the same reason as above.
     id: 'cape-town-drift',
-    name: 'Cape Town Drift',
-    location: 'V&A Waterfront under Table Mountain',
-    setPiece: 'Two Oceans Aquarium wreck',
+    name: 'Container Chaos',
+    location: 'A stacked container port under the flat-top mountain',
+    setPiece: 'The Aquarium Wreck — toppled container maze',
     cup: 'reef',
     accent: '#3aa9d7',
     lapTarget: 48,
@@ -230,6 +235,39 @@ export const V1_TRACKS: V1TrackEntry[] = [
   },
 ]
 
+/** Cups the shipping menus are allowed to surface.
+ *
+ *  The catalogue above deliberately keeps the whole four-cup slate —
+ *  cup rosters, the leaderboard schema, the docs and the art-pass
+ *  backlog all read from it, and deleting entries to hide them would
+ *  throw away that structure. Instead the front end renders only the
+ *  cups named here, so the card the player sees matches what's
+ *  actually finished. Widen this list (one entry per cup) as each
+ *  cup's tracks come out of greybox.
+ *
+ *  Dev cups are unaffected — they're separate constants below and stay
+ *  gated on `isDevBuild()` instead. */
+export const VISIBLE_CUPS: readonly CupId[] = ['reef']
+
+export function isCupVisible(id: CupId): boolean {
+  return VISIBLE_CUPS.includes(id)
+}
+
+/** The v1 tracks the menus may show — `V1_TRACKS` filtered to
+ *  `VISIBLE_CUPS`. Every player-facing surface (race track-select, the
+ *  Time Trial venue picker, the leaderboards screen) renders from this
+ *  rather than reaching for `V1_TRACKS` directly. */
+export function visibleV1Tracks(): V1TrackEntry[] {
+  return V1_TRACKS.filter((t) => isCupVisible(t.cup))
+}
+
+/** The cups the cup-select screen may show — `V1_CUPS` filtered the
+ *  same way. Declared after `V1_CUPS` is initialised at module scope,
+ *  so it's safe to call from render code. */
+export function visibleV1Cups(): CupEntry[] {
+  return V1_CUPS.filter((c) => isCupVisible(c.id))
+}
+
 /** Player-facing display name for a track id, from the same ship-track
  *  catalogue the menu tiles render. Returns `undefined` for anything
  *  not in the v1 slate — procedural + Dev Cup tracks (lagoon, cliffside,
@@ -270,8 +308,8 @@ export const V1_CUPS: CupEntry[] = [
     name: 'Reef Cup',
     tagline: 'Starters. Bright, shallow, instructive.',
     accent: '#36c8c0',
-    // All three Reef tracks are built + wired (Mayday Bay, Mexico City,
-    // Cape Town Drift), so the cup ships. Mexico City's build landed via
+    // All three Reef tracks are built + wired (Mayday Bay, Angel Basin,
+    // Container Chaos), so the cup ships. Angel Basin's build landed via
     // the Texcoco art pass; the opener gate was flipped 2026-06-10.
     status: 'ship',
     gateLabel: '',

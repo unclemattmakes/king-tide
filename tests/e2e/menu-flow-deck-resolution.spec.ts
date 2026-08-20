@@ -36,7 +36,10 @@ test.describe('menu @ 1280×800 (Steam Deck)', () => {
     await page.goto('/')
     // Apple-sport refresh dropped the explicit PRESS START button —
     // any key on the title screen advances. Use the keyboard so the
-    // test doesn't depend on element stability under animation.
+    // test doesn't depend on element stability under animation. Wait for
+    // the title first: runMenuFlow installs its keydown listener last,
+    // so an Enter fired straight after `goto` is swallowed.
+    await expect(page.locator('.bc-title .word')).toBeVisible()
     await page.keyboard.press('Enter')
     // First mode card visible = mode-select screen has rendered.
     await expect(page.locator('.bc-mode-card[data-mode="race"]')).toBeVisible({ timeout: 10_000 })

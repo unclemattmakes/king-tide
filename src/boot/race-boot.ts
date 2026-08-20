@@ -2042,7 +2042,6 @@ export async function bootRace(appEl: HTMLElement) {
     landmarkTick,
     track,
     trackId,
-    manifest,
     playerEid,
     aiEids,
     playerVariant,

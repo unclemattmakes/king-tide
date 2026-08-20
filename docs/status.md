@@ -12,15 +12,24 @@
 >    and **The Maw** are art-dressed; the other tracks were intentionally reset
 >    to greybox route-stubs (PR #285) for the v2 art pass. "v1 lineup complete"
 >    is a v1 statement, not a v2 one. *(South Beach Sunken / Miami was cut in the
->    2026-06 content pass; the Reef opener **Mexico City** (slug `mexico-city`)
->    — drowned, on the old Lake Texcoco bed — was rebuilt via the Texcoco art
->    pass and now ships, so the Reef Cup is ungated as of 2026-06-10.)*
+>    2026-06 content pass; the Reef opener **Angel Basin** (slug `mexico-city`)
+>    — a drowned highland capital on a returned lake bed — was rebuilt via the
+>    Texcoco art pass and now ships, so the Reef Cup is ungated as of
+>    2026-06-10.)*
 > 3. **The soundtrack is 14 verified Creative-Commons tracks** (Free Music
 >    Archive; mix of CC0 / CC BY / CC BY-SA / CC BY-NC — per-track licenses,
 >    links and constraints in [CREDITS.md](../CREDITS.md)). Older entries
 >    calling them "commissioned" / "licensed" / "CC0 placeholder" are stale.
 >    The NC tracks are fine while the game is non-commercial; the SA tracks
 >    must not be baked into published trailer videos.
+>
+> 4. **Venues are fictional cities, and display names diverge from slugs.**
+>    The Reef Cup reads **Mayday Bay → Angel Basin → Container Chaos**; the
+>    slugs behind them are `sandbar`, `mexico-city`, `cape-town-drift`. Real
+>    place-names survive in the art docs as *reference* only. The shipping
+>    menus also show **one cup** — `VISIBLE_CUPS` in
+>    [tracks-catalog.ts](../src/engine/menus/tracks-catalog.ts) filters the
+>    still-intact four-cup catalogue down to Reef (2026-08-20).
 >
 > Wave mastery has also pivoted to a motocross pitch-the-takeoff/landing model
 > (the Mario-Kart fork), away from the press-forward-on-crest pump described

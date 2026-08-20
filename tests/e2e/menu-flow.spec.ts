@@ -39,6 +39,29 @@ async function softClick(loc: Locator): Promise<void> {
   await loc.click({ force: true })
 }
 
+/** Wait for a menu commit to actually land in the address bar.
+ *  `finish()` resolves the menu promise, but `url-modes` then tears the
+ *  attract loop down (up to a 1.5 s race + a 200 ms grace) before it
+ *  calls `location.assign` — so `waitForLoadState('domcontentloaded')`
+ *  can return on the *old* page and read a URL that hasn't changed yet.
+ */
+async function waitForCommit(page: Page, pattern: RegExp): Promise<string> {
+  await page.waitForURL(pattern, { timeout: 30_000 })
+  return page.url()
+}
+
+/** Cold-boot, then advance off the title. The Enter has to wait for the
+ *  title to actually mount: `runMenuFlow` installs its keydown listener
+ *  as the last thing it does, so a press fired straight after `goto` is
+ *  swallowed and the flow sits on the title screen — which then shows up
+ *  as a "mode card is hidden" failure several lines later.
+ */
+async function gotoAndStart(page: Page): Promise<void> {
+  await page.goto('/')
+  await expect(page.locator('.bc-title .word')).toBeVisible()
+  await page.keyboard.press('Enter')
+}
+
 async function clickModeCard(page: Page, mode: string): Promise<void> {
   await softClick(page.locator(`.bc-mode-card[data-mode="${mode}"]`))
 }
@@ -65,8 +88,7 @@ test.describe('cold-boot menu', () => {
   })
 
   test('Race path commits a race URL with track + bike + race=1', async ({ page }) => {
-    await page.goto('/')
-    await page.keyboard.press('Enter')
+    await gotoAndStart(page)
     await clickModeCard(page, 'race')
     // Click the first track card. With every v1 track now status:'ship',
     // the first card on `sp-track` is Sandbar. Clicking auto-advances to
@@ -75,9 +97,7 @@ test.describe('cold-boot menu', () => {
     // Pick the first bike (Cruiser comes first in BIKE_VARIANTS).
     // Clicking a bike auto-commits the race URL.
     await softClick(page.locator('#sp-bike-cards .bc-card').first())
-    await page.waitForLoadState('domcontentloaded')
-    const url = page.url()
-    expect(url).toContain('race=1')
+    const url = await waitForCommit(page, /race=1/)
     expect(url).toMatch(/track=/)
     expect(url).toMatch(/bike=/)
     // Race mode never stamps `cup=` or `tt=1`.
@@ -86,8 +106,7 @@ test.describe('cold-boot menu', () => {
   })
 
   test('Time Trial path commits a race URL with tt=1', async ({ page }) => {
-    await page.goto('/')
-    await page.keyboard.press('Enter')
+    await gotoAndStart(page)
     await clickModeCard(page, 'time-trial')
     // TT reuses `sp-cup-tracks` as a venue picker — every shipped v1
     // track is listed as a clickable tile (no cup wrapper). The grid
@@ -101,9 +120,7 @@ test.describe('cold-boot menu', () => {
     await expect(firstTrack).toBeVisible()
     await firstTrack.dispatchEvent('click')
     await softClick(page.locator('#sp-bike-cards .bc-card').first())
-    await page.waitForLoadState('domcontentloaded')
-    const url = page.url()
-    expect(url).toContain('race=1')
+    const url = await waitForCommit(page, /race=1/)
     expect(url).toContain('tt=1')
     expect(url).toMatch(/track=/)
     expect(url).toMatch(/bike=/)
@@ -112,8 +129,7 @@ test.describe('cold-boot menu', () => {
   })
 
   test('Cup path commits a championship URL with cup= + first race track', async ({ page }) => {
-    await page.goto('/')
-    await page.keyboard.press('Enter')
+    await gotoAndStart(page)
     await clickModeCard(page, 'cup')
     // First cup card is Reef Cup — `V1_CUPS[0]`. Dev placeholder + Dev
     // Cup get appended after the ship cups, so `.first()` is stable.
@@ -121,9 +137,7 @@ test.describe('cold-boot menu', () => {
     // Championship cups skip the lineup-preview step and land directly
     // on bike-select. Pick the first bike to commit the cup.
     await softClick(page.locator('#sp-bike-cards .bc-card').first())
-    await page.waitForLoadState('domcontentloaded')
-    const url = page.url()
-    expect(url).toContain('race=1')
+    const url = await waitForCommit(page, /race=1/)
     expect(url).toContain('cup=reef')
     // First race in Reef Cup's lineup is `sandbar` (first matching v1
     // track in catalog order).
@@ -134,12 +148,10 @@ test.describe('cold-boot menu', () => {
   })
 
   test('MP entry "CREATE LOBBY" navigates to a room code URL', async ({ page }) => {
-    await page.goto('/')
-    await page.keyboard.press('Enter')
+    await gotoAndStart(page)
     await clickModeCard(page, 'multiplayer')
     // CREATE LOBBY button is the first card on the MP entry screen.
     await softClick(page.locator('.bc-mode-card[data-action="create"]'))
-    await page.waitForLoadState('domcontentloaded')
-    expect(page.url()).toMatch(/[?&]room=[A-Z0-9-]+/)
+    expect(await waitForCommit(page, /[?&]room=/)).toMatch(/[?&]room=[A-Z0-9-]+/)
   })
 })

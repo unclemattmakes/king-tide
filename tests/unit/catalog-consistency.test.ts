@@ -50,7 +50,7 @@ describe('catalog consistency', () => {
   })
 
   it('exactly the dressed venues carry art: dressed', () => {
-    // Update alongside the v2 art pass: only Mayday Bay + Mexico City
+    // Update alongside the v2 art pass: only Mayday Bay + Angel Basin
     // are art-complete today (CLAUDE.md "status: 'ship' means
     // wired/playable, not art-complete"). The Maw is also dressed but
     // deliberately parked off the card (docs/tracks/the-maw.md).

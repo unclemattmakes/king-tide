@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { V1_CUPS, V1_TRACKS } from '../../src/engine/menus/tracks-catalog'
+import {
+  V1_CUPS,
+  V1_TRACKS,
+  visibleV1Cups,
+  visibleV1Tracks,
+} from '../../src/engine/menus/tracks-catalog'
 
 /**
  * Cup lineups are derived from each track's `cup` field, so these guard the
@@ -12,11 +17,11 @@ import { V1_CUPS, V1_TRACKS } from '../../src/engine/menus/tracks-catalog'
 describe('tracks-catalog cup lineups', () => {
   const cupRaces = (id: string): string[] => V1_CUPS.find((c) => c.id === id)?.races ?? []
 
-  it('Reef Cup is Mayday Bay → Mexico City → Cape Town', () => {
+  it('Reef Cup is Mayday Bay → Angel Basin → Container Chaos', () => {
     expect(cupRaces('reef')).toEqual(['sandbar', 'mexico-city', 'cape-town-drift'])
   })
 
-  it('the Reef Cup ships — Mexico City is built + ungated', () => {
+  it('the Reef Cup ships — Angel Basin is built + ungated', () => {
     const t = V1_TRACKS.find((x) => x.id === 'mexico-city')
     expect(t?.status).toBe('ship')
     expect(t?.gateLabel).toBe('')
@@ -72,6 +77,64 @@ describe('tracks-catalog cup lineups', () => {
       expect(cup.races.length).toBeGreaterThan(0)
       for (const trackId of cup.races) {
         expect(V1_TRACKS.some((t) => t.id === trackId)).toBe(true)
+      }
+    }
+  })
+})
+
+/**
+ * The catalogue keeps the whole four-cup slate, but the shipping menus
+ * render only the cups in `VISIBLE_CUPS` so the card matches what's
+ * finished. These pin that filter — widening it is a deliberate edit,
+ * not something a stray `status` flip should do.
+ */
+describe('menu visibility filter', () => {
+  it('only the Reef Cup is surfaced today', () => {
+    expect(visibleV1Cups().map((c) => c.id)).toEqual(['reef'])
+  })
+
+  it('the visible track slate is exactly the Reef lineup', () => {
+    expect(visibleV1Tracks().map((t) => t.id)).toEqual([
+      'sandbar',
+      'mexico-city',
+      'cape-town-drift',
+    ])
+  })
+
+  it('hides every non-Reef venue, shipped or not', () => {
+    const visible = new Set(visibleV1Tracks().map((t) => t.id))
+    for (const t of V1_TRACKS) {
+      if (t.cup === 'reef') continue
+      expect(visible.has(t.id), `${t.id} leaked onto the card`).toBe(false)
+    }
+  })
+
+  it('leaves the full catalogue intact behind the filter', () => {
+    // The filter is a render-time concern; hiding a cup must not delete
+    // its data (cup rosters, docs and the art backlog all read it).
+    expect(V1_CUPS.length).toBe(4)
+    expect(V1_TRACKS.length).toBeGreaterThan(visibleV1Tracks().length)
+  })
+})
+
+/**
+ * The two Reef venues that moved to fictional names. Slugs are load-
+ * bearing — GLB filenames, track JSON, R2 asset keys, the Blender seeds
+ * and the saved best-lap ledger all key off them — so the rename must
+ * stay display-only.
+ */
+describe('fictional venue names', () => {
+  it('Angel Basin and Container Chaos keep their original slugs', () => {
+    expect(V1_TRACKS.find((t) => t.id === 'mexico-city')?.name).toBe('Angel Basin')
+    expect(V1_TRACKS.find((t) => t.id === 'cape-town-drift')?.name).toBe('Container Chaos')
+  })
+
+  it('no player-facing Reef copy names a real city', () => {
+    const reef = V1_TRACKS.filter((t) => t.cup === 'reef')
+    for (const t of reef) {
+      const copy = `${t.name} ${t.location} ${t.setPiece}`
+      for (const real of ['Mexico City', 'Cape Town', 'Table Mountain', 'Reforma', 'V&A']) {
+        expect(copy, `${t.id} still says "${real}"`).not.toContain(real)
       }
     }
   })

@@ -1,7 +1,14 @@
-# Cape Town Drift — Reef Cup #2
+# Container Chaos — Reef Cup #2
 
 > Cup: Reef · The set's calm-water skill check — the Drake Lake of the v1
 > lineup.
+
+> **Renamed 2026-08-20 — Container Chaos.** Every King Tide venue is now a fictional
+> city, so this track's player-facing name is **Container Chaos**. The slug stays
+> `cape-town-drift` (GLB, track JSON, R2 asset keys, Blender seed and the saved
+> best-lap ledger all key off it), and the real-world references below stay
+> as *art reference* — they're where the look comes from, not what the venue
+> is called in game.
 
 ## Identity
 

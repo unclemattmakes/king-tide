@@ -211,6 +211,11 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     ])
     const manifest = await loadManifest()
     const reason = earlyParams.get('back') === '1' ? 'exit-from-race' : 'cold'
+    // `?menu=track` opens the flow directly on the venue picker. The
+    // finish screen's NEXT RACE stamps it so "next race" means "pick
+    // the next race" rather than silently rotating to whatever track
+    // happens to follow in the manifest.
+    const startAt = earlyParams.get('menu') === 'track' ? ('sp-track' as const) : undefined
 
     // Soundtrack radio — play music from the menu, not just once a race
     // loads. Installed before the menu renders so the first click/keypress
@@ -251,6 +256,10 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     const result = await runMenuFlow({
       manifestTracks: manifest.tracks,
       reason,
+      // Spread rather than pass `startAt: undefined` — the repo runs
+      // `exactOptionalPropertyTypes`, so an explicit undefined isn't
+      // assignable to an optional property.
+      ...(startAt ? { startAt } : {}),
     })
     // Final commit — tear the attract loop down BEFORE navigating, and give
     // the browser a short beat to start draining the GPU-side destruction
