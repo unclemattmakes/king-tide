@@ -35,9 +35,9 @@ and [track-design-specs.md](../track-design-specs.md) flagged as pending
 ("final cup order set in the anti-grav reconciliation pass"). Eight
 tracks carried anti-grav and have been reworked below; the four that
 never used it (the Reef opener, Cape Town, The Maw, Marina Bay 7) and Golden
-Gate are unchanged. *(The Reef opener is now Mexico City,
-which replaced South Beach Sunken / Miami in the 2026-06 content pass — it
-likewise never used anti-grav.)*
+Gate are unchanged. *(The Reef opener is now Angel Basin — slug
+`mexico-city` — which replaced South Beach Sunken / Miami in the 2026-06
+content pass; it likewise never used anti-grav.)*
 
 ## Replacement verticality vocabulary
 
@@ -74,8 +74,8 @@ moment.
 | # | Track | Cup | Location | Old anti-grav | New verticality | Doc |
 |---|---|---|---|---|---|---|
 | — | Mayday Bay | Tutorial | (fictional) | brief intro arch | crest-launch lesson | [sandbar.md](./sandbar.md) |
-| 1 | Mexico City | Reef | Mexico City | none | collapsed-freeway ramp | [mexico-city.md](./mexico-city.md) |
-| 2 | Cape Town Drift | Reef | Cape Town | none | flat / slalom | [cape-town-drift.md](./cape-town-drift.md) |
+| 1 | Angel Basin | Reef | Mexico City | none | collapsed-freeway ramp | [mexico-city.md](./mexico-city.md) |
+| 2 | Container Chaos | Reef | Cape Town | none | flat / slalom | [cape-town-drift.md](./cape-town-drift.md) |
 | 3 | Needle Sound | Harbor | Seattle | none | pier/ferry ramps + Space Needle saucer | [needle-sound.md](./needle-sound.md) |
 | 4 | Golden Gate Drowned | Harbor | San Francisco | none (was always terrain) | frozen-wave hills + The Break | [golden-gate-drowned.md](./golden-gate-drowned.md) |
 | 5 | Opera Drowned | Harbor (closer) | Sydney | none | Harbour Bridge arch + drop | [opera-drowned.md](./opera-drowned.md) |

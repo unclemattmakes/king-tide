@@ -35,6 +35,8 @@ import {
   V1_CUPS,
   V1_TRACKS,
   type V1TrackEntry,
+  visibleV1Cups,
+  visibleV1Tracks,
 } from './tracks-catalog'
 
 /**
@@ -63,6 +65,12 @@ export type MenuFlowOpts = {
   initialBikeId?: BikeVariantId
   /** "exit" arrives from a finish-screen EXIT click — show a banner. */
   reason?: 'cold' | 'exit-from-race'
+  /** Screen to open on, overriding the default (title on a cold boot,
+   *  mode when arriving back from a race). `'sp-track'` is what the
+   *  finish screen's NEXT RACE uses: it drops the player straight onto
+   *  the venue picker instead of walking them back through the title +
+   *  mode screens to change track. */
+  startAt?: 'title' | 'mode' | 'sp-track'
 }
 
 type Step =
@@ -202,7 +210,10 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     bikeId: (opts.initialBikeId ?? DEFAULT_BIKE_VARIANT) as BikeVariantId,
   }
 
-  let currentMode: ModeId | null = null
+  // Opening straight on the track picker means the mode was implicitly
+  // chosen — seed it so the breadcrumbs, back-nav and the bike screen's
+  // commit path all behave as though the player clicked RACE.
+  let currentMode: ModeId | null = opts.startAt === 'sp-track' ? 'race' : null
   let currentStep: Step = 'title'
   /** Cup-mode pick. Holds the selected cup so the cup-tracks step
    *  knows which list to render. The dev cup always wins the
@@ -384,13 +395,15 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     }
   }
 
-  /** Race-mode track-select host. Renders all 12 ship tracks; tiles
-   *  for `status === 'ship'` are live, the rest are gated with the
-   *  per-track `gateLabel`. The list never contains test tracks — those
-   *  live in the Dev Cup so the real race lineup stays uncluttered. */
+  /** Race-mode track-select host. Renders the venues of every cup in
+   *  `VISIBLE_CUPS` — one cup today, so the screen is the Reef slate
+   *  and nothing else. Tiles for `status === 'ship'` are live, the rest
+   *  are gated with the per-track `gateLabel`. The list never contains
+   *  test tracks — those live in the Dev Cup so the real race lineup
+   *  stays uncluttered. */
   function renderV1TrackCards(host: HTMLElement): void {
     host.innerHTML = ''
-    for (const t of V1_TRACKS) {
+    for (const t of visibleV1Tracks()) {
       host.appendChild(buildV1TrackCard(t))
     }
   }
@@ -448,13 +461,13 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     return V1_CUPS.find((c) => c.id === id)?.name ?? id
   }
 
-  /** Cup-select host. Renders the four ship cups plus the Dev cups
-   *  (dev builds only). Real cups stay disabled in Step 0; the Dev
-   *  Cup is the browse entrypoint; the Dev Placeholder Cup is the
-   *  championship wiring proof. */
+  /** Cup-select host. Renders the cups named in `VISIBLE_CUPS` plus
+   *  the Dev cups (dev builds only). The Dev Cup is the browse
+   *  entrypoint; the Dev Placeholder Cup is the championship wiring
+   *  proof, and neither is filtered by cup visibility. */
   function renderCupCards(host: HTMLElement): void {
     host.innerHTML = ''
-    for (const c of V1_CUPS) {
+    for (const c of visibleV1Cups()) {
       host.appendChild(buildCupCard(c))
     }
     if (dev) {
@@ -523,11 +536,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   function renderCupTrackCards(host: HTMLElement): void {
     host.innerHTML = ''
     if (currentMode === 'time-trial') {
-      // TT picks a single venue from the full ship roster. Every
-      // status:'ship' v1 track is fair game; on dev builds we also
-      // surface the dev tracks below so playtesters can run TT against
-      // procedurals + freshly-baked GLBs without leaving the menu.
-      for (const t of V1_TRACKS) {
+      // TT picks a single venue from the visible ship roster. Every
+      // status:'ship' track in a `VISIBLE_CUPS` cup is fair game; on
+      // dev builds we also surface the dev tracks below so playtesters
+      // can run TT against procedurals + freshly-baked GLBs without
+      // leaving the menu.
+      for (const t of visibleV1Tracks()) {
         if (t.status !== 'ship') continue
         host.appendChild(buildV1TrackCard(t))
       }
@@ -1544,7 +1558,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     screens.credits = buildCredits()
     for (const s of Object.values(screens)) stage?.appendChild(s!)
 
-    showStep(opts.reason === 'exit-from-race' ? 'mode' : 'title')
+    showStep(opts.startAt ?? (opts.reason === 'exit-from-race' ? 'mode' : 'title'))
 
     function onKey(e: KeyboardEvent): void {
       // Don't hijack typing into the room-code input.
@@ -1666,7 +1680,7 @@ function buildLeaderboardTrackList(
 ): LeaderboardTrackEntry[] {
   const seen = new Set<string>()
   const out: LeaderboardTrackEntry[] = []
-  for (const t of V1_TRACKS) {
+  for (const t of visibleV1Tracks()) {
     // Unbuilt venues (status 'pending') used to get rows on the theory
     // that empty boards read as "race when this lands" — but a board
     // for a track you *cannot race* only makes the whole screen read

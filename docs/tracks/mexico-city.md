@@ -1,8 +1,15 @@
-# Mexico City — Reef Cup #1
+# Angel Basin — Reef Cup #1
 
 > Cup: Reef · The opener: bright, shallow, instructive — first racing track
 > after the Mayday Bay tutorial. *(Replaced South Beach Sunken / Miami in the
 > 2026-06 content pass.)*
+
+> **Renamed 2026-08-20 — Angel Basin.** Every King Tide venue is now a fictional
+> city, so this track's player-facing name is **Angel Basin**. The slug stays
+> `mexico-city` (GLB, track JSON, R2 asset keys, Blender seed and the saved
+> best-lap ledger all key off it), and the real-world references below stay
+> as *art reference* — they're where the look comes from, not what the venue
+> is called in game.
 
 ## Identity
 

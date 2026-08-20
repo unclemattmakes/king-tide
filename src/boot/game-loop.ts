@@ -35,7 +35,6 @@ import { setWaveDotsController } from '@/engine/dev/dev-runtime'
 import { type Intent, inputSourceLabel, readPlayerIntent } from '@/engine/input'
 import { tickCameraLook } from '@/engine/input/camera-look'
 import { createJitterTelemetry } from '@/engine/jitter-telemetry'
-import { buildTrackList, nextTrackId } from '@/engine/menus/catalog'
 import { trackDisplayName } from '@/engine/menus/tracks-catalog'
 import {
   decodeInputFrameFrom,
@@ -102,7 +101,6 @@ import {
   MIN_THROTTLE,
   MIN_VY_PEAK,
 } from '@/engine/wave-pump-observer'
-import type { AssetManifest } from '@/game/assets/manifest'
 import { aiCallSign } from '@/game/bikes/callsigns'
 import { type BikeVariant, variantForAiSlot } from '@/game/bikes/variants'
 import {
@@ -300,7 +298,6 @@ export interface GameLoopOpts {
   /** Track + per-bike state. */
   track: Track
   trackId: string
-  manifest: AssetManifest
   playerEid: number
   aiEids: number[]
   playerVariant: BikeVariant
@@ -492,7 +489,6 @@ export function startGameLoop(opts: GameLoopOpts): void {
     landmarkTick,
     track,
     trackId,
-    manifest,
     playerEid,
     aiEids,
     playerVariant,
@@ -2124,7 +2120,6 @@ export function startGameLoop(opts: GameLoopOpts): void {
             hud,
             track,
             trackId,
-            manifest,
             playerVariant,
             roomId,
             cupId,
@@ -2162,7 +2157,6 @@ interface FinishOpts {
   hud: GameLoopHud
   track: Track
   trackId: string
-  manifest: AssetManifest
   playerVariant: BikeVariant
   roomId: string | null
   cupId: string | null
@@ -2185,7 +2179,6 @@ function showFinishScreen(opts: FinishOpts): void {
     hud,
     track,
     trackId,
-    manifest,
     playerVariant,
     roomId,
     cupId,
@@ -2440,15 +2433,19 @@ function showFinishScreen(opts: FinishOpts): void {
           window.location.assign(url.toString())
         }
       } else {
-        // Single-race mode — original behaviour: rotate to the next
-        // catalogue track.
+        // Single-race mode — bounce back to the venue picker. This used
+        // to rotate to the next id in the manifest list, which meant
+        // NEXT RACE off any Reef track landed on whatever sorted next
+        // (`seattle`, a dev map) with no say from the player. A one-off
+        // race has no schedule to advance, so "next race" is a choice,
+        // not a rotation: `?menu=track` opens the menu on sp-track.
         nextBtn.textContent = 'NEXT RACE'
         nextBtn.onclick = () => {
-          const tracksList = buildTrackList(manifest.tracks)
-          const nextId = nextTrackId(tracksList, trackId)
-          window.location.assign(
-            buildRaceUrl({ roomId, trackId: nextId, bikeId: playerVariant.id }),
-          )
+          const url = new URL(window.location.href)
+          url.search = ''
+          url.searchParams.set('back', '1')
+          url.searchParams.set('menu', 'track')
+          window.location.assign(url.toString())
         }
       }
       nextBtn.focus({ preventScroll: true })

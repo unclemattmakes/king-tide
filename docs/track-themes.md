@@ -158,7 +158,7 @@ intro-open-water → calm-skill-check → vertical-spectacle closer.
 Players finish all three feeling competent and ready for the showcase
 cup.
 
-## 1. Mexico City
+## 1. Angel Basin *(slug `mexico-city`)*
 
 > *Replaced South Beach Sunken (Miami) in the 2026-06 content pass — the
 > Reef opener is now an **inland** drowning, the set's surprise.*
@@ -194,7 +194,7 @@ marimba.
 **Lore tag:** "They drained the lake to build the city. The lake was patient.
 The Circuit opens its season on the water that won."
 
-## 2. Cape Town Drift
+## 2. Container Chaos *(slug `cape-town-drift`)*
 
 **Cup:** Reef | **Lap target:** 48 s | **Laps:** 3 | **Total race:** ~2:24
 **Water/Land:** 60/40 | **Anti-grav:** none | **Difficulty:** intro
@@ -724,8 +724,8 @@ now the **verticality solution** that replaced it.
 | # | Track | Cup | Location | Verticality | Water | Set-piece |
 |---|---|---|---|---|---|---|
 | — | Mayday Bay | Tutorial | (fictional) | crest launch | 80% | training gates |
-| 1 | Mexico City | Reef | Mexico City | collapsed-freeway ramp | 65% | El Ángel |
-| 2 | Cape Town Drift | Reef | Cape Town | flat / slalom | 60% | Two Oceans Wreck |
+| 1 | Angel Basin | Reef | Mexico City | collapsed-freeway ramp | 65% | El Ángel |
+| 2 | Container Chaos | Reef | Cape Town | flat / slalom | 60% | Two Oceans Wreck |
 | 3 | Needle Sound | Harbor | Seattle | pier/ferry ramps + Needle saucer | 55% | The Saucer |
 | 4 | Golden Gate Drowned | Harbor | San Francisco | frozen-wave hills + The Break | 55% | The Break |
 | 5 | Opera Drowned | Harbor | Sydney | Harbour Bridge arch + drop | 60% | The Coathanger |

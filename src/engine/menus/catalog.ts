@@ -48,14 +48,6 @@ export function buildTrackList(manifest?: TrackManifestEntry[]): TrackEntry[] {
   return out
 }
 
-/** Return the next track in the rotation, wrapping at the end. Used by
- *  the finish screen's NEXT RACE default to step through the schedule. */
-export function nextTrackId(tracks: TrackEntry[], currentId: string): string {
-  const idx = tracks.findIndex((t) => t.id === currentId)
-  if (idx < 0) return tracks[0]?.id ?? currentId
-  return tracks[(idx + 1) % tracks.length]?.id ?? currentId
-}
-
 /** Bike stat bars normalised to 0..1 for visual comparison. The five
  *  attributes here map onto the underlying BikeStatsData with sensible
  *  ranges so each variant has a recognisable profile in the picker. */

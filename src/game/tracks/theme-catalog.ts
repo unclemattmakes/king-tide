@@ -54,13 +54,16 @@ const CATALOG: Record<string, TrackTheme> = {
     timeLabel: 'Mid-morning',
     weatherLabel: 'Calm · Beaufort 1',
   },
+  // Slug stays `mexico-city` (GLB / JSON / R2 keys); the venue is
+  // fictional as of the rename, so the prose drops the real-world
+  // place-names while keeping the same drowned-highland-capital read.
   'mexico-city': {
-    displayName: 'Mexico City',
-    location: 'Drowned Mexico City · Valle de México',
+    displayName: 'Angel Basin',
+    location: 'Angel Basin · Valle del Espejo',
     cup: 'Reef',
     setPiece: 'El Ángel',
     lore: 'They drained the lake to build the city. The lake was patient.',
-    palette: 'Rosa mexicano + marigold + lake teal',
+    palette: 'Hot rosa + marigold + lake teal',
     timeLabel: 'Late afternoon',
     weatherLabel: 'Calm lake · Beaufort 2',
   },
@@ -94,12 +97,13 @@ const CATALOG: Record<string, TrackTheme> = {
     timeLabel: 'Golden hour',
     weatherLabel: 'Harbour chop · Beaufort 4',
   },
+  // Slug stays `cape-town-drift` for the same reason.
   'cape-town-drift': {
-    displayName: 'Cape Town Drift',
-    location: 'V&A Waterfront · Cape Town',
+    displayName: 'Container Chaos',
+    location: 'Container Chaos · The Waterfront',
     cup: 'Reef',
-    setPiece: 'Two Oceans Wreck',
-    lore: "Table Mountain didn't notice. Everything below it did.",
+    setPiece: 'The Aquarium Wreck',
+    lore: "The mountain didn't notice. Everything stacked below it did.",
     palette: 'Atlantic blue + container red',
     timeLabel: 'Midday',
     weatherLabel: 'Bright + breezy · Beaufort 4',

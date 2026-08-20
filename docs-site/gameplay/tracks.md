@@ -8,8 +8,8 @@ playable lineup:
 | Track | URL | Notes |
 |---|---|---|
 | Mayday Bay | `?track=sandbar` | Tutorial lagoon; Reef Cup opener. **Art-dressed.** (Slug stays `sandbar`; display name is Mayday Bay.) |
-| Mexico City | `?track=mexico-city` | Reef Cup round 2. Greybox route-stub. |
-| Cape Town Drift | `?track=cape-town-drift` | Reef Cup finale. Greybox route-stub. |
+| Angel Basin | `?track=mexico-city` | Reef Cup round 2. Greybox route-stub. |
+| Container Chaos | `?track=cape-town-drift` | Reef Cup finale. Greybox route-stub. |
 | The Maw | `?track=the-maw` | Figure-8 slalom. **Art-dressed.** |
 | Shibuya Submerged | `?track=shibuya-submerged` | Greybox route-stub. |
 | Liberty Drowned | `?track=liberty-drowned` | Greybox route-stub. |
@@ -24,8 +24,8 @@ playable lineup:
 ::: warning Only two are art-complete
 `status: 'ship'` means **wired and playable, not art-complete.** Only **Mayday Bay**
 and **The Maw** are dressed; the rest are greybox route-stubs awaiting the v2 art
-pass. The current proof-of-thesis is the **Reef Cup** (Mayday Bay → Mexico City →
-Cape Town Drift) — see [`docs/tracks/README.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/tracks/README.md) for the canonical lineup.
+pass. The current proof-of-thesis is the **Reef Cup** (Mayday Bay → Angel Basin →
+Container Chaos) — see [`docs/tracks/README.md`](https://github.com/unclemattmakes/king-tide/blob/main/docs/tracks/README.md) for the canonical lineup.
 :::
 
 A handful of **procedural dev tracks** also ship for engine and physics work — they're
