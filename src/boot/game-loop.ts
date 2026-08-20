@@ -61,6 +61,7 @@ import { updateSwayTime, updateWind } from '@/engine/render/foliage-sway'
 import { shouldRenderFrame } from '@/engine/render/frame-cap'
 import { createGpuProfiler } from '@/engine/render/gpu-profiler'
 import type { HorizonRing } from '@/engine/render/horizon-ring'
+import { createLaunchGradeHud } from '@/engine/render/launch-grade-hud'
 import { updateLavaTime } from '@/engine/render/lava-river-material'
 import { renderLeaderboardFinishBanner } from '@/engine/render/leaderboard-finish-banner'
 import { createOobHud } from '@/engine/render/oob-hud'
@@ -111,6 +112,7 @@ import {
   ControlIntentStore,
   DriftStateStore,
   HoverStateStore,
+  LaunchGradeStore,
   RBHandleStore,
   TransformStore,
   TrickStateStore,
@@ -127,6 +129,7 @@ import {
 import { OutOfBoundsStore } from '@/game/components/out-of-bounds'
 import type { PickupType } from '@/game/components/pickup'
 import { RacerStore } from '@/game/components/race'
+import { RescueStateStore } from '@/game/components/rescue'
 import type { RaceTick } from '@/game/sim-step'
 import { defaultSimTuning, simTuningFromDevSettings, simulateStep } from '@/game/sim-step'
 import { chargeBoostMeter } from '@/game/systems/boost-meter'
@@ -145,6 +148,7 @@ import type { WaveRiderSystem } from '@/game/systems/wave-rider'
 import type { Track } from '@/game/tracks/types'
 import { createCameraTuner } from './camera-tuner'
 import type { MultiplayerHandle } from './multiplayer'
+import { respawnBikeToLine } from './respawn'
 import { createSimSurfaceProbe } from './sim-surface-probe'
 import { downloadReplay, formatTime, ordinal } from './utils'
 
@@ -614,43 +618,23 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // and re-seat the rider. OOB respawn (vs. controls' respawn-to-start) so a
   // mid-race rescue doesn't cost the whole lap of progress.
   function respawnToLine(): void {
-    const leash = leashFor(track)
-    const rbh = RBHandleStore.get(playerEid)
-    if (!leash || !rbh) return
-    const rb = phys.world.getRigidBody(rbh.handle)
-    if (!rb) return
-    // Restore dynamics if the shark had captured the bike (kinematic).
-    if (rb.bodyType() !== phys.rapier.RigidBodyType.Dynamic) {
-      rb.setBodyType(phys.rapier.RigidBodyType.Dynamic, true)
-    }
-    const t = rb.translation()
-    const pts = leash.points
-    let best = Number.POSITIVE_INFINITY
-    let bi = 0
-    for (let i = 0; i < pts.length; i++) {
-      const p = pts[i]!
-      const dx = p.x - t.x
-      const dz = p.z - t.z
-      const d = dx * dx + dz * dz
-      if (d < best) {
-        best = d
-        bi = i
-      }
-    }
-    const p = pts[bi]!
-    const nxt = pts[(bi + 1) % pts.length]!
-    // start.yaw convention: 0 = facing +Z, +π/2 = +X → atan2(dx, dz).
-    const yaw = Math.atan2(nxt.x - p.x, nxt.z - p.z)
-    const hy = yaw / 2
-    // Clear the live sea: the spline Y is authored at the mean tide, so on a
-    // risen tide `p.y + 1.5` can sit under water — drop in at the higher of the
-    // spline point and the current surface so buoyancy catches the bike.
-    const respawnY = Math.max(p.y, waveField.baseY) + 1.5
-    rb.setTranslation({ x: p.x, y: respawnY, z: p.z }, true)
-    rb.setRotation({ x: 0, y: Math.sin(hy), z: 0, w: Math.cos(hy) }, true)
-    rb.setLinvel({ x: 0, y: 0, z: 0 }, true)
-    rb.setAngvel({ x: 0, y: 0, z: 0 }, true)
-    resetRiderForBike(sim, phys, playerEid)
+    // Shared with the manual respawn key + the stuck-rescue consumer —
+    // one teleport implementation, one set of invariants (dynamic body
+    // restore, tide-safe drop height, crash-tracking clear, rider
+    // re-seat). See src/boot/respawn.ts.
+    respawnBikeToLine({ sim, phys, track, waveField, eid: playerEid })
+  }
+
+  // Stuck-rescue consumer — the sim flags a wedge / long rider-eject
+  // (stuck-rescue.ts, one-shot edge like the OOB lethal flag); the loop
+  // performs the actual teleport. Skipped while the shark sequence owns
+  // the bike so the two rescues can't fight over the body.
+  function handleRescueRequest(): void {
+    const rescue = RescueStateStore.get(playerEid)
+    if (!rescue || !rescue.requestedThisTick) return
+    rescue.requestedThisTick = false
+    if (sharkSeq.isActive()) return
+    respawnToLine()
   }
 
   // Consume the one-shot lethal trigger. Phase 1: 'hit' snaps you back on
@@ -705,6 +689,9 @@ export function startGameLoop(opts: GameLoopOpts): void {
   const driftTierHud = createDriftTierHud()
   const tuckHud = createTuckHud(TUCK_SWEET_SPOT)
   const trickPromptHud = createTrickPromptHud()
+  // Launch/landing verdict chyron — the wave-mastery feedback loop's
+  // render half. Sim decides (launchGradeSystem); this only announces.
+  const launchGradeHud = createLaunchGradeHud()
 
   // Anti-grav HUD widget. Reads the player bike's AntiGravOverride
   // each render frame and fades the indicator in/out. The chase
@@ -728,8 +715,11 @@ export function startGameLoop(opts: GameLoopOpts): void {
             progressLabel: `BEAT ${idx + 1}/${total}`,
           })
         },
-        onBeatCleared: (beat) => {
-          tutorialHud?.flashCleared(beat.clearMessage ?? 'OK')
+        onBeatCleared: (beat, how) => {
+          // Celebrate only what was actually performed; a timed-out
+          // beat moves on with a neutral flash — no "+PUMP" for a
+          // pump that never happened.
+          tutorialHud?.flashCleared(how === 'performed' ? (beat.clearMessage ?? 'OK') : 'MOVING ON')
         },
         onCompleted: () => {
           tutorialHud?.finish(DEFAULT_TUTORIAL_SCRIPT.finishMessage)
@@ -1246,6 +1236,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // breach animation, and drive the warning popup. The autopilot handoff was
     // already reconciled at the top of the frame.
     handleOobLethal()
+    handleRescueRequest()
     sharkSeq.tick(dt)
     oobHud.update(OutOfBoundsStore.get(playerEid), oobAutopilotActive)
 
@@ -1639,6 +1630,28 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // Flatground small hops (where the sim never opened the window)
     // never fire here — the lift impulse comes from trickHopSystem
     // but none of the trick FX runs.
+    // Launch/landing verdicts — the wave-mastery loop's announce step.
+    // Sim already graded the edge + paid the meter (launchGradeSystem);
+    // here we flash the chyron, chime a clean landing, and let the
+    // tutorial's LAUNCH / LAND beats graduate. Skipped on autopilot —
+    // the pilot isn't the player.
+    if (!control.isAutoPlay()) {
+      const grade = LaunchGradeStore.get(playerEid)
+      if (grade?.firedThisTick) {
+        launchGradeHud.flash(grade.firedKind, grade.firedQuality)
+        if (grade.firedKind === 'landing') {
+          tutorialDirector?.notifyLanding(grade.firedQuality)
+          // Audio receipt on the landing only (takeoff already has
+          // wind + engine); clean landings get the perfect sparkle.
+          if (playerSettings.wavePumpIntensity !== 'off' && grade.firedQuality >= 0.4) {
+            audio.wavePump(grade.firedQuality, grade.firedQuality >= 0.72)
+          }
+        } else {
+          tutorialDirector?.notifyLaunch(grade.firedQuality)
+        }
+      }
+    }
+
     if (!control.isAutoPlay() && state.playerSnapshot) {
       const hoverState = HoverStateStore.get(playerEid)
       const intent = ControlIntentStore.get(playerEid)

@@ -271,12 +271,14 @@ release, a 350 ms cooldown prevents immediate re-trigger.
 
 ## Tutorial integration
 
-The default tutorial script (`tutorial-script.ts`) now includes a
-**DRIFT** beat between WAVE PUMP and ANTI-GRAV: "Hold Z / C through a
-corner while steering, then release for a boost." It clears on the
-first charged release (`driftTierThisBeat >= 1`), with a 25 s
-`clearAfterSeconds` escape hatch so a flat track with no real corner
-still advances.
+The default tutorial script (`tutorial-script.ts`) includes a
+**DRIFT** beat between the LAUNCH → LAND wave-mastery pair and READY
+(the WAVE PUMP + ANTI-GRAV beats it originally sat between are both
+cut): "Hold Z / C through a corner while steering, then release for a
+boost." It clears on the first charged release
+(`driftTierThisBeat >= 1`), with a 45 s `clearAfterSeconds` escape
+hatch so a flat track with no real corner still advances — expiry
+shows a neutral "moving on" flash, not the "+TURBO" celebration.
 
 The director gained a `notifyDrift(tier)` out-of-band signal (parallel
 to `notifyPumpEvent` / `notifyOrbitTouch`) that keeps the max tier seen

@@ -37,7 +37,50 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-06-21** — **Levels: static collision is now clipped to
+> **Last updated: 2026-08-19** — **First-session funnel + wave-mastery
+> feedback pass ([PR #25](https://github.com/unclemattmakes/king-tide/pull/25),
+> branch `claude/playtest-fixes`).** A three-hat playtest of the live build
+> (PM / art director / first-time customer) produced a prioritized card; this
+> pass executed it. Shipped: the Tutorial's First Run now teaches on **Mayday
+> Bay** (was the greybox `lagoon` dev fixture) with a 2-bike casual escort, no
+> placement board, and beats that celebrate only performed actions; the
+> **wave-mastery loop is finally graded** — new `launch-grade.ts` sim system
+> scores takeoff pitch + landing/surface match on the airborne edges, pays the
+> boost meter (clean landing ≈ one trick), flashes a two-word verdict chyron,
+> and the tutorial's new LAUNCH → LAND beats clear on those verdicts (E/Q
+> named on screen at last); **respawn is a first-class rebindable action**
+> (default Backspace — it was a hardcoded, invisible listener) that snaps to
+> the nearest racing-line point, plus `stuck-rescue.ts` auto-rescue after
+> ~2.5 s wedged or rider-ragdolled, and a fixed latent bug where any teleport
+> instantly re-ejected the rider (crash-tracker Δv); menus take **arrow/WASD
+> spatial navigation** + clickable breadcrumbs; playable greybox venues badge
+> **"EARLY ROUTE · ART PASS COMING"**; Mayday Bay's intro plate now agrees
+> with its card (**Reef Cup**, was "Tutorial Cup" — cross-catalog consistency
+> test added); the **phantom ambience 404s are gone** (the opus files never
+> existed — seed-script placeholders; refs removed, validator + a new QA
+> asset-404 gate prevent recurrence); thruster/spray luminance capped under
+> the contrast budget (signal FX untouched — wants a headed eyeball tune);
+> lagoon ships an explicit sky (black-void fix); minimap YOU dot is
+> unmistakable; boot time is now a per-cell QA budget that reaches
+> qa-report.md; the standing-rider bug is code-guarded (its root causes are
+> **asset** defects: four `Ride_*` clips are byte-copies of the chair-sit
+> idle, and stunt's `socket_seat` is ~0.95 m too high — .blend re-author is
+> the follow-up). Verified: typecheck / lint / 1440 unit tests (+9 new) /
+> build / docs build green; headed Playwright on the affected specs
+> (`boot.spec`'s 8 s ready tripwire fails locally on main too — ~9 s with
+> CDN-served assets — pre-existing, left alone). **Corrected findings:** the
+> start countdown already existed (hold-the-grid + F1 lights, May) — the
+> playtest misread it through automation latency; and **The Maw's absence
+> from the venue card is deliberate** (B-list parking, docs/tracks/the-maw.md)
+> — CLAUDE.md now says so. _Deliberately not shipped: the warm-restart
+> orchestrator (full seam list added to boot-overhaul-plan.md — a missed
+> store means corrupted restarts; needs its own e2e), camera-fade through
+> occluding props (needs a per-instance fade design vs. the instanced vinyl),
+> and leaderboard seeding (production write — a human's call)._
+>
+> ---
+>
+> **2026-06-21** — **Levels: static collision is now clipped to
 > the playable corridor (stop colliding out-of-bounds terrain).** Most of a
 > dressed map's terrain is out of bounds — the OOB system leashes the bike to
 > the racing line and kills it past 2.5× the corridor half-width, yet

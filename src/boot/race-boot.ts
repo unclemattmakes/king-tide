@@ -342,6 +342,11 @@ export async function bootRace(appEl: HTMLElement) {
   // finish.
   const timeTrialMode = params.get('tt') === '1'
 
+  // Tutorial framework (?tutorial=1) — the coached first run. Hoisted
+  // here so the spawn + HUD phases can branch on it, not just the
+  // game-loop handoff at the bottom of boot.
+  const tutorialMode = params.get('tutorial') === '1'
+
   // Replay playback mode. `?replay=session` reads a JSON replay payload
   // from sessionStorage (stashed there by the garage's Load Replay flow,
   // which then triggers a navigation to ?replay=session). When active, the
@@ -924,6 +929,14 @@ export async function bootRace(appEl: HTMLElement) {
   const aiParam = Number(params.get('ai'))
   if (params.get('ai') !== null && Number.isFinite(aiParam)) spawnArgs.aiCount = aiParam
   if (timeTrialMode) spawnArgs.aiCount = 0
+  // Tutorial: a calm two-bike escort at casual pace. The coached first
+  // run must not be an eight-bike race the student is losing while
+  // they learn throttle — pace-setters, not a pack. `?ai=` below 2
+  // still wins (it's an explicit dev override).
+  if (tutorialMode) {
+    spawnArgs.aiCount = Math.min(spawnArgs.aiCount ?? 2, 2)
+    spawnArgs.difficulty = 'casual'
+  }
   const { playerEid, aiEids, replayBikeEids, ghostEid } = spawnBikes(spawnArgs)
 
   // Time Trial — install the ghost runner once both the ghost entity
@@ -986,6 +999,8 @@ export async function bootRace(appEl: HTMLElement) {
     // canonical visual when the intro is on. Multiplayer keeps the
     // banner (lobby gate already has its own UI; no intro shots fly).
     hideCountdownBanner: useStartLights,
+    // Tutorial: no placement board — the coached run is not a contest.
+    hidePositionBoard: tutorialMode,
     onCountdownTick: (n) => {
       // Light audio cue: re-use the gate "ding" for each tick, lap fanfare for GO.
       if (n === 0) audio.lapCompleted()
@@ -1709,6 +1724,7 @@ export async function bootRace(appEl: HTMLElement) {
     phys,
     track,
     trackId,
+    waveField,
     playerEid,
     playerVariantId: playerVariant.id,
     roomId,
@@ -2058,7 +2074,7 @@ export async function bootRace(appEl: HTMLElement) {
     onFinish: () => {
       controls.setFinishShown(true)
     },
-    tutorialMode: params.get('tutorial') === '1',
+    tutorialMode,
     timeTrialMode,
     ghostRunner,
     ...(waveRiderSys ? { waveRiderSys } : {}),

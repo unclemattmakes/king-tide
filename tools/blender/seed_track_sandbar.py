@@ -296,27 +296,24 @@ def _apply_sandbar_sky(scene) -> None:
 
 
 def _merge_audio_into_json(track_id: str) -> None:
-    """Post-pass: drop a forward-looking ``audio`` block into the
-    track JSON after the addon export. The merge logic in
-    ``_merge_export_json`` doesn't own ``audio``, so a hand-edited
-    block survives every subsequent Blender re-export. Paths target
-    real basenames under ``public/audio/{music,ambient}/`` — missing
-    files load gracefully (warned, never crashed) so the schema can
-    ship ahead of the licensed assets.
+    """Post-pass fixups on the exported track JSON.
+
+    Audio: this used to author a placeholder ``audio`` block
+    (sandbar-pad-bed / gulls / surf-light) for files that were never
+    produced — every player load 404'd against the CDN before falling
+    back. Until real ambience exists under ``public/audio/``, author
+    no ``audio`` block at all, and scrub any stale one so a re-seed
+    converges to a clean file. When the assets land, reintroduce the
+    block here *after* the files are pushed.
     """
     json_path = os.path.join(REPO_ROOT, "public", "tracks", f"{track_id}.json")
     if not os.path.isfile(json_path):
-        print(f"[seed-track-sandbar] WARN: no JSON at {json_path}, skipping audio merge")
+        print(f"[seed-track-sandbar] WARN: no JSON at {json_path}, skipping JSON fixups")
         return
     with open(json_path, "r", encoding="utf-8") as fh:
         body = json.load(fh)
 
-    body["audio"] = {
-        "music": "sandbar-pad-bed.opus",
-        "ambient": ["gulls.opus", "surf-light.opus"],
-        "ambientGains": [0.3, 0.5],
-        "music3dEffects": {"duckOnPump": 0.5},
-    }
+    body.pop("audio", None)
     # Tutorial is one lap — the export's scene prop also writes this,
     # but stamp it here too as a safety so the JSON on disk is
     # unambiguously one lap regardless of whether
@@ -326,7 +323,7 @@ def _merge_audio_into_json(track_id: str) -> None:
     with open(json_path, "w", encoding="utf-8") as fh:
         json.dump(body, fh, indent=2)
         fh.write("\n")
-    print(f"[seed-track-sandbar] merged audio + lapsToFinish=1 into {json_path}")
+    print(f"[seed-track-sandbar] scrubbed stale audio + lapsToFinish=1 into {json_path}")
 
 
 # ────────────────────────────────────────────────────────────────────

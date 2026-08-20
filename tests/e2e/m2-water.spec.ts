@@ -52,11 +52,11 @@ test.describe('M2 water', () => {
         if ((window.__hover!.race()?.raceTime ?? 0) - rCal0 > 1.5) break
       }
       const steerPlusXSign = window.__hover!.player()!.position.x - x0 >= 0 ? 1 : -1
-      // Reset to the start pose, then drive the held line.
+      // Reset to the start pose, then drive the held line. (The
+      // player-facing respawn key snaps to the nearest racing-line
+      // point now — specs use the deterministic to-start debug hook.)
       window.__hover!.setIntentOverride(null)
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Backspace' }))
-      await wait(50)
-      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Backspace' }))
+      window.__hover!.respawnToStart()
       await wait(400)
       window.__hover!.setIntentOverride(driveIntent(0))
 

@@ -13,7 +13,7 @@
  * shipping track explicitly.
  */
 
-export type CupName = 'Tutorial' | 'Reef' | 'Harbor' | 'Continental' | 'Drowned'
+export type CupName = 'Tutorial' | 'Reef' | 'Harbor' | 'Continental' | 'Drowned' | 'Exhibition'
 
 export type TrackTheme = {
   /** Optional broadcast display name. Overrides the JSON-authored
@@ -43,7 +43,11 @@ const CATALOG: Record<string, TrackTheme> = {
   sandbar: {
     displayName: 'Mayday Bay',
     location: 'Mayday Bay · Castaway Lagoon',
-    cup: 'Tutorial',
+    // Race 1 of the Reef Cup (tracks-catalog.ts + the cup roster test
+    // pin it there) — the plate must agree with the venue card. The
+    // tutorial *mode* runs here too, but that doesn't make it the
+    // "Tutorial Cup" on a race-day plate.
+    cup: 'Reef',
     setPiece: 'Training Gates',
     lore: 'A storm-wrecked resort lagoon, calm now, one ramp. Welcome to the Circuit.',
     palette: 'Soft turquoise lagoon',
@@ -194,7 +198,11 @@ export function deriveFallbackTheme(
 
   return {
     location: trackName,
-    cup: 'Tutorial',
+    // Uncatalogued tracks (dev scenes, procedural fixtures, raw GLBs)
+    // used to claim "TUTORIAL CUP" on the intro plate — wrong for all
+    // of them and confusing next to the real tutorial. "Exhibition"
+    // reads as race-day flavor without asserting a cup that exists.
+    cup: 'Exhibition',
     setPiece: '—',
     lore: '',
     palette: '—',

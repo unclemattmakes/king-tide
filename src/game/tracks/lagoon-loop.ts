@@ -88,6 +88,21 @@ export function createLagoonLoop(): Track {
   return {
     id: 'lagoon-loop',
     name: 'Lagoon Loop',
+    // Explicit sky: with no block this track fell to DEFAULT_SKY
+    // (timeOfDay 0, bloom 0, neutral grade), which lands on the
+    // palette's two near-black zenith keyframes — away from the sun
+    // most of the dome rendered as a void ("black sky" playtest bug).
+    // Authored tracks never hit it because they all ship a sky block;
+    // now the dev fixture does too. Mirrors sandbar's mid-morning
+    // recipe (seed_track_sandbar.py) at slightly lower dressing.
+    sky: {
+      timeOfDay: 60,
+      cloudiness: 0.25,
+      sunIntensity: 1.1,
+      colorGrade: 'miami_pastel',
+      bloom: 0.35,
+      seaStateBeaufort: 1,
+    },
     // Player spawns on the right straight, just south of cp 0, facing +Z.
     // No more "spawn in the middle and hop on" — straight off the line.
     start: {

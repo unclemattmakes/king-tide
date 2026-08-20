@@ -22,11 +22,13 @@ import {
 import { driftSystem } from './systems/drift'
 import { hoverSystem } from './systems/hover'
 import { applyPeerInputs, EMPTY_PEER_INPUTS } from './systems/input-apply'
+import { launchGradeSystem } from './systems/launch-grade'
 import { type OobConfig, outOfBoundsSystem } from './systems/out-of-bounds'
 import { boostTickSystem, pickupSystem, pickupUseSystem } from './systems/pickup'
 import { riderCrashSystem } from './systems/rider-crash'
 import { riderPoseSystem } from './systems/rider-pose'
 import { rubberBandSystem } from './systems/rubber-band'
+import { stuckRescueSystem } from './systems/stuck-rescue'
 import { syncFromPhysics } from './systems/sync-from-physics'
 import { trickHopSystem } from './systems/trick-hop'
 import { wakeUpdateSystem } from './systems/wake-update'
@@ -213,6 +215,10 @@ export function simulateStep(
   // Applying the vertical impulse here (before `phys.step()` below)
   // means the bike's lift integrates this tick rather than next.
   trickHopSystem(sim, phys)
+  // Launch/landing grade — right after trick-hop so it reads the same
+  // fresh HoverState edges, and before boostMeterSystem so a landing
+  // reward integrates into the meter this same tick.
+  launchGradeSystem(sim, phys)
   // Drift state machine — runs after trick-hop so the small-hop
   // (drift initiator's visible tell) has already fired its impulse,
   // and reads the same fresh `HoverState.isGrounded`. Doesn't apply
@@ -238,6 +244,10 @@ export function simulateStep(
   // Triggering on Δv catches wall hits, mine blasts, and bike-on-bike
   // sideswipes without needing collision-event subscription.
   riderCrashSystem(sim, phys, phys.fixedDt)
+  // Stuck rescue — after syncFromPhysics + rider crash so it sees this
+  // tick's post-step velocity and rider state. Sets the one-shot
+  // rescue-request flag the render frame consumes.
+  stuckRescueSystem(sim, phys)
 
   if (!inputs.locked) raceTick(sim, phys, phys.fixedDt)
   // Out-of-bounds leash — after the race tick so it sees this tick's finished

@@ -268,7 +268,7 @@ needed; the level picker will list it on next reload.
 
 ::: tip First playtest checklist
 - Press `T` to enable AI autoplay and watch a bot lap your spline.
-- Press `Backspace` to respawn at `start_00` if you get stuck.
+- Press `Backspace` (rebindable) to respawn onto the racing line if you get stuck — the auto-rescue also fires on its own after ~2.5 s wedged.
 - Open the dev tools console for any GLB load errors.
 - If the bike falls through, your terrain mesh probably isn't
   tagged `kind=track`.

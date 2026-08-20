@@ -16,7 +16,7 @@ All keyboard axes are **smoothed with a ~0.13 s ramp** — taps give small input
 | `E` | Pitch — **lift** (nose up, extend air time) |
 | `Space` | Fire pickup |
 | `Shift` | Boost |
-| `Backspace` | Respawn at start (snaps to spawn pose, zero velocity) |
+| `Backspace` (rebindable) | Respawn — snaps to the nearest racing-line point, zero velocity (start pose on splineless dev scenes) |
 | `T` or `F1` | Toggle auto-play (AI drives the player bike) |
 | `M` | Toggle audio mute |
 | `R` | Restart race after finish |

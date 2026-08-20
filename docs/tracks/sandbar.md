@@ -56,8 +56,10 @@ This teaches the exact transfer skill the reworked set uses everywhere —
 lesson (gravity flip) with a lesson that pays off on ten other tracks.
 
 > Removes the **`ANTI-GRAV`** beat from the tutorial director's
-> sequence (THROTTLE → CRUISE → LOOK → WAVE PUMP → DRIFT → ~~ANTI-GRAV~~ →
-> READY). The freed slot can fold into READY or add a second crest rep.
+> sequence. The freed slot went to the v2 wave-mastery pair: the live
+> sequence is THROTTLE → CRUISE → LOOK → **LAUNCH → LAND** (pitch the
+> takeoff / stick the landing, graded by `launch-grade.ts`) → DRIFT →
+> READY.
 
 ## Hard section / branching / per-lap
 

@@ -301,20 +301,6 @@
       "seed": 1337
     }
   },
-  "audio": {
-    "music": "sandbar-pad-bed.opus",
-    "ambient": [
-      "gulls.opus",
-      "surf-light.opus"
-    ],
-    "ambientGains": [
-      0.3,
-      0.5
-    ],
-    "music3dEffects": {
-      "duckOnPump": 0.5
-    }
-  },
   "terrainShader": {
     "altMin": -50.0,
     "altMax": 120.0,

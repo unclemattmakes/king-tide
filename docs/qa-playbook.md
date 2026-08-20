@@ -305,7 +305,7 @@ through this list once per track:
       catches obvious cases.
 - [ ] Pause menu → resume; pause menu → exit returns to main menu
       cleanly.
-- [ ] Backspace respawn works at start gate.
+- [ ] Respawn (default Backspace, rebindable) snaps to the racing line; auto-rescue fires after ~2.5s wedged or rider-down.
 - [ ] Garage / settings tabs all reachable via keyboard alone (no
       mouse).
 - [ ] Every menu / overlay is fully navigable by **controller alone** —

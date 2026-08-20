@@ -57,6 +57,15 @@ const LAUNCH_PITCH_SPIN = 6
 type VelSample = { x: number; y: number; z: number }
 const prevVel = new Map<number, VelSample>()
 
+/** Forget the Δv history for a bike. Every teleport-style respawn MUST
+ *  call this: a respawn zeroes linvel while the rider is attached, so
+ *  the next tick's Δv otherwise reads as a full-speed wall hit and
+ *  instantly re-ejects the freshly re-seated rider. (The OOB/shark path
+ *  dodged this only because its rider was already launched and pruned.) */
+export function clearCrashTracking(bikeEid: number): void {
+  prevVel.delete(bikeEid)
+}
+
 export function riderCrashSystem(sim: SimWorld, phys: PhysicsWorld, dt: number): void {
   void dt // not currently used; motor ramp lives in the (future) launched-pose system
   const riderEids = query(sim, [Rider])

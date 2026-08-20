@@ -32,6 +32,7 @@ export type KeyboardAction =
   | 'boost'
   | 'trickLeft'
   | 'trickRight'
+  | 'respawn'
 
 export const KEYBOARD_ACTIONS: readonly KeyboardAction[] = [
   'throttleForward',
@@ -44,6 +45,7 @@ export const KEYBOARD_ACTIONS: readonly KeyboardAction[] = [
   'trickRight',
   'fire',
   'boost',
+  'respawn',
 ] as const
 
 export const KEYBOARD_ACTION_LABEL: Readonly<Record<KeyboardAction, string>> = Object.freeze({
@@ -53,10 +55,11 @@ export const KEYBOARD_ACTION_LABEL: Readonly<Record<KeyboardAction, string>> = O
   steerRight: 'Steer right',
   pitchUp: 'Pitch up (nose up)',
   pitchDown: 'Pitch down (nose down)',
-  trickLeft: 'Trick / hop (left)',
-  trickRight: 'Trick / hop (right)',
+  trickLeft: 'Drift / trick (left)',
+  trickRight: 'Drift / trick (right)',
   fire: 'Fire pickup',
   boost: 'Boost',
+  respawn: 'Respawn to track',
 })
 
 export type KeyboardBinding = {
@@ -86,6 +89,12 @@ export const DEFAULT_KEYBOARD_BINDINGS: Readonly<KeyboardBindings> = Object.free
   trickRight: { primary: 'KeyC', secondary: null },
   fire: { primary: 'Space', secondary: null },
   boost: { primary: 'ShiftLeft', secondary: 'ShiftRight' },
+  // Was a hardcoded, undocumented Backspace listener in controls.ts —
+  // invisible in the rebind list, so players stuck on rocks had no way
+  // to discover the rescue. Now a first-class, rebindable action.
+  // (Gamepads lean on the automatic wedge/eject rescue —
+  // stuck-rescue.ts — rather than spending a button.)
+  respawn: { primary: 'Backspace', secondary: null },
 })
 
 /** Gamepad buttons we let the player remap. Sticks stay on the W3C
@@ -93,7 +102,7 @@ export const DEFAULT_KEYBOARD_BINDINGS: Readonly<KeyboardBindings> = Object.free
  *  throttle / brake and stay fixed because non-button bindings can't be
  *  captured by "press a button" prompts cleanly.
  *
- *  MK8 layout: L1/R1 own the hop-trick (and eventually drift). Fire +
+ *  MK8 layout: L1/R1 own the drift-hold + hop-trick channel. Fire +
  *  boost relocated to face buttons so the bumpers stay on the trick
  *  channel where the wrist naturally rests during a drift hold. */
 export type GamepadAction = 'fire' | 'boost' | 'trickLeft' | 'trickRight'
@@ -106,8 +115,8 @@ export const GAMEPAD_ACTIONS: readonly GamepadAction[] = [
 ] as const
 
 export const GAMEPAD_ACTION_LABEL: Readonly<Record<GamepadAction, string>> = Object.freeze({
-  trickLeft: 'Trick / hop (left)',
-  trickRight: 'Trick / hop (right)',
+  trickLeft: 'Drift / trick (left)',
+  trickRight: 'Drift / trick (right)',
   fire: 'Fire pickup',
   boost: 'Boost',
 })

@@ -5,8 +5,9 @@
  *
  * Round-trips: preserves track + bike picks from the caller's URL
  * search and stamps `tutorial=1` + `race=1` on top. Falls back to
- * `lagoon` when no track is in the URL — that's the default ship
- * track the rest of the menu defaults to.
+ * `sandbar` (Mayday Bay, the dressed tutorial lagoon) when no track
+ * is in the URL — a new player's first minute must land on real art,
+ * not the procedural lagoon dev fixture.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -21,9 +22,9 @@ describe('buildReplayTutorialHref', () => {
     expect(url.searchParams.get('bike')).toBe('racer')
   })
 
-  it('falls back to lagoon when no track param is present', () => {
+  it('falls back to sandbar (Mayday Bay) when no track param is present', () => {
     const url = new URL(buildReplayTutorialHref(''))
-    expect(url.searchParams.get('track')).toBe('lagoon')
+    expect(url.searchParams.get('track')).toBe('sandbar')
     expect(url.searchParams.get('tutorial')).toBe('1')
   })
 

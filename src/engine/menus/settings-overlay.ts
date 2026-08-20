@@ -262,7 +262,7 @@ const TAB_SPECS: TabSpec[] = [
   {
     id: 'audio',
     label: 'AUDIO',
-    description: 'Master mix + per-bus levels. Owned by the audio engine.',
+    description: 'Master mix + per-bus levels.',
     rows: [
       {
         id: 'audio-master',
@@ -335,7 +335,7 @@ const TAB_SPECS: TabSpec[] = [
         label: 'Mute all',
         control: { kind: 'toggle', defaultValue: false },
         enabled: false,
-        gate: 'In-race mute lives on the [M] keybinding until the mixer lands',
+        gate: 'Tap M during a race to mute everything at once.',
       },
     ],
   },
@@ -633,7 +633,7 @@ const TAB_SPECS: TabSpec[] = [
         label: 'Show minimap',
         control: { kind: 'toggle', defaultValue: true },
         enabled: false,
-        gate: 'Pending the minimap-vs-arrow decision',
+        gate: 'The minimap is always on for now.',
       },
       {
         id: 'gp-subtitles',

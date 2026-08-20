@@ -22,7 +22,7 @@ const PAGE_REPEAT_INITIAL_MS = 420
 const PAGE_REPEAT_MS = 200
 const AXIS_THRESHOLD = 0.55
 
-type Dir = 'up' | 'down' | 'left' | 'right'
+export type Dir = 'up' | 'down' | 'left' | 'right'
 
 export type MenuGamepadOpts = {
   /** The element to search for focusable children. Re-evaluated on
@@ -43,6 +43,11 @@ export type MenuGamepad = {
    *  Deferred to the next frame so newly-mounted DOM has time to lay
    *  out before we measure it. */
   focusFirst(): void
+  /** Move focus spatially — the same geometric scoring the gamepad
+   *  d-pad/stick uses. Exposed so keyboard arrows / WASD can drive
+   *  identical navigation (input-navigability convention: keyboard is
+   *  a first-class menu citizen, not a Tab-order afterthought). */
+  navigate(dir: Dir): void
   /** Stop polling. */
   dispose(): void
 }
@@ -370,6 +375,7 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
   raf = requestAnimationFrame(tick)
 
   return {
+    navigate,
     focusFirst(): void {
       requestAnimationFrame(() => {
         const els = focusables()

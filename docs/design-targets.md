@@ -102,7 +102,7 @@ Wave-mastery means:
 | Field size | **8 bikes** ✅ (state-sync stable; perf at full field is the open work) | 8 bikes | 12 bikes |
 | Music tracks | 🟡 procedural pad bed only | **4–6** | 8+ |
 | AI difficulty options | **3 levels + rubber-band toggle** ✅ (+ per-difficulty pump + drift tuning) | 3 levels + rubber-band toggle | Per-class tuning |
-| Tutorial | ✅ Track-agnostic 6-beat director (THROTTLE → CRUISE → LOOK → WAVE PUMP → DRIFT → ANTI-GRAV → READY); auto-runs on Sandbar | 1 scripted track, <90 s | Per-mechanic drills |
+| Tutorial | ✅ Track-agnostic 7-beat director (THROTTLE → CRUISE → LOOK → **LAUNCH → LAND** → DRIFT → READY — the wave-mastery pair replaced the cut WAVE PUMP + ANTI-GRAV beats, 2026-08-19); First Run defaults to Sandbar with a 2-bike casual escort | 1 scripted track, <90 s | Per-mechanic drills |
 | Modes | ✅ Race / Time Trial + ghost / Cup (4-cup, MK8 points) / Multiplayer / Tutorial | +Time Trial w/ ghost, +Cup (4-track) | +Knockout, +Mission |
 | Multiplayer | ✅ Room codes, lobby, sticky raceStarted, 1 Hz ping/pong | Room codes, 2–4 peers + AI fill to 8 | 8 peers no AI |
 | Bike variants | **5** ✅ (Cruiser / Racer / Stunt / Scout / Sparrow) | 3 | 5 |
@@ -139,6 +139,12 @@ Wave-mastery means:
    [water-next-research.md](./water-next-research.md) §5, P1); if a
    guidance accessibility option ever returns it should render ON the
    water surface (sampling the same wave field), not as a HUD fan.
+   **Update 2026-08-19 — the minimal grading half shipped:**
+   `launch-grade.ts` scores takeoff pitch + landing/surface match on the
+   sim's airborne edges, pays the boost meter, and flashes a two-word
+   verdict chyron (`launch-grade-hud.ts`); the tutorial's LAUNCH → LAND
+   beats clear on those verdicts. The water-side *forward-looking* read
+   (contour foam etc.) remains the open P1 above.
 5. 🟡 **Soundtrack.** Procedural pad bed shipped as stand-in on the
    music bus (`audio-service.ts`); licensing or commissioning the
    4–6 tracks is the open item — `setMusicEnabled(false)` is a

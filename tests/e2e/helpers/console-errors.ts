@@ -79,13 +79,63 @@ export type ConsoleErrorCollector = {
  * no per-test assertion call. Specs still on the bare import are tracked
  * for migration; see playwright.config.ts and the workstream followups.
  */
+export type Asset404Record = {
+  url: string
+  status: number
+  tMs: number
+}
+
+export type Asset404Collector = {
+  records: Asset404Record[]
+  /** Throws via expect() if any asset-looking request 404'd. Opt-in per
+   *  spec (unlike console errors, not an auto-fixture): some specs probe
+   *  missing-asset fallbacks on purpose. */
+  assertNone(): void
+  snapshot(): Asset404Record[]
+}
+
+/** Requests we grade as "assets": game content the schema loads softly
+ *  (warned, never crashed) — which is exactly how three phantom
+ *  ambience files 404'd on every production load unnoticed. */
+const ASSET_URL_RE = /\/(assets|audio|tracks)\/|\.(glb|opus|jpe?g|png|ktx2|webp)(\?|$)/
+
 export const test = base.extend<{
   consoleErrors: ConsoleErrorCollector
+  /** Opt-in collector: every 404 response for an asset-looking URL.
+   *  QA matrix cells call `asset404s.assertNone()` so a dangling
+   *  content reference fails the cell instead of warning into a log. */
+  asset404s: Asset404Collector
   /** Auto-fixture: enforces "no console errors" after every test that uses
    *  this `test`, unless the spec called `consoleErrors.expectErrors()`.
    *  Never referenced by name in specs — `auto: true` runs it regardless. */
   _consoleErrorAutoAssert: undefined
 }>({
+  asset404s: async ({ page }, use) => {
+    const t0 = Date.now()
+    const records: Asset404Record[] = []
+    const onResponse = (res: { url(): string; status(): number }): void => {
+      if (res.status() !== 404) return
+      if (!ASSET_URL_RE.test(res.url())) return
+      records.push({ url: res.url(), status: res.status(), tMs: Date.now() - t0 })
+    }
+    page.on('response', onResponse)
+    const collector: Asset404Collector = {
+      records,
+      assertNone() {
+        expect(
+          records,
+          records.length === 0
+            ? 'no asset 404s'
+            : `${records.length} asset request(s) 404'd:\n${records
+                .map((r) => `[+${r.tMs}ms] ${r.url}`)
+                .join('\n')}`,
+        ).toEqual([])
+      },
+      snapshot: () => records.slice(),
+    }
+    await use(collector)
+    page.off('response', onResponse)
+  },
   consoleErrors: async ({ page }, use) => {
     const t0 = Date.now()
     const records: ConsoleErrorRecord[] = []

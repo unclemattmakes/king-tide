@@ -140,6 +140,32 @@ reload over a live race page (teardown contention — see below):
 - **Single-boot menu→race handoff** (no page reload; reuse device, WASM,
   GLBs, compiled pipelines). Biggest remaining structural win; large
   `race-boot.ts` refactor.
+- **Warm restart** (pause-menu RESTART without the full reload) — the
+  smaller sibling of the handoff above, scoped 2026-08-19 during the
+  playtest-fixes pass and deliberately **not** shipped blind: every
+  stateful subsystem needs an explicit reset, and one missed store means
+  corrupted restarts in prod. The complete seam list, for whoever picks
+  it up:
+  - `RaceHud.reset()` (race-hud.ts:598) — re-arms 3-2-1 + clears the
+    shared gate-time table; already built for this.
+  - Per-bike: re-place via `resolveGridSlotWorld` (grid-offsets.ts),
+    zero velocities, `resetRiderForBike` + `clearCrashTracking`
+    (rider-crash.ts) per bike.
+  - `RacerStore` back to the initial literal (bike.ts ~:234 — extract
+    an exported `resetRacer()`); `createRaceSystem`'s closure-scoped
+    `prevSigned`/`prevPos` maps need a new reset hook (race.ts:50-53);
+    the `TELEPORT_DIST_SQ` guard then absorbs the teleports.
+  - Combat: despawn in-flight missiles/mines/explosions (entities with
+    colliders), clear shield/stun/boost effect stores, reset pickup
+    spawner cooldowns + held pickups.
+  - Loop state: `finishShown` (via `ControlsHandle.setFinishShown`),
+    `lapState` best-lap pair, replay `recorder` restart, OOB
+    `resolveOob`, `RescueStateStore`, `LaunchGradeStore`, boost meter,
+    drift + trick state.
+  - Multiplayer stays reload-based (restart is already disabled in MP).
+  Verify with a dedicated e2e: restart mid-race with a mine placed + a
+  missile in flight + rider launched, assert lap 1 / clean standings /
+  no orphan colliders.
 - ~~Mexico City content diet (material count / prop merging)~~ **DONE
   2026-06-12** — both halves landed and measured (perf-baseline.md): the
   shadow-caster size gate (shadow-caster-gate.ts) plus the decoration merge

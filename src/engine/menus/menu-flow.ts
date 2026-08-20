@@ -13,6 +13,7 @@ import {
 } from '@/engine/leaderboard/local'
 import { fetchBoard } from '@/engine/leaderboard/remote'
 import { playerSettings } from '@/engine/player-settings'
+import { DEFAULT_TUTORIAL_TRACK } from '@/engine/tutorial/tutorial-launch'
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
 import { installMenuGamepad, isAnyOverlayShown } from '../input/menu-gamepad'
@@ -175,7 +176,7 @@ const MODE_TILES: ModeTile[] = [
     id: 'tutorial',
     badge: 'LEARN',
     headline: 'TUTORIAL',
-    desc: 'Six scripted beats — throttle, cruise, look around, wave pump, drift, finish. Skippable for returning players via Settings → Subtitles.',
+    desc: 'Seven scripted beats — throttle, cruise, look, launch, land, drift, finish. Runs on the Mayday Bay lagoon.',
     enabled: true,
   },
 ]
@@ -279,6 +280,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   function renderCrumbs(): void {
     if (!crumbsEl) return
     const steps = stepsForMode()
+    const currentIdx = steps.findIndex((s) => s.id === currentStep)
     crumbsEl.innerHTML = ''
     steps.forEach((s, i) => {
       if (i > 0) {
@@ -287,10 +289,23 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         sep.textContent = '·'
         crumbsEl.appendChild(sep)
       }
-      const c = document.createElement('span')
-      c.className = `bc-crumb${s.id === currentStep ? ' is-current' : ''}`
-      c.textContent = s.label
-      crumbsEl.appendChild(c)
+      // Steps already visited are real buttons — clicking a crumb jumps
+      // back (picks survive a backward jump, so it's just multi-back).
+      // The current + not-yet-reached steps stay inert labels.
+      const visited = currentIdx > 0 && i < currentIdx
+      if (visited) {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = 'bc-crumb bc-crumb-link'
+        b.textContent = s.label
+        b.addEventListener('click', () => showStep(s.id))
+        crumbsEl.appendChild(b)
+      } else {
+        const c = document.createElement('span')
+        c.className = `bc-crumb${s.id === currentStep ? ' is-current' : ''}`
+        c.textContent = s.label
+        crumbsEl.appendChild(c)
+      }
     })
   }
 
@@ -414,6 +429,11 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         }</div>
       </div>
       ${disabled ? `<div class="bc-gate">${escapeHtml(t.gateLabel)}</div>` : ''}
+      ${
+        !disabled && t.art === 'greybox'
+          ? '<div class="bc-early">Early route &middot; art pass coming</div>'
+          : ''
+      }
     `
     if (!disabled) {
       card.addEventListener('click', () => {
@@ -1078,23 +1098,23 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="num">02</div>
           <div>
             <div class="title">TUTORIAL</div>
-            <div class="sub">SCRIPTED PROMPTS &middot; ANY TRACK &middot; SKIPPABLE</div>
+            <div class="sub">SCRIPTED PROMPTS &middot; MAYDAY BAY &middot; NO PRESSURE</div>
           </div>
         </div>
         <div class="bc-cards cols-2">
           <div class="bc-card" id="tut-start" role="button" tabindex="0" style="--accent:#ffd27a; cursor: pointer;">
             <div class="label">FRAMEWORK</div>
             <div class="name">FIRST RUN</div>
-            <div class="tag">Six beats — throttle, cruise, look around, wave pump, drift, finish. Runs on any track. Subtitles toggle in Settings.</div>
+            <div class="tag">Seven beats — throttle, cruise, look, launch, land, drift, finish. Runs on the Mayday Bay lagoon.</div>
             <div class="record">~90s &middot; INTRO DIFFICULTY</div>
             <div class="record" style="color: var(--bc-yellow); margin-top: 6px;">${escapeHtml(ctaLabel)} &rarr;</div>
           </div>
-          <div class="bc-card bc-disabled" data-gate="Opens with the Mayday Bay training run" style="--accent:#9bdcf2;">
+          <div class="bc-card bc-disabled" data-gate="In production — track drills join later this season" style="--accent:#9bdcf2;">
             <div class="label">TRAINING COVE</div>
             <div class="name">SANDBAR</div>
             <div class="tag">Track-specific scripted scenarios — drift around a buoy, pickup gate, ramp run.</div>
             <div class="record">~60s &middot; 1 LAP &middot; SANDBAR-ONLY</div>
-            <div class="bc-gate">Opens with the Mayday Bay training run</div>
+            <div class="bc-gate">In production &middot; joins later this season</div>
           </div>
         </div>
         <div class="bc-actions">
@@ -1105,10 +1125,14 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       const launchTutorial = (): void => {
         // Reuse the singleplayer commit path so picks → URL handling
         // stays in one place; just stamp the tutorial flag on top.
+        // First Run always teaches on the dressed tutorial lagoon —
+        // a cold boot's picks.trackId is the procedural dev track,
+        // which must never be a new player's first minute. (Replay
+        // on an arbitrary track lives in Settings → Replay tutorial.)
         const url = new URL(window.location.href)
         url.search = ''
         url.searchParams.set('race', '1')
-        url.searchParams.set('track', picks.trackId)
+        url.searchParams.set('track', DEFAULT_TUTORIAL_TRACK)
         url.searchParams.set('bike', picks.bikeId)
         url.searchParams.set('tutorial', '1')
         finish(url.toString())
@@ -1547,6 +1571,28 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         e.preventDefault()
         return
       }
+      // Arrow keys / WASD move card focus spatially — same scoring the
+      // gamepad d-pad uses (input-navigability convention: a keyboard
+      // player gets d-pad-grade menus, not Tab-cycling). Parked while
+      // the Settings overlay / Rebind modal own input, mirroring the
+      // gamepad poller's isActive guard.
+      const dir =
+        e.code === 'ArrowUp' || e.code === 'KeyW'
+          ? 'up'
+          : e.code === 'ArrowDown' || e.code === 'KeyS'
+            ? 'down'
+            : e.code === 'ArrowLeft' || e.code === 'KeyA'
+              ? 'left'
+              : e.code === 'ArrowRight' || e.code === 'KeyD'
+                ? 'right'
+                : null
+      if (dir !== null) {
+        if (!isAnyOverlayShown('settings-menu', 'rebind-menu')) {
+          gamepadNav.navigate(dir)
+          e.preventDefault()
+        }
+        return
+      }
       if (e.code === 'Enter' || e.code === 'NumpadEnter') {
         if (currentStep === 'title') {
           showStep('mode')
@@ -1606,10 +1652,9 @@ function buildRoomUrl(roomId: string): string {
 
 /** Tracks shown in the Leaderboards screen. Combines:
  *
- *  - All v1 ship tracks (so the player can scan the full slate even
- *    before each track ships — empty boards read as "race when this
- *    lands"). Each row carries the v1 accent so the visual identity
- *    matches the track-select tile.
+ *  - v1 tracks that have actually shipped (a board for an unraceable
+ *    venue only makes the screen read dead). Each row carries the v1
+ *    accent so the visual identity matches the track-select tile.
  *  - Procedural + manifest tracks (lagoon, cliffside, every GLB) so
  *    times set on today's playable maps actually have a home. Dev-only
  *    tracks only appear on dev builds, matching the cup-select gating.
@@ -1622,6 +1667,11 @@ function buildLeaderboardTrackList(
   const seen = new Set<string>()
   const out: LeaderboardTrackEntry[] = []
   for (const t of V1_TRACKS) {
+    // Unbuilt venues (status 'pending') used to get rows on the theory
+    // that empty boards read as "race when this lands" — but a board
+    // for a track you *cannot race* only makes the whole screen read
+    // dead. List a venue once a time is actually settable on it.
+    if (t.status !== 'ship') continue
     seen.add(t.id)
     out.push({ id: t.id, name: t.name, accent: t.accent })
   }

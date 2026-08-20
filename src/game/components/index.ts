@@ -353,6 +353,33 @@ export type TrickStateData = {
 export const TrickStateStore = createStore<TrickStateData>('TrickState')
 
 /**
+ * Launch/landing grade — per-bike state for the wave-mastery feedback
+ * loop (launch-grade.ts). Side-table only: no ECS tag, the system
+ * queries on [BikeTag, RBHandle, HoverState, Racer] and lazily seeds
+ * this store, so bike creation needs no changes.
+ *
+ * `firedThisTick` is a one-shot sim→render edge (trick-hop pattern):
+ * set on the tick a takeoff or landing verdict lands, consumed by the
+ * game-loop render hook the same frame, cleared next sim tick.
+ */
+export type LaunchGradeData = {
+  /** Grounded state last tick — drives the takeoff/landing edges. */
+  prevGrounded: boolean
+  /** Seconds airborne in the current flight (0 while grounded). */
+  airborneSec: number
+  /** Takeoff quality 0..1 captured at the last grounded→airborne edge.
+   *  Kept through the flight so a landing HUD could pair the two. */
+  takeoffQuality: number
+  /** One-shot: a verdict fired this tick. */
+  firedThisTick: boolean
+  /** Which edge fired: the takeoff pop or the touchdown. */
+  firedKind: 'launch' | 'landing'
+  /** Quality 0..1 of the fired verdict. */
+  firedQuality: number
+}
+export const LaunchGradeStore = createStore<LaunchGradeData>('LaunchGrade')
+
+/**
  * Per-bike Mario-Kart-style drift state. Written by `driftSystem` each
  * fixed tick. The hover system reads `driftDir` to modulate the ground-
  * branch lateral drag + yaw torque. The render side reads `driftDir`

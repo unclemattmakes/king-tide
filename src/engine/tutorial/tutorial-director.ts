@@ -22,6 +22,7 @@
  */
 
 import type {
+  BeatClearKind,
   BeatClearResult,
   TutorialBeat,
   TutorialContext,
@@ -29,9 +30,11 @@ import type {
 } from './tutorial-script'
 
 export interface TutorialDirectorEvents {
-  /** Called when a beat clears. The host can play a sound, kick a
-   *  HUD widget, etc. */
-  onBeatCleared?: (beat: TutorialBeat) => void
+  /** Called when a beat clears. `how` distinguishes an actually
+   *  performed action (`'performed'`) from the escape-hatch timer or
+   *  an explicit skip (`'timeout'`), so the host can celebrate the
+   *  first and stay neutral on the second. */
+  onBeatCleared?: (beat: TutorialBeat, how: BeatClearKind) => void
   /** Called when a new beat arms — useful for HUD widget swap. */
   onBeatArmed?: (beat: TutorialBeat) => void
   /** Called once when the script has finished. The host should mark
@@ -62,6 +65,11 @@ export interface TutorialDirector {
    *  (1 = MT, 2 = SMT, 3 = UMT). The director keeps the max tier
    *  seen this beat. */
   notifyDrift(tier: number): void
+  /** Out-of-band: launchGradeSystem graded a takeoff this frame. */
+  notifyLaunch(quality: number): void
+  /** Out-of-band: launchGradeSystem graded a landing this frame. The
+   *  director keeps the best quality seen this beat. */
+  notifyLanding(quality: number): void
   /** Current beat being shown (or `null` if completed / not started). */
   currentBeat(): TutorialBeat | null
   /** Index of the current beat in the script's beat list. */
@@ -83,6 +91,8 @@ export function createTutorialDirector(
   let pumpEventsThisBeat = 0
   let orbitTouchedThisBeat = false
   let driftTierThisBeat = 0
+  let launchesThisBeat = 0
+  let bestLandingQualityThisBeat = 0
   let completed = false
   let armed = false
 
@@ -92,13 +102,15 @@ export function createTutorialDirector(
     pumpEventsThisBeat = 0
     orbitTouchedThisBeat = false
     driftTierThisBeat = 0
+    launchesThisBeat = 0
+    bestLandingQualityThisBeat = 0
     armed = true
     const beat = script.beats[idx]
     if (beat && events.onBeatArmed) events.onBeatArmed(beat)
   }
 
-  function clearBeat(beat: TutorialBeat): void {
-    if (events.onBeatCleared) events.onBeatCleared(beat)
+  function clearBeat(beat: TutorialBeat, how: BeatClearKind): void {
+    if (events.onBeatCleared) events.onBeatCleared(beat, how)
     if (beatIndex + 1 >= script.beats.length) {
       completed = true
       armed = false
@@ -136,13 +148,15 @@ export function createTutorialDirector(
         inAntiGrav: sample.inAntiGrav,
         orbitTouchedThisBeat,
         driftTierThisBeat,
+        launchesThisBeat,
+        bestLandingQualityThisBeat,
       }
       if (evaluatePredicate(beat, ctx)) {
-        clearBeat(beat)
+        clearBeat(beat, 'performed')
         return
       }
       if (typeof beat.clearAfterSeconds === 'number' && beatTime >= beat.clearAfterSeconds) {
-        clearBeat(beat)
+        clearBeat(beat, 'timeout')
       }
     },
     notifyPumpEvent() {
@@ -154,6 +168,14 @@ export function createTutorialDirector(
     notifyDrift(tier) {
       if (!completed && armed && tier > driftTierThisBeat) {
         driftTierThisBeat = Math.max(0, Math.min(3, Math.floor(tier)))
+      }
+    },
+    notifyLaunch(quality) {
+      if (!completed && armed && quality >= 0) launchesThisBeat += 1
+    },
+    notifyLanding(quality) {
+      if (!completed && armed && quality > bestLandingQualityThisBeat) {
+        bestLandingQualityThisBeat = Math.min(1, quality)
       }
     },
     currentBeat() {
@@ -168,7 +190,7 @@ export function createTutorialDirector(
     },
     skipCurrentBeat() {
       const beat = script.beats[beatIndex]
-      if (beat) clearBeat(beat)
+      if (beat) clearBeat(beat, 'timeout')
     },
   }
 }

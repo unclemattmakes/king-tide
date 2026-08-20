@@ -47,6 +47,7 @@ const FAILURE_TAIL_LINES = 40
  * @typedef {{
  *   track: string,
  *   bike: string,
+ *   bootMs: number | null,
  *   fps: number,
  *   p50Ms: number,
  *   p95Ms: number,
@@ -120,11 +121,12 @@ export function renderMarkdown(report) {
     if (perfRows.length > 0) {
       lines.push('## Matrix perf')
       lines.push('')
-      lines.push('| Track | Bike | FPS | p50 ms | p95 ms | p99 ms | Hitches | Samples |')
-      lines.push('|---|---|---:|---:|---:|---:|---:|---:|')
+      lines.push('| Track | Bike | Boot s | FPS | p50 ms | p95 ms | p99 ms | Hitches | Samples |')
+      lines.push('|---|---|---:|---:|---:|---:|---:|---:|---:|')
       for (const r of perfRows) {
+        const boot = r.bootMs === null ? '—' : (r.bootMs / 1000).toFixed(1)
         lines.push(
-          `| ${r.track} | ${r.bike} | ${r.fps.toFixed(1)} | ${r.p50Ms.toFixed(1)} | ${r.p95Ms.toFixed(1)} | ${r.p99Ms.toFixed(1)} | ${r.hitchCount} | ${r.count} |`,
+          `| ${r.track} | ${r.bike} | ${boot} | ${r.fps.toFixed(1)} | ${r.p50Ms.toFixed(1)} | ${r.p95Ms.toFixed(1)} | ${r.p99Ms.toFixed(1)} | ${r.hitchCount} | ${r.count} |`,
         )
       }
       lines.push('')
@@ -226,6 +228,17 @@ export function parseMatrixPerfRows(logPath) {
   }
   /** @type {MatrixPerfRow[]} */
   const rows = []
+  // The spec has always emitted `qa-matrix:<track>:<bike>:bootMs <n>`
+  // alongside the perf line, but nothing parsed it — boot cost never
+  // reached the report. Collect it first, then join onto the perf rows.
+  /** @type {Map<string, number>} */
+  const bootByCell = new Map()
+  const bootRe = /qa-matrix:([\w-]+):([\w-]+):bootMs\s+(\d+)/g
+  let bm = bootRe.exec(raw)
+  while (bm !== null) {
+    bootByCell.set(`${bm[1]}:${bm[2]}`, Number(bm[3]))
+    bm = bootRe.exec(raw)
+  }
   // `qa-matrix:<track>:<bike>:perf {"fps":...,"p50Ms":...,...}`. The JSON
   // can technically wrap a newline if the recorder ever grew to multiline
   // output, but today it's always single-line so this is fine.
@@ -238,6 +251,7 @@ export function parseMatrixPerfRows(logPath) {
       rows.push({
         track,
         bike,
+        bootMs: bootByCell.get(`${track}:${bike}`) ?? null,
         fps: numberOr(parsed.fps, 0),
         p50Ms: numberOr(parsed.p50Ms, 0),
         p95Ms: numberOr(parsed.p95Ms, 0),

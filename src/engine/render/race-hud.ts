@@ -108,6 +108,10 @@ export interface RaceHudOptions {
    *  `onCountdownTick` callback still fires so an external overlay
    *  (e.g. the F1 start-lights row) can drive the visual instead. */
   hideCountdownBanner?: boolean
+  /** When true, never show the placement board (1st/8). The lap chip
+   *  stays. Tutorial mode sets this — a coached first run shouldn't
+   *  pin "8th/8" on the student while they learn throttle. */
+  hidePositionBoard?: boolean
 }
 
 export function createRaceHud(opts: RaceHudOptions): RaceHud {
@@ -453,9 +457,10 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     const posKey = input.totalRacers > 0 ? input.playerPosition * 1000 + input.totalRacers : 0
     if (posKey !== lastPositionKey) {
       // Solo time trial has no field to place in — hide the board, keep
-      // the lap chip.
-      rpBoard.style.display = input.totalRacers > 1 ? '' : 'none'
-      if (input.totalRacers > 1) {
+      // the lap chip. Tutorial hides it too (hidePositionBoard).
+      const showBoard = input.totalRacers > 1 && !opts.hidePositionBoard
+      rpBoard.style.display = showBoard ? '' : 'none'
+      if (showBoard) {
         rpNum.textContent = String(input.playerPosition)
         rpSuf.textContent = ordinalSuffix(input.playerPosition)
         rpTotal.textContent = `/${input.totalRacers}`
@@ -546,7 +551,12 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
 
   function drawMinimapDot(ctx: CanvasRenderingContext2D, dot: MinimapDot): void {
     const c = worldToCanvas(dot.x, dot.z)
-    const r = dot.isPlayer ? 5 : dot.isLeader ? 4 : 3.2
+    // The player dot was 5px vs the field's 3.2px with a same-radius
+    // ring — at a glance indistinguishable from the pack (playtest:
+    // "I can't tell which dot is me"). YOU is now bigger AND wears a
+    // detached halo ring, two channels that survive colorblind
+    // palettes and dot-overlap pileups.
+    const r = dot.isPlayer ? 6 : dot.isLeader ? 4 : 3.2
     const palette = currentHudPalette()
     ctx.fillStyle = dot.isPlayer
       ? palette.player
@@ -564,6 +574,13 @@ export function createRaceHud(opts: RaceHudOptions): RaceHud {
     if (dot.isPlayer) {
       ctx.strokeStyle = 'rgba(255, 245, 225, 0.95)'
       ctx.lineWidth = 2
+      ctx.stroke()
+      // Detached halo — clear water between cap ring and halo is what
+      // makes YOU pop out of a cluster of AI dots.
+      ctx.beginPath()
+      ctx.arc(c.cx, c.cy, r + 4, 0, Math.PI * 2)
+      ctx.strokeStyle = 'rgba(255, 245, 225, 0.55)'
+      ctx.lineWidth = 1.5
       ctx.stroke()
     }
   }

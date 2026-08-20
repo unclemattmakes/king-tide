@@ -22,10 +22,21 @@
  *   - **Skip toggle** — returning players can dismiss the whole
  *     framework via Settings → Gameplay → Subtitles, or via the
  *     `?tutorial=0` URL override.
- *   - **Per-beat timeout** — beats with `clearAfterSeconds` clear
- *     automatically once the timer expires. Useful for the
- *     "look around" beat where there's no objective success signal.
+ *   - **Per-beat timeout** — beats with `clearAfterSeconds` advance
+ *     automatically once the timer expires, so no mechanic is ever a
+ *     hard gate (anti-target: "optional flair before difficulty
+ *     gate"). A timeout is reported as `'timeout'` to
+ *     `onBeatCleared`, and the HUD shows a neutral "moving on" flash
+ *     instead of the success message — the celebration is reserved
+ *     for actually performing the action.
  */
+
+import { VERDICT_OK_MIN } from '@/game/systems/launch-grade'
+
+/** How a beat ended: the player performed the action (`performed`),
+ *  or the escape-hatch timer expired / the beat was skipped
+ *  (`timeout`). Drives whether the HUD celebrates or just moves on. */
+export type BeatClearKind = 'performed' | 'timeout'
 
 /** Snapshot the director hands to each beat's `clearWhen` predicate.
  *  Read-only — beats must never mutate sim/render state. */
@@ -40,8 +51,16 @@ export interface TutorialContext {
   /** Forward throttle ∈ [0,1] — current frame value. */
   throttle: number
   /** Wave-pump events received since the current beat armed. The
-   *  director clears this counter at every beat arm. */
+   *  director clears this counter at every beat arm. (Legacy channel —
+   *  fed by the trick-fire shim; the v2 wave-mastery beats read the
+   *  launch/landing fields below instead.) */
   pumpEventsThisBeat: number
+  /** Graded takeoffs (launchGradeSystem verdicts) since the beat
+   *  armed. Cleared at every beat arm. */
+  launchesThisBeat: number
+  /** Best landing quality (0..1) graded since the beat armed. 0 when
+   *  no credible landing has happened yet. Cleared at every beat arm. */
+  bestLandingQualityThisBeat: number
   /** True while the player is engaged with an anti-grav source
    *  (override.active && weight > threshold). Parked with anti-grav
    *  (cut) — no shipped beat reads it, but the field stays so the
@@ -92,12 +111,13 @@ export interface TutorialScript {
 /** v1 framework's canned script. Track-agnostic — works on any
  *  manifest track. Sandbar adds its own scripted scenarios on top.
  *
- *  Six beats — throttle, cruise, look-around, swell pump, drift,
- *  ready. The drift beat (added once the mini-turbo mechanic landed)
- *  is detected generically off the drift-tier release signal, so it
- *  works on any manifest track without a buoy-shaped corner. The
- *  remaining cathedral-copy beats (pickup, ramp) are still swapped for
- *  what we can detect without a Sandbar-shaped course. */
+ *  Seven beats — throttle, cruise, look-around, launch, land, drift,
+ *  ready. LAUNCH + LAND teach the v2 signature mechanic (motocross
+ *  "master the jump": pitch the takeoff, pitch the landing — the
+ *  Mario-Kart fork, NOT the old press-forward-on-crest pump) off the
+ *  launch-grade system's verdicts. The drift beat is detected
+ *  generically off the drift-tier release signal, so it works on any
+ *  manifest track without a buoy-shaped corner. */
 export const DEFAULT_TUTORIAL_SCRIPT: TutorialScript = {
   id: 'first-run-intro',
   label: 'INTRO',
@@ -122,16 +142,33 @@ export const DEFAULT_TUTORIAL_SCRIPT: TutorialScript = {
       title: 'LOOK AROUND',
       hint: 'Right stick / mouse-drag to peek at the swells ahead.',
       clearWhen: (ctx) => ctx.orbitTouchedThisBeat,
-      clearAfterSeconds: 8,
+      clearAfterSeconds: 12,
       clearMessage: 'EYES UP',
     },
     {
-      id: 'wave-pump',
-      title: 'WAVE PUMP',
-      hint: 'Throttle at the swell crest to launch off the wave.',
-      clearWhen: (ctx) => ctx.pumpEventsThisBeat >= 1,
-      clearAfterSeconds: 25,
-      clearMessage: '+PUMP',
+      // The signature mechanic, first half — pitch the takeoff.
+      // Clears on any graded launch (launchGradeSystem's takeoff
+      // verdict), so the student learns "pitch back, pop off the
+      // crest" — the v2 motocross model, not the cut pump-on-crest.
+      // Long leash: the timeout is a safety net, not the expected
+      // path — an expired beat advances with a neutral flash.
+      id: 'wave-launch',
+      title: 'LAUNCH',
+      hint: 'Pitch back — hold E (or pull the stick) as you ride up a swell, and pop off the crest.',
+      clearWhen: (ctx) => ctx.launchesThisBeat >= 1,
+      clearAfterSeconds: 45,
+      clearMessage: '+AIR',
+    },
+    {
+      // Second half — stick the landing. Clears on a landing graded
+      // "ok" or better (quality >= VERDICT_OK_MIN), so a cased,
+      // nose-first crash doesn't graduate the beat.
+      id: 'stick-landing',
+      title: 'STICK THE LANDING',
+      hint: 'Level out with E / Q so the nose matches the water when you touch down.',
+      clearWhen: (ctx) => ctx.bestLandingQualityThisBeat >= VERDICT_OK_MIN,
+      clearAfterSeconds: 45,
+      clearMessage: 'STOMPED!',
     },
     {
       id: 'drift',
@@ -139,9 +176,10 @@ export const DEFAULT_TUTORIAL_SCRIPT: TutorialScript = {
       hint: 'Hold Z / C through a corner while steering, then release for a boost.',
       // Clears on any charged release (blue MT or better). The
       // clearAfterSeconds escape hatch keeps the script moving on a
-      // flat track with no real corner to drift through.
+      // flat track with no real corner to drift through — long leash,
+      // neutral flash on expiry (see BeatClearKind).
       clearWhen: (ctx) => ctx.driftTierThisBeat >= 1,
-      clearAfterSeconds: 25,
+      clearAfterSeconds: 45,
       clearMessage: '+TURBO',
     },
     {

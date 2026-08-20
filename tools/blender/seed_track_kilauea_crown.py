@@ -756,17 +756,10 @@ KILAUEA_SKY = {
 }
 
 
-KILAUEA_AUDIO = {
-    "ambient": [
-        "volcano-rumble.opus",
-        "surf-light.opus",
-        "jungle-birds.opus",
-    ],
-    "ambientGains": [0.5, 0.45, 0.3],
-    "music3dEffects": {
-        "duckOnPump": 0.3,
-    },
-}
+# Ambience (volcano-rumble / surf-light / jungle-birds) is parked until
+# real files exist under public/audio/ambient/ — the old placeholder
+# block made every load 404 against the CDN. Reintroduce a
+# KILAUEA_AUDIO block here only after the assets are pushed.
 
 
 def _merge_track_json() -> None:
@@ -789,7 +782,7 @@ def _merge_track_json() -> None:
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     data["sky"] = KILAUEA_SKY
-    data["audio"] = KILAUEA_AUDIO
+    data.pop("audio", None)
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
         f.write("\n")
