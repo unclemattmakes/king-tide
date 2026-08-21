@@ -32,20 +32,19 @@ linked docs — extend those rather than growing this file.
    That diagnosis was wrong and the failure is fixed (#416). **A red check now
    means something.** Read it before assuming it's infrastructure.
    What CI actually covers: **`check-and-build` and `docs` are the real
-   gates** — typecheck, lint, unit tests, build, docs build. `determinism`
-   and `QA report` boot real tracks, so they hydrate assets from R2 and
-   **skip with a `::warning::` when `RCLONE_CONF_BASE64` is absent** — a
+   gates** — typecheck, lint, unit tests, build, docs build. `determinism`,
+   `e2e` and `QA report` all boot real tracks, so they hydrate assets from R2
+   and **skip with a `::warning::` when `RCLONE_CONF_BASE64` is absent** — a
    green run there means "not exercised", not "passed", on forks *and* on the
    main repo (the secret has never been set).
-   **`e2e` is the exception — it does NOT skip** (corrected 2026-08-21; this
-   file used to lump it in with the other two). It runs the whole suite
-   unhydrated and dies on its 25-minute job timeout, so **its normal outcome
-   on every push is `cancelled` — which drags the whole run's conclusion to
-   `cancelled` too**, on healthy commits and broken ones alike. Judge a run
-   by `check-and-build` + `docs`, never by the run-level badge, and don't
-   read a cancelled `e2e` as a regression. It gates nothing
-   (`continue-on-error: true`). Detail + the fix:
-   [maintainer-workflow.md](docs/maintainer-workflow.md#reading-the-ci-results-honestly).
+   `e2e` only started skipping on 2026-08-21 — before that it ran the suite
+   unhydrated and died on its 25-minute timeout, which dragged **every**
+   run's conclusion to `cancelled`, healthy commits included. So: **judge a
+   commit by `check-and-build` + `docs`, never by the run-level badge**
+   (three of five jobs are non-gating by design), and treat pre-2026-08-21
+   run badges as noise.
+   [maintainer-workflow.md](docs/maintainer-workflow.md#reading-the-ci-results-honestly)
+   has the detail.
    **Don't just set that secret expecting the gates to light up.** Measured
    2026-08-17 by setting it on a clone: hydration works fine, then the specs
    fail on runner hardware — GitHub runners have no GPU, headless Chromium

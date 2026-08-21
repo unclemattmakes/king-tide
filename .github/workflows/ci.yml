@@ -68,11 +68,30 @@ jobs:
       - name: Build VitePress site
         run: pnpm docs:build
 
+  # Broad e2e suite. Informational (`continue-on-error`) — flip that off once
+  # it's been genuinely green on PRs for a couple of weeks, which needs the
+  # runner story below sorted first.
+  #
+  # Asset/secret gating (added 2026-08-21): every step that needs the app is
+  # gated on RCLONE_CONF_BASE64, same as `determinism` / `QA report`. Until
+  # then only the *hydrate* steps were gated and `pnpm e2e` ran unconditionally
+  # — so on a repo without the secret (which is every run to date) it drove the
+  # whole suite against a bare public/assets, failed every asset- or
+  # GPU-dependent spec, and got killed by `timeout-minutes: 25`. That burned a
+  # 25-minute runner slot per push for no signal, and — because a *cancelled*
+  # job propagates to the workflow run — left every run's conclusion reading
+  # `cancelled` whether the commit was healthy or not, which is a good way to
+  # train everyone to ignore CI. It now takes the skip path with a `::warning::`
+  # instead.
+  #
+  # Setting the secret does NOT make this suite pass: GitHub runners have no
+  # GPU, so headless Chromium falls back to SwiftShader and a WebGPU track boot
+  # can't finish inside the specs' waits. Same measured wall the determinism
+  # gate hits — see the REALITY CHECK below and CLAUDE.md hard rule 1. Real
+  # coverage for sim/render/feel work is headed Playwright on your own machine.
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    # Informational for now. Flip `continue-on-error` off once it's been green
-    # on PRs for a couple of weeks.
     continue-on-error: true
     env:
       E2E_HEADLESS: '1'
@@ -92,10 +111,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # E2E drives the real app, which fetches the compiled GLB/audio assets.
       # Those are gitignored + served from R2 (docs/asset-storage.md), so we
-      # hydrate them first. Gated on RCLONE_CONF_BASE64: if it's absent (e.g. a
-      # forked PR with no secrets) we skip the pull and let the run proceed —
-      # this job is informational (continue-on-error) so a missing-asset failure
-      # here doesn't gate the build. The hard asset gate is the `determinism` job.
+      # hydrate them first.
       - name: Install rclone
         if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         uses: AnimMouse/setup-rclone@v1
@@ -109,9 +125,14 @@ jobs:
           export RCLONE_CONFIG="$RUNNER_TEMP/rclone/rclone.conf"
           pnpm assets:pull
       - name: Install Playwright Chromium
+        if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         run: pnpm e2e:install
       - name: Run e2e
+        if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         run: pnpm e2e
+      - name: Skip notice (no asset secret)
+        if: ${{ env.HAS_ASSET_SECRET != 'true' }}
+        run: echo "::warning::RCLONE_CONF_BASE64 not set — skipping the e2e suite (cannot hydrate assets from R2). It runs for real on branches/PRs with the secret."
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v7
@@ -119,6 +140,7 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+          if-no-files-found: ignore
 
   # Determinism GATE — unlike the broad `e2e` job above, this one is NOT
   # continue-on-error, so a determinism regression (sim divergence or a golden
