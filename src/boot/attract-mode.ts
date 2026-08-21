@@ -151,6 +151,10 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       scene,
       phys,
       editMode: false,
+      // Backdrop, not a race — take the decimated `-menu.glb` when the venue
+      // ships one. See `build_track_menu.py` for what it gives up and why the
+      // menu is the one surface that can afford to.
+      preferMenuVariant: true,
     })
     if (disposed) {
       disposeRenderer()
