@@ -18,7 +18,8 @@ fixable, and this page is the fix.
 | production build (`check-and-build`) | ❌ | ✅ | ❌ |
 | docs build (`docs`) | ❌ | ✅ | ❌ |
 | Vercel preview to eyeball | ❌ | ✅ both projects | ❌ |
-| e2e · determinism · QA matrix | ❌ | ⚠️ skip — no GPU on runners | ❌ |
+| determinism · QA matrix | ❌ | ⚠️ skip — no GPU on runners | ❌ |
+| e2e | ❌ | ⚠️ *doesn't* skip — [always `cancelled`](#e2e-doesnt-skip--read-the-run-badge-accordingly) | ❌ |
 | `partykit-deploy` | ❌ | ❌ **main-only** | runs *after* the push |
 
 Three things follow from that table.
@@ -91,12 +92,47 @@ was green. See the postmortem in
 ## Reading the CI results honestly
 
 `check-and-build` and `docs` are the only checks that both gate PRs and actually
-exercise the code. `determinism`, `e2e` and the QA matrix boot real tracks, so
-they hydrate assets from R2 and **skip** when `RCLONE_CONF_BASE64` is absent —
-which it always is. A green tick on those means *"not exercised"*, not
-*"passed"*. Do not add that secret expecting them to light up; it has been
-measured, and GitHub's GPU-less runners just turn a green skip into a permanent
-red. Full detail in [CLAUDE.md](../CLAUDE.md) hard rule 1.
+exercise the code. `determinism` and the QA matrix boot real tracks, so they
+hydrate assets from R2 and **skip** when `RCLONE_CONF_BASE64` is absent — which
+it always is. A green tick on those means *"not exercised"*, not *"passed"*. Do
+not add that secret expecting them to light up; it has been measured, and
+GitHub's GPU-less runners just turn a green skip into a permanent red. Full
+detail in [CLAUDE.md](../CLAUDE.md) hard rule 1.
+
+### `e2e` doesn't skip — read the run badge accordingly
+
+*(Corrected 2026-08-21. This page and CLAUDE.md both used to lump `e2e` in with
+the two jobs above.)*
+
+`determinism` and `QA report` each end in a `Skip notice (no asset secret)` step
+that emits a `::warning::` and gates every real step behind
+`HAS_ASSET_SECRET == 'true'`. **`e2e` has no such step.** Only its *Install
+rclone* and *Hydrate assets from R2* steps are gated; `Install Playwright
+Chromium` and `Run e2e` are unconditional. So with no secret it runs the full
+suite against a bare `public/assets`, every asset- or GPU-dependent spec fails
+or times out, and the job is killed by its own `timeout-minutes: 25`.
+
+Consequences worth internalising before you read any run:
+
+- **`e2e` reads `cancelled` on essentially every push.** That is its steady
+  state, not a signal. It is `continue-on-error: true` — informational by
+  design — so it gates nothing.
+- **The *run-level* conclusion is `cancelled` too.** A cancelled job propagates
+  to the workflow run, so the runs list shows `cancelled` for healthy commits
+  and broken ones alike. Verified on `main` at `90f95b7` (PR #26's merge, where
+  `check-and-build`, `docs`, `determinism` and `partykit-deploy` all passed) and
+  on every recent main run back through #22. **Never judge a commit by the
+  run-level badge** — open the run and read `check-and-build` + `docs`.
+- Conversely, don't spend time "fixing" a cancelled `e2e` on your PR. Compare it
+  against the same job on the base commit first; it will look identical.
+
+**The fix**, when someone wants it: give `e2e` the same skip path the other two
+already have — gate `Install Playwright Chromium` + `Run e2e` on
+`env.HAS_ASSET_SECRET == 'true'` and add a `Skip notice (no asset secret)` step
+with the matching `::warning::`. That reclaims a 25-minute runner slot per push
+and lets the run-level badge mean something again. Until then, a cancelled `e2e`
+is the expected output, and pointing the secret at it just trades the
+cancellation for a red (see the measured note in hard rule 1).
 
 Real coverage for sim/render/feel work is headed Playwright on your own machine
 (hard rule 2), not CI.
