@@ -254,6 +254,56 @@ Open / remaining for a full roll-out:
 - Generate one per dressed track + `pnpm assets:push` (R2). Only `sandbar` has
   one so far; every other track silently runs the legacy path.
 
+### Menu backdrop variant (the transfer lever)
+
+[`tools/blender/build_track_menu.py`](../tools/blender/build_track_menu.py) bakes
+`<track>-menu.glb`: the same venue, decimated **as a visual**. The cold-boot
+menu's live feed ([attract-mode.ts](../src/boot/attract-mode.ts)) opts in via
+`loadTrackForBoot({ preferMenuVariant: true })`; every other caller is untouched,
+and a track that ships no variant loads exactly as before.
+
+Why the menu specifically: the backdrop camera sits low over the water under a
+dimmed, vignetted plate and nobody is racing on it, so it is the one surface
+that can give up triangles for free. `sandbar.glb` is **pure geometry, zero
+textures** — POSITION 5.97 MB · NORMAL 5.97 MB · COLOR_0 3.93 MB · indices
+3.85 MB across 430,684 tris — so triangle count *is* the file size.
+
+Unlike the collider proxy this keeps materials, normals, COLOR_0 and extras
+(the vinyl pass and foliage sway read COLOR_0; the terrain shader, decals,
+emitters and horizon extraction all read `kind`), decimates **per object rather
+than joining** so 18 materials and every tag survive, and passes `collider_mesh`
+through undecimated. The variant is also its own collision source — the runtime
+skips `-collider.glb` when it uses one, so the backdrop pays a single download
+instead of two.
+
+Sandbar at ratio 0.3, measured 2026-08-21:
+
+| | before | after |
+|---|---|---|
+| `sandbar.glb` + `-collider.glb` | 20.7 + 4.7 MB | `sandbar-menu.glb` 6.6 MB |
+| tris | 430,684 | 131,022 |
+| backdrop transfer | 34.2 MB | 14.4 MB |
+| time to `attract-live` @ 20 Mbps (median of 3) | 15.3 s | **9.5 s** |
+| time to `attract-live` on localhost | 4.21 s | 4.16 s |
+
+**The win is transfer, not CPU.** On a warm local dev server the two are
+indistinguishable (within run-to-run noise) — the remaining ~4 s is module
+import staging, shader compilation and GPU upload, which decimation does not
+touch. Tuning the ratio further only helps players on real connections.
+
+Shape cost, scan-converted top-down max-Y against the source at 4 m cells:
+mean **13.4 cm**, **97.7 %** of the map within 25 cm, 99.7 % within 1 m, and
+**zero cells lost their surface**. Landmark peaks hold (seastack_03.001 91.0 m
+unchanged, seastack_03.002 46.5 m unchanged, seastack_04.001 109.1 → 107.3 m).
+The 0.2 % of cells past 3 m are silhouette *edges* on tall thin stacks, where a
+cell centre that used to catch an overhang now misses it and reads the seabed —
+a sampling boundary, not a missing feature. One material (`Steel`, a small slot
+on the ship hulls) loses all its faces at 0.3 and merges into its neighbours.
+
+Not yet done: only `sandbar` has a variant, and it is **not on R2** — until
+`pnpm assets:push`, production resolves no variant and silently serves the full
+GLB, i.e. today's behaviour.
+
 ### Dev cold-start (the "blank page before KING TIDE on first `pnpm dev`")
 
 Separate from the in-app load: on a cold `node_modules/.vite` cache, Vite

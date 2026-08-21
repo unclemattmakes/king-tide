@@ -30,6 +30,7 @@ import {
   attachTrackColliders,
   loadColliderProxy,
   loadGlbTrackVisuals,
+  resolveGlbVariant,
 } from '@/engine/render/glb-track'
 import { createRampMesh } from '@/engine/render/ramp-mesh'
 import { gateShadowCaster, resolveShadowCastMinRadius } from '@/engine/render/shadow-caster-gate'
@@ -106,6 +107,13 @@ export async function loadTrackForBoot(opts: {
   scene: THREE.Scene
   phys: PhysicsWorld
   editMode: boolean
+  /** Prefer a shipped `<track>-menu.glb` — the decimated backdrop variant
+   *  built by `tools/blender/build_track_menu.py` — over the full render
+   *  GLB. For the cold-boot menu's live feed only: the camera sits low over
+   *  the water under a dimmed, vignetted plate, so it cannot spend 20 MB and
+   *  8 s on geometry nobody is racing on. Additive — a track that ships no
+   *  variant loads exactly as before. */
+  preferMenuVariant?: boolean
 }): Promise<LoadedTrack> {
   const { trackId, scene, phys, editMode } = opts
 
@@ -218,7 +226,11 @@ export async function loadTrackForBoot(opts: {
       // so the load degrades gracefully there; in the race path it stays a
       // hard error.
       try {
-        const env = await loadGlbTrackVisuals(assetUrl(track.environmentGlb), {
+        const baseUrl = assetUrl(track.environmentGlb)
+        // Menu backdrop: swap in the decimated variant when the track ships
+        // one. Null (no variant, or not asked for) keeps the full GLB.
+        const menuUrl = opts.preferMenuVariant ? await resolveGlbVariant(baseUrl, 'menu') : null
+        const env = await loadGlbTrackVisuals(menuUrl ?? baseUrl, {
           // Anchor the terrain wet band + underwater tint to the real water
           // surface (not y=0) by threading the track's water height in.
           terrainShader: { ...track.terrainShader, waterLevel: track.water?.height ?? 0 },
@@ -233,9 +245,16 @@ export async function loadTrackForBoot(opts: {
         // heightmap below still bakes from the high-poly mesh in BOTH modes,
         // so water shoaling + the waterline read identically in the editor.
         if (!editMode) {
-          const colliderProxy = await loadColliderProxy(
-            assetUrl(track.environmentGlb.replace(/\.glb$/i, '-collider.glb')),
-          )
+          // The menu variant is already decimated to a fraction of the render
+          // mesh, so it IS the collision source — skipping a second multi-MB
+          // download for a backdrop whose only physics consumer is the AI
+          // hover ray. It carries its `collider_mesh` slabs verbatim, so the
+          // docks still collide.
+          const colliderProxy = menuUrl
+            ? null
+            : await loadColliderProxy(
+                assetUrl(track.environmentGlb.replace(/\.glb$/i, '-collider.glb')),
+              )
           attachTrackColliders(colliderProxy ?? env.scene, phys, collisionCorridorFor(track))
         }
         terrainRoots.push(env.scene)

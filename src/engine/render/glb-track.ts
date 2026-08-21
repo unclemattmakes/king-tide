@@ -280,17 +280,46 @@ export function isUnderMechanicalRigArm(node: THREE.Object3D): boolean {
  * normally); without it GLTFLoader would try to parse HTML as a GLB.
  */
 export async function loadColliderProxy(url: string): Promise<THREE.Object3D | null> {
+  if (!(await glbExists(url))) return null
   try {
-    const head = await fetch(url, { method: 'HEAD' })
-    const ct = head.headers.get('content-type') ?? ''
-    const isGlb =
-      head.ok && (ct.includes('octet-stream') || ct.includes('gltf') || ct.includes('binary'))
-    if (!isGlb) return null
     const gltf = await new GLTFLoader().loadAsync(url)
     return gltf.scene as unknown as THREE.Object3D
   } catch {
     return null
   }
+}
+
+/**
+ * True when `url` is a real GLB the loader can parse.
+ *
+ * The content-type guard is the point: Vite's dev server answers a missing
+ * static file with `200 + index.html` rather than a 404 (prod/R2 404 normally),
+ * so a bare `res.ok` would report every absent variant as present and hand
+ * GLTFLoader a page of HTML to choke on.
+ */
+async function glbExists(url: string): Promise<boolean> {
+  try {
+    const head = await fetch(url, { method: 'HEAD' })
+    const ct = head.headers.get('content-type') ?? ''
+    return head.ok && (ct.includes('octet-stream') || ct.includes('gltf') || ct.includes('binary'))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resolve an optional sibling variant of a track GLB — `<track>-<suffix>.glb`
+ * beside `<track>.glb` — returning its URL, or null when the track doesn't ship
+ * one. Callers fall back to the base GLB, so a variant is always additive: a
+ * track that never builds one behaves exactly as before.
+ *
+ * Today's user is the menu backdrop's `-menu` variant
+ * (`tools/blender/build_track_menu.py`).
+ */
+export async function resolveGlbVariant(baseUrl: string, suffix: string): Promise<string | null> {
+  const url = baseUrl.replace(/\.glb$/i, `-${suffix}.glb`)
+  if (url === baseUrl) return null
+  return (await glbExists(url)) ? url : null
 }
 
 export function attachTrackColliders(
