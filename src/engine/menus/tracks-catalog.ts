@@ -347,12 +347,15 @@ export const V1_CUPS: CupEntry[] = [
 /** Dev Cup — the fenced-off bin for test maps so the four ship-cups
  *  stay clean of playtest pollution. Visible only on dev builds (gated
  *  by `isDevBuild()` below). Browse-only — click a tile to jump into a
- *  one-off race against that track. The actual championship-wiring
- *  proof lives in `DEV_PLACEHOLDER_CUP` below. */
+ *  one-off race against that track. Its contents are whatever
+ *  `DEV_TRACK_ALLOWLIST` admits, which is Figure Eight alone today. The
+ *  actual championship-wiring proof lives in `DEV_PLACEHOLDER_CUP`
+ *  below — no longer shown on the cup screen, which carries one dev cup
+ *  as a sample. */
 export const DEV_CUP: CupEntry = {
   id: 'dev',
   name: 'Dev Cup',
-  tagline: 'Playtest tracks. Dev builds only — kept off the ship cups.',
+  tagline: 'Playtest track. Dev builds only — kept off the ship cups.',
   accent: '#a78bff',
   status: 'ship',
   gateLabel: '',
@@ -412,13 +415,33 @@ const DEV_PROCEDURAL: DevTrackEntry[] = [
   },
 ]
 
-/** Build the Dev Cup track list: procedurals first, then every GLB
- *  track surfaced by the asset manifest. */
+/**
+ * Dev tracks the menus are allowed to surface, by id.
+ *
+ * The manifest carries 30-plus playtest tracks — every greybox, spec
+ * fixture and stress map anyone has ever baked. Listing all of them made
+ * the Dev Cup a junk drawer and, once Single Race / Time Trial started
+ * showing a dev sample, buried the three venues we're actually driving
+ * to shippable. Figure Eight is the one kept: a compact GLB-backed
+ * circuit that exercises the real loader path.
+ *
+ * This is a display filter only — nothing here gates `?track=<id>`, so
+ * every other map is still one URL away for anyone who wants it. Re-add
+ * an id to put it back on the menus.
+ */
+const DEV_TRACK_ALLOWLIST: ReadonlySet<string> = new Set(['figure-eight'])
+
+/** Build the Dev Cup track list: procedurals first, then every GLB track
+ *  surfaced by the asset manifest — both filtered through
+ *  {@link DEV_TRACK_ALLOWLIST}, which today admits Figure Eight alone
+ *  (so the `lagoon` / `cliffside` procedurals below contribute nothing
+ *  until the allowlist names them again). */
 export function buildDevCupTracks(manifest?: TrackManifestEntry[]): DevTrackEntry[] {
-  const out: DevTrackEntry[] = [...DEV_PROCEDURAL]
+  const out: DevTrackEntry[] = DEV_PROCEDURAL.filter((t) => DEV_TRACK_ALLOWLIST.has(t.id))
   const known = new Set(out.map((t) => t.id))
   for (const m of manifest ?? []) {
     if (known.has(m.id)) continue
+    if (!DEV_TRACK_ALLOWLIST.has(m.id)) continue
     out.push({
       id: m.id,
       name: m.displayName,

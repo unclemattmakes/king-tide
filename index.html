@@ -1496,6 +1496,14 @@
         margin-top: 28px;
         display: flex; flex-direction: column; align-items: center; gap: 14px;
       }
+      /* Title fork — SINGLE PLAYER / MULTIPLAYER sit side by side as real
+         buttons, not the ambient press-anything label they replaced. Wrap
+         (not scroll) on narrow viewports; the phone breakpoint below
+         stacks them full-width. */
+      .bc-title .cta-choice {
+        flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 16px;
+      }
+      .bc-title .cta-choice .bc-btn { min-width: 210px; }
 
       .bc-recap {
         margin: 28px auto 0;
@@ -2504,6 +2512,10 @@
         .bc-title { padding: 12px 0; }
         .bc-title .tagline { margin-top: 18px; letter-spacing: 0.12em; }
         .bc-title .cta { margin-top: 22px; gap: 12px; }
+        /* Stack the fork full-width on a phone — two 210px pills side by
+           side overflow a 360px viewport. */
+        .bc-title .cta-choice { flex-direction: column; align-self: stretch; }
+        .bc-title .cta-choice .bc-btn { min-width: 0; width: 100%; }
         .bc-recap { padding: 14px 18px 12px; margin: 22px auto 0; }
         .bc-recap-val { font-size: 22px; }
         .bc-recap-val.small { font-size: 13px; }

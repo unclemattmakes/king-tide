@@ -4,9 +4,10 @@ import { expect, type Locator, type Page, test } from '@playwright/test'
  * Cold-boot menu flow smoke tests. The full broadcast-styled menu lives
  * in `src/engine/menus/`; these tests cover:
  *  - bare `/` lands on the title screen
- *  - the four mode commits — Race, Time Trial, Cup, Multiplayer —
- *    each stamp the URL with the right `?` params and reload into the
- *    matching game-loop branch
+ *  - the four mode commits — Single Race, Time Trial, Cup (off the mode
+ *    screen) and Multiplayer (off the title fork) — each stamp the URL
+ *    with the right `?` params and reload into the matching game-loop
+ *    branch
  *  - `?autostart=1` skips the menu entirely (the rest of the suite
  *    relies on this)
  *
@@ -69,9 +70,9 @@ async function clickModeCard(page: Page, mode: string): Promise<void> {
 test.describe('cold-boot menu', () => {
   test('bare URL shows the cold-boot title screen', async ({ page }) => {
     await page.goto('/')
-    // Apple-sport refresh dropped the explicit PRESS START button —
-    // the entire `.bc-title` section is the affordance now; any key
-    // or click on it advances. Assert on the wordmark instead.
+    // The title offers an explicit SINGLE PLAYER / MULTIPLAYER fork now,
+    // so it is no longer an any-key surface. Assert on the wordmark
+    // rather than either button, which the relocation tests below cover.
     await expect(page.locator('.bc-title .word')).toBeVisible()
     // Body gets the menu-active class so HUD chrome stays hidden.
     const bodyClass = await page.evaluate(() => document.body.classList.contains('menu-active'))
@@ -148,10 +149,63 @@ test.describe('cold-boot menu', () => {
   })
 
   test('MP entry "CREATE LOBBY" navigates to a room code URL', async ({ page }) => {
-    await gotoAndStart(page)
-    await clickModeCard(page, 'multiplayer')
+    // Multiplayer forks off the TITLE screen now, not the mode picker —
+    // the mode screen is the single-player branch only.
+    await page.goto('/')
+    await expect(page.locator('.bc-title .word')).toBeVisible()
+    await softClick(page.locator('#title-multi'))
     // CREATE LOBBY button is the first card on the MP entry screen.
     await softClick(page.locator('.bc-mode-card[data-action="create"]'))
     expect(await waitForCommit(page, /[?&]room=/)).toMatch(/[?&]room=[A-Z0-9-]+/)
+  })
+})
+
+/**
+ * The mode screen's job is picking a format. Three "…" links competing
+ * with that got moved somewhere they belong: Credits + Making of into
+ * Settings → About, and Leaderboards onto the track pickers, where a
+ * board is about the venue in front of you.
+ */
+test.describe('mode-screen link relocation', () => {
+  test('mode screen keeps only BACK and SETTINGS', async ({ page }) => {
+    await gotoAndStart(page)
+    await expect(page.locator('#mode-cards')).toBeVisible()
+    for (const gone of ['#mode-leaderboards', '#mode-credits', '#mode-making-of']) {
+      expect(await page.locator(gone).count(), `${gone} is still on the mode screen`).toBe(0)
+    }
+    await expect(page.locator('#mode-settings')).toBeVisible()
+  })
+
+  test('track pickers carry the leaderboards link, and BACK returns there', async ({ page }) => {
+    await gotoAndStart(page)
+    await clickModeCard(page, 'race')
+    await expect(page.locator('#sp-track-cards .bc-card').first()).toBeVisible()
+    await softClick(page.locator('#sp-track-leaderboards'))
+    // Leaderboard opened; BACK must land on the picker we came from
+    // rather than dumping us on the mode screen.
+    await softClick(page.locator('#lb-back'))
+    await expect(page.locator('#sp-track-cards .bc-card').first()).toBeVisible()
+  })
+
+  test('Time Trial venue picker offers leaderboards too', async ({ page }) => {
+    await gotoAndStart(page)
+    await clickModeCard(page, 'time-trial')
+    await expect(page.locator('#sp-cup-track-cards .bc-card').first()).toBeVisible()
+    await expect(page.locator('#sp-cup-tracks-leaderboards')).toBeVisible()
+  })
+
+  test('Settings → About holds credits + making of', async ({ page }) => {
+    await gotoAndStart(page)
+    await softClick(page.locator('#mode-settings'))
+    await expect(page.locator('#settings-menu')).toHaveClass(/show/)
+    await softClick(page.locator('#sm-tabs .sm-tab', { hasText: 'ABOUT' }))
+    await expect(page.locator('.sm-row[data-row="about-credits"]')).toBeVisible()
+    await expect(page.locator('.sm-row[data-row="about-making-of"]')).toBeVisible()
+    // Credits are a menu step, so the row is live here (a mid-race
+    // Settings open leaves it disabled instead) and closes the overlay.
+    await softClick(page.locator('.sm-row[data-row="about-credits"] button'))
+    await expect(page.locator('#credits-back')).toBeVisible()
+    await softClick(page.locator('#credits-back'))
+    await expect(page.locator('#mode-cards')).toBeVisible()
   })
 })
