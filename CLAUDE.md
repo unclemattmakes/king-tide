@@ -37,6 +37,14 @@ linked docs — extend those rather than growing this file.
    and **skip with a `::warning::` when `RCLONE_CONF_BASE64` is absent** — a
    green run there means "not exercised", not "passed", on forks *and* on the
    main repo (the secret has never been set).
+   `e2e` only started skipping on 2026-08-21 — before that it ran the suite
+   unhydrated and died on its 25-minute timeout, which dragged **every**
+   run's conclusion to `cancelled`, healthy commits included. So: **judge a
+   commit by `check-and-build` + `docs`, never by the run-level badge**
+   (three of five jobs are non-gating by design), and treat pre-2026-08-21
+   run badges as noise.
+   [maintainer-workflow.md](docs/maintainer-workflow.md#reading-the-ci-results-honestly)
+   has the detail.
    **Don't just set that secret expecting the gates to light up.** Measured
    2026-08-17 by setting it on a clone: hydration works fine, then the specs
    fail on runner hardware — GitHub runners have no GPU, headless Chromium

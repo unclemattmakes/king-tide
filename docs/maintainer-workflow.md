@@ -91,14 +91,47 @@ was green. See the postmortem in
 ## Reading the CI results honestly
 
 `check-and-build` and `docs` are the only checks that both gate PRs and actually
-exercise the code. `determinism`, `e2e` and the QA matrix boot real tracks, so
+exercise the code. `e2e`, `determinism` and the QA matrix boot real tracks, so
 they hydrate assets from R2 and **skip** when `RCLONE_CONF_BASE64` is absent —
 which it always is. A green tick on those means *"not exercised"*, not
 *"passed"*. Do not add that secret expecting them to light up; it has been
 measured, and GitHub's GPU-less runners just turn a green skip into a permanent
 red. Full detail in [CLAUDE.md](../CLAUDE.md) hard rule 1.
 
-Real coverage for sim/render/feel work is headed Playwright on your own machine
+### Why `e2e` used to read `cancelled`, and what changed
+
+*(2026-08-21. Until this date `e2e` did **not** skip, and both this page and
+CLAUDE.md wrongly said it did.)*
+
+`determinism` and `QA report` have always ended in a `Skip notice (no asset
+secret)` step, with every real step gated behind `HAS_ASSET_SECRET == 'true'`.
+`e2e` had no such step: only its *Install rclone* and *Hydrate assets from R2*
+steps were gated, so `Run e2e` fired unconditionally, drove the whole suite
+against a bare `public/assets`, failed every asset- or GPU-dependent spec, and
+got killed by its own `timeout-minutes: 25`.
+
+Two things fell out of that, and both are worth recognising if you are reading
+runs from before this date:
+
+- **`e2e` read `cancelled` on essentially every push.** That was its steady
+  state, not a signal. It is `continue-on-error: true` — informational by
+  design — so it gated nothing either way.
+- **The *run-level* conclusion read `cancelled` too.** A cancelled job
+  propagates to the workflow run, so the runs list showed `cancelled` for
+  healthy commits and broken ones alike. Verified on `main` at `90f95b7`
+  (PR #26's merge, where `check-and-build`, `docs`, `determinism` and
+  `partykit-deploy` all passed) and on every recent main run back through #22.
+
+`e2e` now takes the same skip path as its two siblings, so a run's conclusion
+tracks the jobs that actually ran and a 25-minute runner slot per push comes
+back. **The habit still holds regardless: judge a commit by `check-and-build`
++ `docs`, not by the run-level badge.** That badge can go red or cancelled for
+reasons that have nothing to do with the diff, and three of the five jobs are
+non-gating by design.
+
+Setting `RCLONE_CONF_BASE64` would turn `e2e`'s skip into a red, not a green —
+the specs hit the same GPU-less-runner wall the determinism gate does. Real
+coverage for sim/render/feel work is headed Playwright on your own machine
 (hard rule 2), not CI.
 
 ## If you would rather remove the escape hatch
