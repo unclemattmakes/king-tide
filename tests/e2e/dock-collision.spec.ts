@@ -44,7 +44,12 @@ const EXACT_OBJECT = 'HV_TrackColliderExact'
 // Serial: both tests boot the full sandbar track, and two concurrent WebGPU
 // boots on one GPU — each pulling ~25 MB of R2 assets — blow the 30 s
 // grounded-bike gate in `waitFullyBooted`.
-test.describe.configure({ mode: 'serial' })
+//
+// The timeout bump is for the same reason the boot is slow: a cold sandbar
+// boot runs ~20 s on its own, and the screenshot test then dwells 7 s for
+// the countdown to retire, which overruns Playwright's 30 s per-test
+// default with nothing actually wrong.
+test.describe.configure({ mode: 'serial', timeout: 120_000 })
 
 test.describe('Mayday Bay dock collision', () => {
   test('the shipped collision proxy carries the dock collider slabs', async ({ page }) => {

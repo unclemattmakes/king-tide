@@ -69,8 +69,27 @@ async function waitForRaceUrl(page: Page): Promise<string> {
 test.describe('menus show only the first cup', () => {
   test('Race → TRACK lists exactly the three Reef venues', async ({ page }) => {
     await gotoTrackSelect(page)
-    const names = await page.locator('#sp-track-cards .bc-card .name').allInnerTexts()
-    expect(names.map((n) => n.trim())).toEqual(['MAYDAY BAY', 'ANGEL BASIN', 'CONTAINER CHAOS'])
+    // Dev builds append one dev sample below the ship venues; filter it
+    // out by its DEV badge, same as the CUP and Time Trial specs below.
+    const shipVenues = page.locator('#sp-track-cards .bc-card:not(:has(.bc-dev-badge)) .name')
+    expect((await shipVenues.allInnerTexts()).map((n) => n.trim())).toEqual([
+      'MAYDAY BAY',
+      'ANGEL BASIN',
+      'CONTAINER CHAOS',
+    ])
+  })
+
+  test('the venue pickers carry ONE dev sample, not the whole dev bin', async ({ page }) => {
+    // The Dev Cup holds 30+ playtest tracks. Single Race and Time Trial
+    // each show exactly one as a sample of the shape — listing them all
+    // buried the three real venues they sit beside. Dev builds only;
+    // production renders no dev content at all, so this asserts "at most
+    // one" and pins the ceiling rather than requiring one to exist.
+    await gotoTrackSelect(page)
+    expect(await page.locator('#sp-track-cards .bc-dev-badge').count()).toBeLessThanOrEqual(1)
+    await openMode(page, 'time-trial')
+    await expect(page.locator('#sp-cup-track-cards .bc-card').first()).toBeVisible()
+    expect(await page.locator('#sp-cup-track-cards .bc-dev-badge').count()).toBeLessThanOrEqual(1)
   })
 
   test('no later-cup venue leaks onto the track card', async ({ page }) => {

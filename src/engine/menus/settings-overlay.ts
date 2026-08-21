@@ -85,7 +85,7 @@ import {
 import type { QualityPreset } from '@/engine/render/quality-preset'
 import { buildReplayTutorialHref } from '@/engine/tutorial/tutorial-launch'
 
-type Tab = 'audio' | 'video' | 'controls' | 'gameplay' | 'accessibility' | 'network'
+type Tab = 'audio' | 'video' | 'controls' | 'gameplay' | 'accessibility' | 'network' | 'about'
 
 /** Label↔intensity maps for the wave-pump select. Kept here so the
  *  row spec (which uses string options) and the runtime wiring agree
@@ -789,7 +789,47 @@ const TAB_SPECS: TabSpec[] = [
       },
     ],
   },
+  {
+    // Home for the two "about the game" links that used to sit on the
+    // mode screen. They were competing for attention with the thing that
+    // screen exists to do — pick a format — and neither is something a
+    // player reaches for mid-flow.
+    id: 'about',
+    label: 'ABOUT',
+    description: 'Who made this, and how.',
+    rows: [
+      {
+        id: 'about-credits',
+        label: 'Credits',
+        control: { kind: 'button', label: 'OPEN…' },
+        enabled: true,
+        gate: 'Artists, musicians and toolmakers. Main menu only — the credits are a menu screen.',
+      },
+      {
+        id: 'about-making-of',
+        label: 'Making of',
+        control: { kind: 'button', label: 'OPEN…' },
+        enabled: true,
+        gate: 'Opens the making-of microsite in a new tab.',
+      },
+    ],
+  },
 ]
+
+/**
+ * Host-supplied "show the credits screen" action.
+ *
+ * The credits are a step in the menu flow, not a standalone page, so the
+ * settings overlay can only offer them when it was opened from the menu.
+ * `runMenuFlow` registers a handler on start and clears it on teardown;
+ * with none registered (settings opened from the pause menu or the finish
+ * screen mid-race) the row renders disabled rather than dead-clicking.
+ */
+let creditsHandler: (() => void) | null = null
+
+export function setSettingsCreditsHandler(fn: (() => void) | null): void {
+  creditsHandler = fn
+}
 
 export interface SettingsOverlayHandle {
   open(): void
@@ -1200,6 +1240,25 @@ export function installSettingsOverlay(): SettingsOverlayHandle {
     if (spec.enabled && spec.id === 'controls-rebind-pad') {
       btn.addEventListener('click', () => {
         installRebindModal().open('gamepad')
+      })
+    }
+    if (spec.id === 'about-credits') {
+      // Resolved per render (`renderPane` rebuilds rows on every open and
+      // tab switch), so the row reflects whether a menu host is currently
+      // registered rather than whatever was true at module load.
+      btn.disabled = creditsHandler === null
+      btn.addEventListener('click', () => {
+        const show = creditsHandler
+        if (!show) return
+        close()
+        show()
+      })
+    }
+    if (spec.enabled && spec.id === 'about-making-of') {
+      btn.addEventListener('click', () => {
+        // The making-of microsite ships alongside the game at /making-of/.
+        // New tab so the menu (or a paused race) stays put underneath.
+        window.open('/making-of/', '_blank', 'noopener')
       })
     }
     return btn

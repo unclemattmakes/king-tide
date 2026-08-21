@@ -24,12 +24,11 @@ import {
   buildTrackList,
   type TrackEntry,
 } from './catalog'
-import { installSettingsOverlay } from './settings-overlay'
+import { installSettingsOverlay, setSettingsCreditsHandler } from './settings-overlay'
 import {
   buildDevCupTracks,
   type CupEntry,
   DEV_CUP,
-  DEV_PLACEHOLDER_CUP,
   type DevTrackEntry,
   isDevBuild,
   V1_CUPS,
@@ -124,9 +123,10 @@ const STEPS_TT: { id: Step; label: string }[] = [
   { id: 'sp-bike', label: 'BIKE' },
 ]
 
+/** MP forks off the TITLE screen, not the mode picker, so there is no
+ *  MODE crumb on this branch. */
 const STEPS_MP: { id: Step; label: string }[] = [
   { id: 'title', label: 'START' },
-  { id: 'mode', label: 'MODE' },
   { id: 'mp-entry', label: 'ROOM' },
 ]
 
@@ -151,11 +151,24 @@ type ModeTile = {
 type ComingSoonBike = { id: string; name: string; tagline: string; accent: string; gate: string }
 const BIKE_COMING_SOON_SLOTS: ComingSoonBike[] = []
 
+/**
+ * The single-player mode picker (screen 01). Multiplayer is NOT here —
+ * the title screen forks single-player vs multiplayer up front, so this
+ * screen is only ever reached down the solo branch and a MULTIPLAYER
+ * tile inside it would be a second door to the same room.
+ *
+ * The TUTORIAL tile was removed too. Its screen (`buildTutorialIntro`)
+ * and mode routing are deliberately left in place, unreachable, so
+ * restoring the tile is a one-entry edit here — and because that screen
+ * still holds the roadmap copy for the gated Training Cove drills. The
+ * tutorial itself is unaffected and still reachable two ways: Settings →
+ * "Replay tutorial", and `?tutorial=1` on the URL.
+ */
 const MODE_TILES: ModeTile[] = [
   {
     id: 'race',
     badge: 'SOLO',
-    headline: 'RACE',
+    headline: 'SINGLE<br />RACE',
     desc: 'Pick a track, pick a bike, run a quick race against AI. Every venue is a city the sea took back.',
     enabled: true,
   },
@@ -171,20 +184,6 @@ const MODE_TILES: ModeTile[] = [
     badge: 'CIRCUIT',
     headline: 'CUP',
     desc: 'Race a cup back-to-back with points on the line every heat — the Reef Cup headlines today’s card. More cups join as the season unfolds.',
-    enabled: true,
-  },
-  {
-    id: 'multiplayer',
-    badge: 'ONLINE',
-    headline: 'MULTI<br />PLAYER',
-    desc: 'Up to eight riders per lobby. Create a room or join by code; everyone votes a track when the lobby fills.',
-    enabled: true,
-  },
-  {
-    id: 'tutorial',
-    badge: 'LEARN',
-    headline: 'TUTORIAL',
-    desc: 'Seven scripted beats — throttle, cruise, look, launch, land, drift, finish. Runs on the Mayday Bay lagoon.',
     enabled: true,
   },
 ]
@@ -205,8 +204,18 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   const tracks = buildTrackList(opts.manifestTracks)
   const bikeCards = buildBikeCards()
 
+  // Default venue is the first SHIPPABLE one (Mayday Bay), not
+  // `buildTrackList`'s first entry — that list is led by the procedural
+  // `lagoon` dev fixture, and `focusFirst` prefers a `.selected` card, so
+  // the old default parked the cursor on the dev sample sitting below the
+  // three real venues on the Time Trial screen. A caller-supplied
+  // `initialTrackId` (returning from a race) still wins.
   const picks = {
-    trackId: opts.initialTrackId ?? tracks[0]?.id ?? 'lagoon',
+    trackId:
+      opts.initialTrackId ??
+      visibleV1Tracks().find((t) => t.status === 'ship')?.id ??
+      tracks[0]?.id ??
+      'lagoon',
     bikeId: (opts.initialBikeId ?? DEFAULT_BIKE_VARIANT) as BikeVariantId,
   }
 
@@ -219,6 +228,13 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
    *  knows which list to render. The dev cup always wins the
    *  enabled-at-step-0 race against the four ship cups. */
   let pickedCup: CupEntry | null = null
+  /** Which track picker opened the leaderboard, so BACK returns there
+   *  instead of always dumping the player on the mode screen. Only the
+   *  two track-select screens can reach it. */
+  let leaderboardReturnStep: Step = 'sp-track'
+  /** Same idea for the credits, which Settings → About can now open from
+   *  any screen — BACK returns to whichever one the player left. */
+  let creditsReturnStep: Step = 'mode'
   const screens: Partial<Record<Step, HTMLElement>> = {}
   // `commitSpRace` lives inside the Promise executor (it needs `resolve`),
   // but `renderBikeCards` runs in the outer scope — bridge them via a ref.
@@ -368,7 +384,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           currentMode === 'time-trial'
             ? 'Solo against the clock. Your best lap saves as a translucent ghost — race it next time.'
             : pickedCup?.id === 'dev'
-              ? 'Playtest tracks. Procedural built-ins + every GLB the manifest knows about.'
+              ? 'Playtest track. The dev bin is allowlisted — see DEV_TRACK_ALLOWLIST to add more.'
               : (pickedCup?.races.length ?? 0) > 0
                 ? 'Championship lineup. START CUP to lock in the whole bill.'
                 : 'Cup line-up — tap a card to lock in your venue.',
@@ -395,17 +411,28 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     }
   }
 
+  /** The single dev track the venue pickers show as a sample of the
+   *  shape — `undefined` on production builds, where no dev content
+   *  exists at all. Both Single Race and Time Trial append exactly this
+   *  one; the full playtest list stays behind Cup → Dev Cup, which is
+   *  the only screen that shows all of them. Shared so the two pickers
+   *  can't drift into showing different samples. */
+  function devSampleTrack(): DevTrackEntry | undefined {
+    return dev ? devCupTracks[0] : undefined
+  }
+
   /** Race-mode track-select host. Renders the venues of every cup in
-   *  `VISIBLE_CUPS` — one cup today, so the screen is the Reef slate
-   *  and nothing else. Tiles for `status === 'ship'` are live, the rest
-   *  are gated with the per-track `gateLabel`. The list never contains
-   *  test tracks — those live in the Dev Cup so the real race lineup
-   *  stays uncluttered. */
+   *  `VISIBLE_CUPS` — one cup today, so the screen is the Reef slate —
+   *  plus the single dev sample on dev builds. Tiles for
+   *  `status === 'ship'` are live, the rest are gated with the per-track
+   *  `gateLabel`. */
   function renderV1TrackCards(host: HTMLElement): void {
     host.innerHTML = ''
     for (const t of visibleV1Tracks()) {
       host.appendChild(buildV1TrackCard(t))
     }
+    const sample = devSampleTrack()
+    if (sample) host.appendChild(buildDevTrackCard(sample))
   }
 
   function buildV1TrackCard(t: V1TrackEntry): HTMLElement {
@@ -470,8 +497,14 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     for (const c of visibleV1Cups()) {
       host.appendChild(buildCupCard(c))
     }
+    // ONE dev cup, as a sample of the shape — not the whole dev bin.
+    // The screen's job is to sell the Reef Cup; a wall of dev entries
+    // beside it reads as though the dev cups are part of the card.
+    // DEV_CUP is the keeper because it is the browse entrypoint to
+    // every playtest track, so nothing becomes unreachable — where
+    // DEV_PLACEHOLDER_CUP only ever existed to prove championship
+    // wiring, which the real Reef Cup now exercises.
     if (dev) {
-      host.appendChild(buildCupCard(DEV_PLACEHOLDER_CUP))
       host.appendChild(buildCupCard(DEV_CUP))
     }
   }
@@ -536,20 +569,17 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
   function renderCupTrackCards(host: HTMLElement): void {
     host.innerHTML = ''
     if (currentMode === 'time-trial') {
-      // TT picks a single venue from the visible ship roster. Every
-      // status:'ship' track in a `VISIBLE_CUPS` cup is fair game; on
-      // dev builds we also surface the dev tracks below so playtesters
-      // can run TT against procedurals + freshly-baked GLBs without
-      // leaving the menu.
+      // TT picks a single venue from the visible ship roster — today the
+      // three Reef Cup maps we're driving to shippable — plus the one
+      // dev sample (see `devSampleTrack`). Unlike Single Race this also
+      // drops non-`ship` venues entirely rather than gating them: there
+      // is no clock to race on a track that doesn't load.
       for (const t of visibleV1Tracks()) {
         if (t.status !== 'ship') continue
         host.appendChild(buildV1TrackCard(t))
       }
-      if (dev) {
-        for (const t of devCupTracks) {
-          host.appendChild(buildDevTrackCard(t))
-        }
-      }
+      const sample = devSampleTrack()
+      if (sample) host.appendChild(buildDevTrackCard(sample))
       return
     }
     if (!pickedCup) return
@@ -604,9 +634,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     card.className = `bc-card${t.id === picks.trackId ? ' selected' : ''}`
     card.style.setProperty('--accent', t.accent)
     const best = bestLapFor(t.id, picks.bikeId)
-    const sourceChip = t.source === 'procedural' ? 'PROCEDURAL' : 'GLB'
+    // One flat "DEV" badge rather than the old PROCEDURAL / GLB split.
+    // Beside the real venues the useful signal is "this one isn't a ship
+    // map"; which loader path it takes is a dev detail, and it still
+    // reads on the tagline ("Procedural — …" / "GLB-backed …").
     card.innerHTML = `
-      <span class="bc-dev-badge">${sourceChip}</span>
+      <span class="bc-dev-badge">DEV</span>
       <div class="label">TEST TRACK</div>
       <div class="name">${escapeHtml(t.name).toUpperCase()}</div>
       <div class="tag">${escapeHtml(t.tagline)}</div>
@@ -718,6 +751,14 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       }
       if (cupReadoutLabel)
         cupReadoutLabel.textContent = currentMode === 'time-trial' ? 'MODE' : 'CUP'
+      // TT borrows this screen as a plain venue picker, so it can't keep
+      // the cup framing: no cup was ever selected, and TT reaches it one
+      // step earlier (mode → here) than the cup branch does.
+      const titleEl = screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-tracks-title')
+      const numEl = screens['sp-cup-tracks']?.querySelector<HTMLElement>('#sp-cup-tracks-num')
+      if (titleEl)
+        titleEl.textContent = currentMode === 'time-trial' ? 'SELECT TRACK' : 'CUP LINE-UP'
+      if (numEl) numEl.textContent = currentMode === 'time-trial' ? '02' : '03'
       if (backBtn) backBtn.innerHTML = currentMode === 'time-trial' ? '&larr; BACK' : '&larr; CUP'
       // Championship-shaped cups (placeholder + future ship cups) get a
       // single START CUP CTA; browse Dev Cup keeps its tile-as-launcher
@@ -788,11 +829,20 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       showStep(currentMode === 'time-trial' ? 'mode' : 'sp-cup')
     else if (currentStep === 'sp-bike') showStep(bikeBackStep())
     else if (currentStep === 'pre-race') showStep('sp-bike')
-    else if (currentStep === 'mp-entry') showStep('mode')
+    else if (currentStep === 'mp-entry') showStep('title')
     else if (currentStep === 'tutorial-intro') showStep('mode')
-    else if (currentStep === 'leaderboard') showStep('mode')
-    else if (currentStep === 'credits') showStep('mode')
+    else if (currentStep === 'leaderboard') showStep(leaderboardReturnStep)
+    else if (currentStep === 'credits') showStep(creditsReturnStep)
   }
+
+  // Settings → About → Credits routes back through this flow, since the
+  // credits are a menu step rather than a standalone page. Cleared in
+  // `teardown` so a settings overlay opened later from a paused race
+  // doesn't hold a handler onto a menu that no longer exists.
+  setSettingsCreditsHandler(() => {
+    creditsReturnStep = currentStep
+    showStep('credits')
+  })
 
   const gamepadNav = installMenuGamepad({
     container: () => screens[currentStep] ?? null,
@@ -804,6 +854,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
 
   return new Promise<MenuFlowResult>((resolve) => {
     function teardown(): void {
+      setSettingsCreditsHandler(null)
       window.clearInterval(clockInterval)
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keydown', markActive)
@@ -885,9 +936,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         }
       }
       const recapHtml = recap ? renderRecapHtml(recap) : ''
-      // The whole title surface advances on click, but the CTA is also a
-      // real <button> so keyboard focus + gamepad A (which clicks the
-      // active focusable, see menu-gamepad.ts) both reach the same path.
+      // Two real choices, so the title is no longer an "any key advances"
+      // surface: the whole-section click handler and the ambient
+      // press-anything label are both gone. Arrow keys / d-pad move
+      // between the buttons and Enter / gamepad A commits the focused one
+      // (see `onKey` + menu-gamepad.ts) — the input-navigability
+      // convention in docs/v1-work-breakdown.md.
       el.innerHTML = `
         <span class="word">${escapeHtml(GAME_TITLE)}</span>
         <svg class="wave-stroke" viewBox="0 0 460 22" fill="none" aria-hidden="true"
@@ -897,13 +951,18 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         </svg>
         ${taglineHtml}
         ${recapHtml}
-        <div class="cta">
-          <button class="cta-blink primary" id="title-start" type="button">
-            Press anything &mdash; let&rsquo;s ride
-          </button>
+        <div class="cta cta-choice">
+          <button class="bc-btn primary" id="title-single" type="button">SINGLE PLAYER</button>
+          <button class="bc-btn" id="title-multi" type="button">MULTIPLAYER</button>
         </div>
       `
-      el.addEventListener('click', () => showStep('mode'))
+      el.querySelector('#title-single')?.addEventListener('click', () => showStep('mode'))
+      el.querySelector('#title-multi')?.addEventListener('click', () => {
+        // Seed the mode the way the old MULTIPLAYER tile did, so the
+        // room screen's breadcrumbs and commit path behave identically.
+        currentMode = 'multiplayer'
+        showStep('mp-entry')
+      })
       return el
     }
 
@@ -941,15 +1000,16 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
             <div style="font-family: var(--bc-font-display); font-size: 28px;">ONE</div>
           </div>
         </div>
-        <div class="bc-cards cols-5" id="mode-cards">${tilesHtml}</div>
+        <div class="bc-cards cols-3" id="mode-cards">${tilesHtml}</div>
         <div class="bc-actions">
           <div class="left">
             <button class="bc-link" id="mode-back" type="button">&larr; BACK</button>
           </div>
           <div class="right">
-            <button class="bc-link" id="mode-leaderboards" type="button">LEADERBOARDS &middot;&middot;&middot;</button>
-            <button class="bc-link" id="mode-credits" type="button">CREDITS &middot;&middot;&middot;</button>
-            <button class="bc-link" id="mode-making-of" type="button">MAKING OF &middot;&middot;&middot;</button>
+            <!-- CREDITS + MAKING OF moved into Settings → About; LEADERBOARDS
+                 moved onto the track pickers, where a board is about the
+                 venue in front of you rather than a stray link on a format
+                 chooser. -->
             <button class="bc-link" id="mode-settings" type="button">SETTINGS &middot;&middot;&middot;</button>
           </div>
         </div>
@@ -993,24 +1053,29 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       el.querySelector('#mode-settings')?.addEventListener('click', () => {
         installSettingsOverlay().open()
       })
-      el.querySelector('#mode-leaderboards')?.addEventListener('click', () => {
-        // Re-mount on each open so freshly-set TT times appear without
-        // a full menu reload. Cheap — the screen is read-only over
-        // localStorage data.
-        const fresh = buildLeaderboard()
-        const existing = screens.leaderboard
-        existing?.parentElement?.replaceChild(fresh, existing)
-        screens.leaderboard = fresh
-        showStep('leaderboard')
-      })
       return el
+    }
+
+    /** Open the leaderboard from a track picker, remembering which one so
+     *  BACK returns there. Re-mounts the screen on each open so freshly-set
+     *  TT times appear without a full menu reload — cheap, since it is
+     *  read-only over localStorage. */
+    function openLeaderboard(from: Step): void {
+      leaderboardReturnStep = from
+      const fresh = buildLeaderboard()
+      const existing = screens.leaderboard
+      existing?.parentElement?.replaceChild(fresh, existing)
+      screens.leaderboard = fresh
+      showStep('leaderboard')
     }
 
     function buildSpTrack(): HTMLElement {
       const el = document.createElement('section')
       el.className = 'bc-screen'
+      // One dev sample rides along on this screen now, so the hint points
+      // at where the REST of them live rather than implying none are here.
       const devHint = dev
-        ? 'Cup → Dev Cup holds today’s playtest tracks.'
+        ? 'Cup → Dev Cup holds the rest of today’s playtest tracks.'
         : 'New venues join the card all season.'
       el.innerHTML = `
         <div class="bc-section-head">
@@ -1023,11 +1088,17 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         <div class="bc-cards cols-3" id="sp-track-cards"></div>
         <div class="bc-actions">
           <div class="left"><button class="bc-link" id="sp-track-back" type="button">&larr; MODE</button></div>
+          <div class="right">
+            <button class="bc-link" id="sp-track-leaderboards" type="button">LEADERBOARDS &middot;&middot;&middot;</button>
+          </div>
         </div>
       `
       const host = el.querySelector<HTMLElement>('#sp-track-cards')
       if (host) renderV1TrackCards(host)
       el.querySelector('#sp-track-back')?.addEventListener('click', () => showStep('mode'))
+      el.querySelector('#sp-track-leaderboards')?.addEventListener('click', () =>
+        openLeaderboard('sp-track'),
+      )
       return el
     }
 
@@ -1069,9 +1140,9 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       el.className = 'bc-screen'
       el.innerHTML = `
         <div class="bc-section-head">
-          <div class="num">03</div>
+          <div class="num" id="sp-cup-tracks-num">03</div>
           <div>
-            <div class="title">CUP LINE-UP</div>
+            <div class="title" id="sp-cup-tracks-title">CUP LINE-UP</div>
             <div class="sub" id="sp-cup-tracks-sub">PICK A VENUE FROM THE CUP YOU SELECTED</div>
           </div>
           <div class="meta">
@@ -1082,7 +1153,10 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         <div class="bc-cards cols-3" id="sp-cup-track-cards"></div>
         <div class="bc-actions">
           <div class="left"><button class="bc-link" id="sp-cup-tracks-back" type="button">&larr; CUP</button></div>
-          <div class="right"><button class="bc-btn primary" id="sp-cup-start" type="button" style="display:none;">START CUP &rarr;</button></div>
+          <div class="right">
+            <button class="bc-link" id="sp-cup-tracks-leaderboards" type="button">LEADERBOARDS &middot;&middot;&middot;</button>
+            <button class="bc-btn primary" id="sp-cup-start" type="button" style="display:none;">START CUP &rarr;</button>
+          </div>
         </div>
       `
       const host = el.querySelector<HTMLElement>('#sp-cup-track-cards')
@@ -1093,6 +1167,9 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         showStep(currentMode === 'time-trial' ? 'mode' : 'sp-cup'),
       )
       el.querySelector('#sp-cup-start')?.addEventListener('click', () => showStep('sp-bike'))
+      el.querySelector('#sp-cup-tracks-leaderboards')?.addEventListener('click', () =>
+        openLeaderboard('sp-cup-tracks'),
+      )
       return el
     }
 
@@ -1206,7 +1283,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <div class="bc-lb-board" id="lb-board"></div>
         </div>
         <div class="bc-actions">
-          <div class="left"><button class="bc-link" id="lb-back" type="button">&larr; MODE</button></div>
+          <div class="left"><button class="bc-link" id="lb-back" type="button">&larr; TRACK</button></div>
           <div class="right">
             <button class="bc-link" id="lb-settings" type="button">CHANGE HANDLE &middot;&middot;&middot;</button>
             <button class="bc-link" id="lb-clear" type="button">CLEAR LOCAL TIMES</button>
@@ -1340,7 +1417,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       renderBoard()
       // Kick the initial global fetch in the background.
       void refreshRemote(selectedId)
-      el.querySelector('#lb-back')?.addEventListener('click', () => showStep('mode'))
+      el.querySelector('#lb-back')?.addEventListener('click', () => showStep(leaderboardReturnStep))
       el.querySelector('#lb-settings')?.addEventListener('click', () => {
         installSettingsOverlay().open()
         // Re-render once the overlay closes so a handle change reflects
@@ -1430,7 +1507,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           </div>
         </div>
         <div class="bc-actions">
-          <div class="left"><button class="bc-link" id="mp-back" type="button">&larr; MODE</button></div>
+          <div class="left"><button class="bc-link" id="mp-back" type="button">&larr; START</button></div>
         </div>
       `
       el.querySelector<HTMLButtonElement>('[data-action="create"]')?.addEventListener(
@@ -1458,7 +1535,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           e.preventDefault()
         }
       })
-      el.querySelector('#mp-back')?.addEventListener('click', () => showStep('mode'))
+      el.querySelector('#mp-back')?.addEventListener('click', () => showStep('title'))
       return el
     }
 
@@ -1539,10 +1616,12 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           </section>
         </div>
         <div class="bc-actions">
-          <div class="left"><button class="bc-link primary" id="credits-back" type="button">&larr; MODE</button></div>
+          <div class="left"><button class="bc-link primary" id="credits-back" type="button">&larr; BACK</button></div>
         </div>
       `
-      el.querySelector('#credits-back')?.addEventListener('click', () => showStep('mode'))
+      el.querySelector('#credits-back')?.addEventListener('click', () =>
+        showStep(creditsReturnStep),
+      )
       return el
     }
 
@@ -1564,27 +1643,10 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       // Don't hijack typing into the room-code input.
       const target = e.target as HTMLElement | null
       if (target && target.tagName === 'INPUT') return
-      // Title screen is ambient — any meaningful key advances. Skip
-      // modifier-only events (Shift/Ctrl/Alt/Meta on their own) and
-      // Escape (which goes to gamepadBack below).
-      if (
-        currentStep === 'title' &&
-        e.code !== 'Escape' &&
-        ![
-          'ShiftLeft',
-          'ShiftRight',
-          'ControlLeft',
-          'ControlRight',
-          'AltLeft',
-          'AltRight',
-          'MetaLeft',
-          'MetaRight',
-        ].includes(e.code)
-      ) {
-        showStep('mode')
-        e.preventDefault()
-        return
-      }
+      // The title used to advance on ANY key. It now offers a real
+      // choice, so it falls through to the shared arrow-key / Enter
+      // handling below — otherwise the first keypress would commit
+      // single-player before the player could move to MULTIPLAYER.
       // Arrow keys / WASD move card focus spatially — same scoring the
       // gamepad d-pad uses (input-navigability convention: a keyboard
       // player gets d-pad-grade menus, not Tab-cycling). Parked while
@@ -1609,7 +1671,13 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       }
       if (e.code === 'Enter' || e.code === 'NumpadEnter') {
         if (currentStep === 'title') {
-          showStep('mode')
+          // Commit whichever choice holds focus. `showStep` calls
+          // `gamepadNav.focusFirst()`, so a player who presses Enter
+          // without navigating gets SINGLE PLAYER — the same one-key
+          // cold-boot path the press-anything title had.
+          const active = document.activeElement as HTMLElement | null
+          const focused = active && screens.title?.contains(active) ? active : null
+          ;(focused ?? screens.title?.querySelector<HTMLButtonElement>('#title-single'))?.click()
           e.preventDefault()
         } else if (currentStep === 'sp-track' || currentStep === 'sp-cup-tracks') {
           showStep('sp-bike')
