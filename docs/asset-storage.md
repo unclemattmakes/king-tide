@@ -80,11 +80,27 @@ deploys when the free quota ran out).
 
 The app resolves every asset path through `assetUrl()`
 ([src/engine/asset-url.ts](../src/engine/asset-url.ts)), which prefixes
-`VITE_ASSET_BASE_URL` in prod and is a no-op in dev (local `public/`). Set
-`VITE_ASSET_BASE_URL=https://hoverbike-content.mattscott.dev` on Vercel
-(Production + Preview); leave it unset locally so `pnpm dev` stays offline.
-Gameplay JSON under `public/tracks/*.json` stays in git (small, versioned)
-and is **not** routed to R2.
+`VITE_ASSET_BASE_URL` when set and falls back to local `public/` when it isn't.
+Set `VITE_ASSET_BASE_URL=https://hoverbike-content.mattscott.dev` on Vercel
+(Production + Preview). Gameplay JSON under `public/tracks/*.json` stays in git
+(small, versioned) and is **not** routed to R2.
+
+> **`pnpm dev` reads R2, not your `public/` copy.** The repo's committed `.env`
+> sets `VITE_ASSET_BASE_URL`, so this is *not* a dev no-op: every `/assets/**`
+> fetch — GLBs, atlases, thumbs — goes to the bucket on a local dev server too.
+> Re-exporting an asset therefore changes nothing you can see until
+> `pnpm assets:push`, and a hydrated `public/assets` is not proof of what the
+> game loads. To drive your **local** copy for a session (verifying an export
+> before publishing it, or A/B-ing two versions of one file), blank the base for
+> that command — it wins over `.env`:
+>
+> ```bash
+> VITE_ASSET_BASE_URL= pnpm dev --port 5399 --strictPort
+> ```
+>
+> The same override works in front of `pnpm e2e`. This bit the dock-collision
+> fix (2026-08-20): a rebuilt `sandbar-collider.glb` sat in `public/assets` for
+> several verification runs that were all silently loading the stale R2 copy.
 
 ### Syncing with R2 — `pnpm assets:pull` / `assets:push`
 

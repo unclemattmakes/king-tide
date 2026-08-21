@@ -221,6 +221,21 @@ shared-index tris (4.4 MB at ratio 0.5) and drops normals/materials a collider
 never reads. **Keep `ratio` conservative — the hover ray rides the collider, so
 ramp lips / jump takeoffs are feel-critical; playtest before going lower.**
 
+Two objects come out: `HV_TrackCollider` (the decimated bulk) and, when the
+source GLB has any, `HV_TrackColliderExact` — the `collider_mesh` meshes joined
+**verbatim**, no weld, no collapse. Those are hand-authored collide-only proxies
+already (a dock's swept deck slab is ~1k tris against terrain's ~200k), and they
+carry the *whole* collision for anything whose visual is tagged `decoration`.
+The proxy REPLACES the render geometry as the collision source, so its strip
+list is not an optimisation knob — a kind dropped there is collision that
+vanishes in-race while the mesh still draws. That is exactly how Mayday Bay's
+dock ramps lost collision until 2026-08-20 (`collider_mesh` was in the strip
+list). `NON_COLLIDING_KINDS` must mirror the runtime set in
+[glb-track.ts](../src/engine/render/glb-track.ts); `tests/unit/track-collider-proxy.test.ts`
+fails if they drift, and `tests/e2e/dock-collision.spec.ts` checks the *shipped*
+proxy still carries the slabs — rebuilding without `pnpm assets:push` leaves the
+bug live, since `.env` points `/assets/**` at R2 even in dev.
+
 Runtime ([`loadColliderProxy`](../src/engine/render/glb-track.ts) +
 [track-loader.ts](../src/boot/track-loader.ts)) is **backward-compatible**: if a
 track ships `<glb>-collider.glb` it colliders that; absent (legacy tracks) it

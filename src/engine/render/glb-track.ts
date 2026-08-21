@@ -40,6 +40,44 @@ export type LoadedGlbTrack = {
   horizonGeometry?: THREE.BufferGeometry
 }
 
+/**
+ * Authored `kind` values that {@link attachTrackColliders} never builds a
+ * collider for. Everything else collides — including `collider_mesh`, which
+ * is *hidden from render precisely so it can carry collision* (see
+ * `ExportedKind.COLLIDER_MESH`); it is emphatically NOT a member of this set.
+ *
+ *  - `decoration` — the opt-out tag. Render-only detail (HV_Dock's plank
+ *    deck, palm fronds, signage) that pairs with a `collider_mesh` proxy or
+ *    with nothing at all.
+ *  - `horizon` — the 1.4 km camera-locked silhouette ring. Stripped from the
+ *    scene by `loadGlbTrackVisuals` already; checked here as belt-and-
+ *    suspenders for direct `attachTrackColliders` callers.
+ *  - `decal` — thin projected overlay quads (wear, paint, posters).
+ *  - `emitter` — particle spawn empties that the glTF exporter sometimes
+ *    round-trips as placeholder cubes. The particle system reads their pose;
+ *    they are not geometry.
+ *
+ * MIRRORED by `NON_COLLIDING_KINDS` in `tools/blender/build_track_collider.py`,
+ * which strips exactly these kinds when baking a decimated `<track>-collider.glb`
+ * proxy. The proxy REPLACES the render geometry as the collision source, so a
+ * kind wrongly listed there is collision that silently disappears in a race.
+ * `tests/unit/track-collider-proxy.test.ts` asserts the two sets agree.
+ *
+ * Known one-way divergences (skipped here, NOT stripped from the proxy —
+ * neither shape exists in any shipped track GLB today, so neither has ever
+ * been exercised through the proxy path): `THREE.InstancedMesh` nodes from
+ * `EXT_mesh_gpu_instancing`, and `landmark_id = "mechanical_rig_arm"`
+ * subtrees. Both are keyed off runtime structure rather than a `kind` string,
+ * so they can't be expressed in the mirrored set; teach the Python builder
+ * about them before shipping a track that uses either.
+ */
+export const NON_COLLIDING_KINDS: ReadonlySet<string> = new Set<string>([
+  'decoration',
+  ExportedKind.HORIZON,
+  ExportedKind.DECAL,
+  ExportedKind.EMITTER,
+])
+
 export async function loadGlbTrackVisuals(
   url: string,
   opts?: { terrainShader?: TerrainShaderConfig },
@@ -276,21 +314,9 @@ export function attachTrackColliders(
     // e.g. HV_Dock's plank deck (planks + pylons = 2 materials) collided
     // per-plank despite being tagged `decoration`. See resolveNodeKind.
     const kind = resolveNodeKind(obj)
-    if (kind === 'decoration') return
-    // Belt-and-suspenders: `loadGlbTrackVisuals` strips horizon meshes
-    // out of the scene before we get here, but check anyway in case
-    // `attachTrackColliders` is called directly with an un-stripped
-    // group. Horizon rings live 1.4 km away and never collide.
-    if (kind === ExportedKind.HORIZON) return
-    // Decals are render-only overlays — never collide with them.
-    if (kind === ExportedKind.DECAL) return
-    // Particle emitters are empties in Blender that occasionally get
-    // converted to placeholder meshes by the exporter (cube primitive
-    // as a viewport gizmo). Either way the particle system reads them
-    // for spawn poses, not as collidable geometry — skip the trimesh
-    // attach. Mesh stays in the scene graph so the particle-system
-    // traversal finds the kind=emitter tag.
-    if (kind === ExportedKind.EMITTER) return
+    // Render-only kinds — see NON_COLLIDING_KINDS for what's in the set and
+    // why, and for the Blender-side mirror that must agree with it.
+    if (kind !== undefined && NON_COLLIDING_KINDS.has(kind)) return
     // EXT_mesh_gpu_instancing produces THREE.InstancedMesh — scattered
     // props from Blender's GN scatter pipeline land here. The mesh's
     // matrixWorld is the prototype's transform, not the per-instance
