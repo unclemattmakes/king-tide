@@ -102,6 +102,66 @@
           linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.45));
       }
 
+      /* ───────────── Backdrop-feed loading indicator ─────────────
+         Up while the attract track loads behind the menu / lobby
+         (`body.attract-loading`, driven by src/boot/url-modes.ts), down the
+         moment the feed goes live — or the boot gives up. The menu is fully
+         interactive the whole time, so this is a corner chip and never a
+         blocking overlay: its only job is to say the background is still
+         coming. (It replaced a painted key-art plate, which filled the
+         backdrop and so read as the finished menu.) */
+      #attract-loading {
+        position: fixed; right: 40px; bottom: 62px; z-index: 45;
+        display: none; flex-direction: column; gap: 8px;
+        min-width: 164px;
+        padding: 10px 14px 11px;
+        border: 1px solid var(--bc-line);
+        border-radius: 10px;
+        background: rgba(7, 30, 38, 0.62);
+        backdrop-filter: blur(3px);
+        pointer-events: none; user-select: none;
+      }
+      body.attract-loading #attract-loading {
+        display: flex;
+        /* 700 ms grace before it appears: on a warm cache the feed can be up
+           almost immediately, and a chip that flashes for a few frames reads
+           as a glitch rather than as progress. `backwards` holds opacity 0
+           through the delay. */
+        animation: bc-fade var(--t-base) var(--ease-out) 700ms backwards;
+      }
+      #attract-loading .al-row { display: flex; align-items: center; gap: 9px; }
+      #attract-loading .al-dot {
+        width: 7px; height: 7px; border-radius: 50%;
+        background: var(--bc-cyan);
+        animation: al-pulse 1.4s ease-in-out infinite;
+      }
+      #attract-loading .al-text {
+        font-family: var(--bc-font-mono);
+        font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--bc-ink-faint);
+      }
+      #attract-loading .al-bar {
+        position: relative; height: 2px; overflow: hidden;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      /* Same compositor-thread sweep as the boot loading screen (`ls-sweep`):
+         it keeps moving through a shader-compile stall on the main thread,
+         which is exactly when the player needs to tell "still loading" from
+         "crashed". */
+      #attract-loading .al-bar::after {
+        content: '';
+        position: absolute; top: 0; bottom: 0; left: 0;
+        width: 40%;
+        background: linear-gradient(90deg, transparent, var(--bc-cyan), transparent);
+        transform: translateX(-100%);
+        will-change: transform;
+        animation: ls-sweep 1.2s linear infinite;
+      }
+      @keyframes al-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.35; transform: scale(0.82); }
+      }
+
       /* ───────────── HUD (race-mode top-left dev info) ─────────────
          The fps / backend / input / race / audio telemetry strip. Off by
          default now (it was always-on clutter); the dev palette's "Dev HUD"
@@ -199,6 +259,11 @@
       }
       @media (prefers-reduced-motion: reduce) {
         #loading-screen .ls-bar::after { animation: none; transform: none; left: 0; width: 100%; opacity: 0.5; }
+        #attract-loading .al-bar::after { animation: none; transform: none; left: 0; width: 100%; opacity: 0.5; }
+        #attract-loading .al-dot { animation: none; }
+        /* Keep the grace delay — it's what stops a one-frame flash on a warm
+           boot — but drop the fade itself. */
+        body.attract-loading #attract-loading { animation-duration: 1ms; }
         #loading-screen, #attract-stage { transition: none; }
       }
 
@@ -1231,26 +1296,7 @@
           linear-gradient(180deg, rgba(7, 30, 38, 0.95) 0%, rgba(2, 6, 16, 0.95) 100%);
         transition: opacity 700ms var(--ease-out);
       }
-      /* Painted key-art plate while the attract feed warms — url-modes sets
-         `--title-backdrop` + `.backdrop-plate` only once the JPG has actually
-         loaded, so a cold cache / missing asset falls back to the gradient
-         above. The scrim keeps the chrome readable over the plate; once
-         attract goes live the whole ::before fades to 0.55 as before. */
-      body.backdrop-plate #menu::before {
-        background:
-          radial-gradient(ellipse 100% 60% at 50% -10%, rgba(108, 255, 200, 0.10), transparent 60%),
-          linear-gradient(180deg, rgba(7, 30, 38, 0.42) 0%, rgba(2, 6, 16, 0.62) 100%),
-          var(--title-backdrop) center / cover no-repeat;
-      }
       body.attract-live #menu::before { opacity: 0.55; }
-      /* Once the live feed is up, hand the backdrop back to the plain gradient
-         veil — the plate ghosting over the game at 0.55 reads as mud. */
-      body.attract-live.backdrop-plate #menu::before {
-        background:
-          radial-gradient(ellipse 100% 60% at 50% -10%, rgba(108, 255, 200, 0.10), transparent 60%),
-          radial-gradient(ellipse 60% 50% at 100% 100%, rgba(255, 122, 58, 0.08), transparent 60%),
-          linear-gradient(180deg, rgba(7, 30, 38, 0.95) 0%, rgba(2, 6, 16, 0.95) 100%);
-      }
       /* Soft top + bottom scrims for type contrast over busy race shots. */
       #menu::after {
         content: ''; position: absolute; inset: 0; z-index: 0;
@@ -2394,6 +2440,14 @@
         .bc-crumbs { font-size: 10px; letter-spacing: 0.08em; gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
         .bc-crumb { padding: 2px 5px; }
         .bc-clock { display: none; }
+
+        #attract-loading {
+          right: max(14px, env(safe-area-inset-right, 0px));
+          bottom: 56px;
+          min-width: 0;
+          padding: 8px 11px 9px;
+        }
+        #attract-loading .al-text { font-size: 9px; letter-spacing: 0.1em; }
 
         .bc-stage {
           padding:
@@ -3958,6 +4012,16 @@
       </div>
     </div>
     <div id="app"></div>
+    <!-- Backdrop-feed loading indicator. Visible only while the attract-mode
+         track is still loading behind the menu / multiplayer lobby
+         (`body.attract-loading`, set in src/boot/url-modes.ts). -->
+    <div id="attract-loading" role="status" aria-live="polite">
+      <div class="al-row">
+        <span class="al-dot" aria-hidden="true"></span>
+        <span class="al-text">Loading venue</span>
+      </div>
+      <div class="al-bar" aria-hidden="true"></div>
+    </div>
     <div id="hud">
       <div class="row" id="hud-fps">fps: --</div>
       <div class="row" id="hud-backend">backend: --</div>
