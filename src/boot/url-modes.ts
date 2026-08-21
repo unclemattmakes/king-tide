@@ -15,7 +15,6 @@
  * meat.
  */
 
-import { assetUrl } from '@/engine/asset-url'
 import { hideLoadingScreen, setLoadingMessage } from './loading-screen'
 
 export type EarlyDispatch = 'handled' | 'continue'
@@ -52,21 +51,41 @@ export function ensureAttractStage(): HTMLElement {
 }
 
 /** Wire an attract-mode handle so the page swaps to the live feed as
- *  background once the first attract frame renders. */
+ *  background once the first attract frame renders.
+ *
+ *  Also owns the backdrop's loading affordance: `attract-loading` goes on
+ *  `<body>` synchronously (the caller kicks the attract import right after,
+ *  and the menu is already interactive by then), and comes off when the feed
+ *  goes live — or when the boot gives up / the import itself fails, so a
+ *  machine that can never show the feed doesn't spin forever. That indicator
+ *  replaced a painted key-art plate: a static concept-art JPG made a slow
+ *  boot look finished-but-wrong, where a spinner is honest about the venue
+ *  still loading behind the menu. */
 function watchAttractLive(
-  promise: Promise<{ isLive: () => boolean; dispose: () => void }>,
+  promise: Promise<{ isLive: () => boolean; isFailed: () => boolean; dispose: () => void }>,
 ): Promise<{ dispose: () => void }> {
-  return promise.then((handle) => {
-    const watch = () => {
-      if (handle.isLive()) {
-        document.body.classList.add('attract-live')
-      } else {
-        requestAnimationFrame(watch)
+  document.body.classList.add('attract-loading')
+  const done = () => document.body.classList.remove('attract-loading')
+  return promise.then(
+    (handle) => {
+      const watch = () => {
+        if (handle.isLive()) {
+          document.body.classList.add('attract-live')
+          done()
+        } else if (handle.isFailed()) {
+          done()
+        } else {
+          requestAnimationFrame(watch)
+        }
       }
-    }
-    watch()
-    return handle
-  })
+      watch()
+      return handle
+    },
+    (err) => {
+      done()
+      throw err
+    },
+  )
 }
 
 /**
@@ -235,17 +254,11 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
     // task does. Once the first attract frame renders, `attract-live`
     // drops the menu's solid backdrop exactly as before.
     hideLoadingScreen()
-    // Painted key-art plate behind the title until the attract feed goes
-    // live — without it, slow machines sit on a half-warmed murky scene
-    // for the whole attract boot. Applied only after the JPG decodes, so
-    // an unhydrated assets dir keeps today's gradient fallback.
-    const plateUrl = assetUrl('/assets/ui/title-backdrop.jpg')
-    const plate = new Image()
-    plate.onload = () => {
-      document.documentElement.style.setProperty('--title-backdrop', `url("${plateUrl}")`)
-      document.body.classList.add('backdrop-plate')
-    }
-    plate.src = plateUrl
+    // Behind the title until the attract feed goes live: the gradient
+    // backdrop plus the "loading the venue" indicator `watchAttractLive`
+    // arms below. (This used to paint an AI concept-art plate here; it read
+    // as the finished background, so a long attract boot looked like the
+    // shipped menu rather than a menu still loading.)
     const attractStage = ensureAttractStage()
     const attractPromise = watchAttractLive(
       importAttractStaged().then(({ bootAttractMode }) =>

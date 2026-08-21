@@ -14,19 +14,23 @@ import { getActivePostPipeline, renderFrame } from '@/engine/render/renderer-ser
 import { createRiderMannequinSystem } from '@/engine/render/rider-mannequin'
 import { createRiderRenderSystem } from '@/engine/render/rider-systems'
 import { createScene } from '@/engine/render/scene'
-import { createSkySystem } from '@/engine/render/sky'
+import { beaufortToAmplitudeScale, createSkySystem } from '@/engine/render/sky'
+import { setTerrainWaterLevel } from '@/engine/render/terrain-water-level-service'
 import { createTrackVisuals } from '@/engine/render/track-mesh'
-import { createWaterMesh, updateUnderwaterFog } from '@/engine/render/water'
+import { createWaterMesh, updateUnderwaterFog, WAVE_BEARING_DEFAULT } from '@/engine/render/water'
 import { createWaveRiderRenderSystem } from '@/engine/render/wave-rider-render'
 import { createSimWorld } from '@/engine/sim/ecs/world'
 import { createPhysicsWorld } from '@/engine/sim/physics/rapier'
+import { generateSpectrumWaves } from '@/engine/sim/water/spectrum'
 import {
   createWaveField,
   defaultWaves,
   sampleHeight,
   setShoreField,
+  setWaveStamps,
+  setWaveZones,
 } from '@/engine/sim/water/wave-field'
-import { applyStoredWaterTuning } from '@/engine/water-debug-storage'
+import { applyLookOverrides } from '@/engine/water-debug-storage'
 import { type LoadedBike, loadBike } from '@/game/assets/bike-loader'
 import { type LoadedProp, loadProp } from '@/game/assets/prop-loader'
 import { variantForAiSlot } from '@/game/bikes/variants'
@@ -37,6 +41,7 @@ import { createRider } from '@/game/entities/rider'
 import { simulateStep } from '@/game/sim-step'
 import { createWaveRiderSystem } from '@/game/systems/wave-rider'
 import type { Track } from '@/game/tracks/types'
+import { ATTRACT_TRACK_ID, attractSeaLevel, attractSeaStateBeaufort } from './attract-backdrop'
 import { AI_GRID_SLOTS, resolveGridSlotWorld } from './grid-offsets'
 import { collectVinylScenery, deferSceneryWarm } from './progressive-warm'
 import { loadTrackForBoot } from './track-loader'
@@ -53,12 +58,18 @@ import { loadTrackForBoot } from './track-loader'
  *    by the AI control system.
  *  - Camera is owned by `BroadcastDirector`, which cycles cinematic shots
  *    over the field every few seconds.
+ *  - The sea is the track's own (look / bearing / set envelope / zones /
+ *    shore field), with two deliberate menu-only departures: the tide is
+ *    HELD at low water instead of breathing across a race, and the sea state
+ *    has a floor so a calm venue still reads as moving water. See
+ *    `ATTRACT_TIDE_PHASE` / `ATTRACT_MIN_SEA_STATE_BEAUFORT`.
  *  - `dispose()` cleans up the renderer, canvas, physics, and frame loop
  *    so a navigation into the real race can swap in a fresh boot.
  *
  * Errors during attract boot are logged but never thrown — the cold-boot
  * menu must remain interactive even if asset loads stall, so attract mode
- * fails silently and just shows a black canvas.
+ * fails silently and just shows a black canvas. `isFailed()` reports that
+ * terminal state so callers can stop waiting on `isLive()`.
  */
 export type AttractHandle = {
   /** Tear down. Safe to call multiple times. */
@@ -67,18 +78,23 @@ export type AttractHandle = {
   cut(): void
   /** True once the attract loop has rendered at least one frame. */
   isLive(): boolean
+  /** True once the boot has given up (asset load / GPU failure). Terminal:
+   *  `isLive()` will never turn true. Callers polling for the live feed use
+   *  this to stop waiting — and to take their "loading" affordance down. */
+  isFailed(): boolean
 }
 
 export type AttractOpts = {
   /** Element the canvas is appended to. Typically `#attract-stage`. */
   parent: HTMLElement
-  /** Default 'lagoon'. */
+  /** Default `ATTRACT_TRACK_ID` (attract-backdrop.ts). */
   trackId?: string
 }
 
 export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle> {
   let disposed = false
   let live = false
+  let failed = false
   let rafHandle = 0
   let teardown: () => void = () => {
     /* replaced on success */
@@ -95,6 +111,9 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     },
     isLive() {
       return live
+    },
+    isFailed() {
+      return failed
     },
   }
   let directorCutPending = false
@@ -121,14 +140,12 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
     }
 
     const waveField = createWaveField(defaultWaves())
-    const waterMesh = createWaterMesh(waveField, { backend })
-    scene.add(waterMesh.mesh)
-    // Same mirror-pass cull as the race boot — the attract backdrop pays
-    // the same reflection re-encode otherwise (see WATER_REFLECTION_LAYER).
-    waterMesh.configureReflectionCulling(camera)
-    applyStoredWaterTuning(waterMesh)
 
-    const trackId = opts.trackId ?? 'lagoon'
+    // Track BEFORE water, exactly like the race boot: the water shader bakes
+    // wavelength / direction / phase / count at construction, so a track that
+    // authors its own wave bank has to land on the field first (only
+    // amplitudes are live-mirrored afterwards).
+    const trackId = opts.trackId ?? ATTRACT_TRACK_ID
     const { track, terrainHeightmap, environmentGlbRoot } = await loadTrackForBoot({
       trackId,
       scene,
@@ -139,6 +156,44 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
       disposeRenderer()
       return handle
     }
+    if (track.water?.spectrum) {
+      waveField.waves = generateSpectrumWaves(track.water.spectrum).waves
+    }
+
+    const waterMesh = createWaterMesh(waveField, { backend })
+    scene.add(waterMesh.mesh)
+    // Same mirror-pass cull as the race boot — the attract backdrop pays
+    // the same reflection re-encode otherwise (see WATER_REFLECTION_LAYER).
+    waterMesh.configureReflectionCulling(camera)
+
+    // ── Per-track water, mirroring race-boot ─────────────────────────────
+    // The backdrop is a shop window for a real venue, so its sea has to be
+    // that venue's sea. Committed `water.look` over the constructor defaults
+    // (TRACK scope, not the machine-wide lab store — the menu must show what
+    // ships, not another scene's leftover tuning), then bearing / set
+    // envelope / zones / stamps / shore field.
+    applyLookOverrides(waterMesh, track.water?.look)
+    waterMesh.debug.setWaveBearing(track.water?.swellBearingDeg ?? WAVE_BEARING_DEFAULT)
+    waveField.swellSetPeriodS = track.water?.swellSets?.periodS ?? 0
+    waveField.swellSetDepth = track.water?.swellSets?.depth ?? 0
+    waveField.swellSetPhase = track.water?.swellSets?.phase ?? 0
+
+    // Sea level, held at LOW water for the whole session (attract-backdrop.ts).
+    // Assigned to the same three consumers the race's live tide drives:
+    // buoyancy (`baseY`), the water shader (mesh Y) and the terrain shader's
+    // wet band / waterline trio.
+    const seaLevel = attractSeaLevel(track.water)
+    waveField.baseY = seaLevel
+    waterMesh.mesh.position.y = seaLevel
+    setTerrainWaterLevel(seaLevel)
+
+    // Sea state — the track's own, floored so the backdrop never reads as
+    // glass (attract-backdrop.ts).
+    const amplitudeScale = beaufortToAmplitudeScale(attractSeaStateBeaufort(track.sky))
+    for (const w of waveField.waves) w.amplitude *= amplitudeScale
+
+    setWaveZones(waveField, track.waveZones)
+    setWaveStamps(waveField, track.waveStamps ?? [])
     if (terrainHeightmap) waterMesh.setTerrainHeightmap(terrainHeightmap)
     setShoreField(waveField, terrainHeightmap?.shoreField ?? null)
 
@@ -442,6 +497,7 @@ export async function bootAttractMode(opts: AttractOpts): Promise<AttractHandle>
   } catch (err) {
     console.warn('[attract] boot failed:', err)
     disposed = true
+    failed = true
   }
 
   return handle

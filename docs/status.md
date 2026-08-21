@@ -46,7 +46,36 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-08-19** — **First-session funnel + wave-mastery
+> **Last updated: 2026-08-21** — **Menu backdrop: Mayday Bay at low tide,
+> and a loading indicator instead of a concept-art plate.** The cold-boot
+> menu / lobby backdrop ran the procedural `lagoon` dev fixture and papered
+> over the attract boot with a painted AI concept-art plate
+> (`/assets/ui/title-backdrop.jpg` + `body.backdrop-plate`) — which filled the
+> backdrop and so read as the *finished* menu rather than a menu still
+> loading. The plate is gone; in its place a corner chip ("LOADING VENUE",
+> the boot screen's compositor-thread sweep so it keeps moving through a
+> shader-compile stall) is up while the attract track loads and comes down
+> when the feed goes live **or** when the attract boot gives up — new
+> `AttractHandle.isFailed()`, so a machine that can never show the feed isn't
+> left spinning. The backdrop venue is now **Mayday Bay** (`sandbar`), and
+> attract mode applies that venue's authored water the way race-boot does
+> (committed `water.look` at track scope — not the machine-wide lab store —
+> plus bearing / set envelope / spectrum / wave zones / stamps / shore field;
+> the track now loads *before* the water mesh so a per-track wave bank can
+> land first). Two deliberate menu-only departures live in the new pure
+> [attract-backdrop.ts](../src/boot/attract-backdrop.ts): the tide is **held
+> at low water** (phase 0.75, clock never advanced — the exposed-sandbar read)
+> and the sea state has a **Beaufort 4 floor**, which the cove's 0.5×
+> wave-zone halves back to a slight chop so the backdrop isn't glass.
+> Gates green (typecheck / lint / 1447 unit tests (+7 new) / build); the
+> indicator lifecycle is covered by a new asset-independent e2e spec and was
+> driven headless here. _Not verified: the look itself — this ran in a remote
+> container with no GPU and an unhydrated `public/assets`, so the low-tide
+> silhouette and the chop want a **headed** eyeball on a pulled clone._
+>
+> ---
+>
+> **2026-08-19** — **First-session funnel + wave-mastery
 > feedback pass ([PR #25](https://github.com/unclemattmakes/king-tide/pull/25),
 > branch `claude/playtest-fixes`).** A three-hat playtest of the live build
 > (PM / art director / first-time customer) produced a prioritized card; this
