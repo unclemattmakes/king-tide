@@ -14,6 +14,12 @@ on:
     tags:
       - "v*"
 
+# Least-privilege default; the bundle job elevates to contents: write
+# because its tag-build leg attaches artifacts to the GitHub Release
+# (evaluation security #2).
+permissions:
+  contents: read
+
 concurrency:
   group: build-desktop-${{ github.ref }}
   cancel-in-progress: false
@@ -22,6 +28,8 @@ jobs:
   bundle:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -55,7 +63,9 @@ jobs:
       # base64-encoded rclone.conf with an `r2-hoverbike` S3 remote. See
       # steam/README.md → "Asset hydration secret".)
       - name: Install rclone
-        uses: AnimMouse/setup-rclone@v1
+        # SHA-pinned third-party action (evaluation security #3) —
+        # Dependabot bumps the pin.
+        uses: AnimMouse/setup-rclone@26ef2133e09fd383329a1d4c1fbe6a71db1976c9 # v1 (v1.12.0)
 
       - name: Hydrate assets from R2
         shell: bash
@@ -144,7 +154,10 @@ jobs:
       # is absent on that leg, hence fail_on_unmatched_files: false.
       - name: Attach to Release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
+        # SHA-pinned: a mutable tag on a third-party action is a
+        # supply-chain hole in the exact job that ships player-facing
+        # builds (evaluation security #3). Dependabot bumps the pin.
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3 (v3.0.2)
         with:
           files: |
             hoverbike-linux.tar.gz

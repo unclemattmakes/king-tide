@@ -43,6 +43,15 @@ on:
           - "false"
           - "true"
 
+# Least-privilege token. This job holds Steam Guard credentials while
+# running third-party actions — the worst-case supply-chain exposure in
+# the repo (evaluation security #2) — so the GITHUB_TOKEN it also
+# carries must be able to do nothing but read. Artifact download uses
+# actions:read via the download-artifact action's own token handling.
+permissions:
+  contents: read
+  actions: read
+
 concurrency:
   group: release-steam
   cancel-in-progress: false
