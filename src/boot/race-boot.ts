@@ -450,6 +450,9 @@ export async function bootRace(appEl: HTMLElement) {
     bestLapThisRace: null as number | null,
     lastLapTime: null as number | null,
     bestLapAllTime: getBestLap({ trackId, bikeId: playerVariant.id }),
+    // True once this run genuinely improved the saved (track, bike)
+    // best — the finish stinger's "celebrate a record" signal.
+    newAllTimeBest: false,
   }
 
   // Track terrain + data. See `src/boot/track-loader.ts` — handles
@@ -1200,6 +1203,11 @@ export async function bootRace(appEl: HTMLElement) {
         }
         if (recordLapTime({ trackId, bikeId: playerVariant.id }, lapTime)) {
           lapState.bestLapAllTime = lapTime
+          // Explicit record flag for the finish stinger: lap times are
+          // quantized to the fixed sim step, so "this-race <= all-time"
+          // at the finish screen can't distinguish a genuine new record
+          // from an exact tie with the old one.
+          lapState.newAllTimeBest = true
         }
         // Record the lap boundary into the replay event stream so the
         // best-lap slicer (Time Trial ghost persistence) can find this
@@ -1653,11 +1661,13 @@ export async function bootRace(appEl: HTMLElement) {
       }
       // Always reset AI state on toggle — fresh closest-point search, no carry
       // over from previous auto-play sessions on the same page. Player-driven
-      // auto-play uses the same difficulty bake-in as the real opponents.
-      AIControllerStore.set(
-        playerEid,
-        defaultAIController('main', { difficulty: playerSettings.aiDifficulty }),
-      )
+      // auto-play uses the same difficulty bake-in as the real opponents —
+      // EXCEPT the boost vent: the meter is the player's banked reward, and
+      // the OOB-autopilot rescue (which rides this same tag) must never
+      // spend it on their behalf.
+      const pilot = defaultAIController('main', { difficulty: playerSettings.aiDifficulty })
+      pilot.ventChargeMin = Number.POSITIVE_INFINITY
+      AIControllerStore.set(playerEid, pilot)
     } else if (hasComponent(sim, playerEid, AITag)) {
       removeComponent(sim, playerEid, AITag)
     }

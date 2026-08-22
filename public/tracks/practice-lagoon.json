@@ -96,16 +96,6 @@
   ],
   "waveZones": [
     {
-      "position": { "x": 0.0, "y": 0.0, "z": 0.0 },
-      "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
-      "halfWidth": 340.0,
-      "halfHeight": 30.0,
-      "halfDepth": 260.0,
-      "heightMult": 0.5,
-      "freqMult": 1.0,
-      "blendRadiusM": 30.0
-    },
-    {
       "position": { "x": 150.0, "y": 0.0, "z": 0.0 },
       "rotation": { "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0 },
       "halfWidth": 45.0,

@@ -14,7 +14,7 @@ import {
 import { fetchBoard } from '@/engine/leaderboard/remote'
 import { playerSettings } from '@/engine/player-settings'
 import { PRACTICE_LAGOON_TRACK_ID } from '@/engine/tutorial/script-catalog'
-import { DEFAULT_TUTORIAL_TRACK } from '@/engine/tutorial/tutorial-launch'
+import { buildCoachedRunHref, DEFAULT_TUTORIAL_TRACK } from '@/engine/tutorial/tutorial-launch'
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
 import { installMenuGamepad, isAnyOverlayShown } from '../input/menu-gamepad'
@@ -136,7 +136,7 @@ const STEPS_MP: { id: Step; label: string }[] = [
  *  enabled set today is Race + Cup (the latter is the routing path to
  *  the Dev Cup) + Multiplayer (works end-to-end via the existing room
  *  protocol). */
-type ModeId = 'race' | 'time-trial' | 'cup' | 'multiplayer' | 'tutorial' | 'practice'
+type ModeId = 'race' | 'time-trial' | 'cup' | 'multiplayer' | 'practice'
 type ModeTile = {
   id: ModeId
   badge: string
@@ -161,8 +161,9 @@ const BIKE_COMING_SOON_SLOTS: ComingSoonBike[] = []
  * PRACTICE is the discoverable door to skill teaching (evaluation
  * summary #1; maintainer decision 2026-08-22): its screen
  * (`buildTutorialIntro`) offers the coached First Run and the practice
- * lagoon's station course. The legacy 'tutorial' mode id + routing stay
- * in place for the Settings → "Replay tutorial" path and `?tutorial=1`.
+ * lagoon's station course. (Settings → "Replay tutorial" and
+ * `?tutorial=1` are URL-param paths — they never route through this
+ * mode picker, which is why no 'tutorial' mode id exists.)
  */
 const MODE_TILES: ModeTile[] = [
   {
@@ -357,7 +358,6 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         // the four ship cups + the placeholder are all championship-shaped;
         // the Dev Cup browse path swaps in once that tile is clicked.
         return (pickedCup?.races.length ?? 1) > 0 ? STEPS_SP_CUP_CHAMPIONSHIP : STEPS_SP_CUP_BROWSE
-      case 'tutorial':
       case 'practice':
         return STEPS_PRACTICE
       case 'time-trial':
@@ -1045,7 +1045,6 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
             case 'multiplayer':
               showStep('mp-entry')
               break
-            case 'tutorial':
             case 'practice':
               showStep('tutorial-intro')
               break
@@ -1230,34 +1229,17 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         </div>
       `
       el.querySelector('#tut-back')?.addEventListener('click', () => showStep('mode'))
+      // Both cards commit through tutorial-launch's shared recipe so
+      // load-bearing params (the lagoon's solo `ai=0`) live in exactly
+      // one place, shared with Settings → Replay tutorial.
+      // First Run always teaches on the dressed tutorial lagoon — a
+      // cold boot's picks.trackId is the procedural dev track, which
+      // must never be a new player's first minute.
       const launchTutorial = (): void => {
-        // Reuse the singleplayer commit path so picks → URL handling
-        // stays in one place; just stamp the tutorial flag on top.
-        // First Run always teaches on the dressed tutorial lagoon —
-        // a cold boot's picks.trackId is the procedural dev track,
-        // which must never be a new player's first minute. (Replay
-        // on an arbitrary track lives in Settings → Replay tutorial.)
-        const url = new URL(window.location.href)
-        url.search = ''
-        url.searchParams.set('race', '1')
-        url.searchParams.set('track', DEFAULT_TUTORIAL_TRACK)
-        url.searchParams.set('bike', picks.bikeId)
-        url.searchParams.set('tutorial', '1')
-        finish(url.toString())
+        finish(buildCoachedRunHref(DEFAULT_TUTORIAL_TRACK, picks.bikeId))
       }
       const launchPracticeLagoon = (): void => {
-        // The station course: the practice lagoon venue with its own
-        // beat script (script-catalog resolves it by track id), solo
-        // water — `ai=0` wins the tutorial escort min() in race-boot —
-        // and the same tutorial plumbing (no position board, no OOB).
-        const url = new URL(window.location.href)
-        url.search = ''
-        url.searchParams.set('race', '1')
-        url.searchParams.set('track', PRACTICE_LAGOON_TRACK_ID)
-        url.searchParams.set('bike', picks.bikeId)
-        url.searchParams.set('tutorial', '1')
-        url.searchParams.set('ai', '0')
-        finish(url.toString())
+        finish(buildCoachedRunHref(PRACTICE_LAGOON_TRACK_ID, picks.bikeId))
       }
       const wireCard = (id: string, launch: () => void): void => {
         const card = el.querySelector<HTMLElement>(`#${id}`)

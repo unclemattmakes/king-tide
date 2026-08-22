@@ -10,7 +10,31 @@ import {
   PRACTICE_LAGOON_TRACK_ID,
   tutorialScriptForTrack,
 } from '../../src/engine/tutorial/script-catalog'
-import { DEFAULT_TUTORIAL_SCRIPT } from '../../src/engine/tutorial/tutorial-script'
+import {
+  DEFAULT_TUTORIAL_SCRIPT,
+  type TutorialContext,
+} from '../../src/engine/tutorial/tutorial-script'
+
+/** Full context with sensible riding defaults — beats under test
+ *  override just the fields they gate on, so adding a context field
+ *  means one edit here instead of one per literal. */
+function makeCtx(over: Partial<TutorialContext> = {}): TutorialContext {
+  return {
+    beatTime: 1,
+    tutorialTime: 1,
+    playerSpeed: 20,
+    throttle: 1,
+    pumpEventsThisBeat: 0,
+    launchesThisBeat: 0,
+    bestLaunchQualityThisBeat: 0,
+    bestLandingQualityThisBeat: 0,
+    bestTuckFactorThisBeat: 0,
+    inAntiGrav: false,
+    orbitTouchedThisBeat: false,
+    driftTierThisBeat: 0,
+    ...over,
+  }
+}
 
 describe('tutorialScriptForTrack', () => {
   it('resolves the practice lagoon to its station script', () => {
@@ -53,58 +77,18 @@ describe('PRACTICE_LAGOON_SCRIPT', () => {
   it('asks for a shaped launch, not just any air', () => {
     const launch = PRACTICE_LAGOON_SCRIPT.beats.find((b) => b.id === 'wave-launch')!
     // Quality-gated: a graded-0 hop must not clear the practice beat...
-    expect(
-      launch.clearWhen({
-        beatTime: 1,
-        tutorialTime: 1,
-        playerSpeed: 20,
-        throttle: 1,
-        pumpEventsThisBeat: 0,
-        launchesThisBeat: 3,
-        bestLaunchQualityThisBeat: 0.1,
-        bestLandingQualityThisBeat: 0,
-        bestTuckFactorThisBeat: 0,
-        inAntiGrav: false,
-        orbitTouchedThisBeat: false,
-        driftTierThisBeat: 0,
-      }),
-    ).toBe(false)
+    expect(launch.clearWhen(makeCtx({ launchesThisBeat: 3, bestLaunchQualityThisBeat: 0.1 }))).toBe(
+      false,
+    )
     // ...while an ok-or-better pop does.
-    expect(
-      launch.clearWhen({
-        beatTime: 1,
-        tutorialTime: 1,
-        playerSpeed: 20,
-        throttle: 1,
-        pumpEventsThisBeat: 0,
-        launchesThisBeat: 1,
-        bestLaunchQualityThisBeat: 0.5,
-        bestLandingQualityThisBeat: 0,
-        bestTuckFactorThisBeat: 0,
-        inAntiGrav: false,
-        orbitTouchedThisBeat: false,
-        driftTierThisBeat: 0,
-      }),
-    ).toBe(true)
+    expect(launch.clearWhen(makeCtx({ launchesThisBeat: 1, bestLaunchQualityThisBeat: 0.5 }))).toBe(
+      true,
+    )
   })
 
   it('asks the drift station for SMT — the sweep is built to afford it', () => {
     const drift = PRACTICE_LAGOON_SCRIPT.beats.find((b) => b.id === 'drift')!
-    const ctx = {
-      beatTime: 1,
-      tutorialTime: 1,
-      playerSpeed: 20,
-      throttle: 1,
-      pumpEventsThisBeat: 0,
-      launchesThisBeat: 0,
-      bestLaunchQualityThisBeat: 0,
-      bestLandingQualityThisBeat: 0,
-      bestTuckFactorThisBeat: 0,
-      inAntiGrav: false,
-      orbitTouchedThisBeat: false,
-      driftTierThisBeat: 1,
-    }
-    expect(drift.clearWhen(ctx)).toBe(false)
-    expect(drift.clearWhen({ ...ctx, driftTierThisBeat: 2 })).toBe(true)
+    expect(drift.clearWhen(makeCtx({ driftTierThisBeat: 1 }))).toBe(false)
+    expect(drift.clearWhen(makeCtx({ driftTierThisBeat: 2 }))).toBe(true)
   })
 })

@@ -19,6 +19,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { createWaveField, sampleZoneFactors, setWaveZones } from '@/engine/sim/water/wave-field'
 import { DEFAULT_MIN_HEIGHT_MULT } from '@/game/ai/pump-hints'
 import { TIER_2_THRESHOLD_S } from '@/game/systems/drift-tiers'
 import { buildTrackFromJson } from '@/game/tracks/json-loader'
@@ -131,18 +132,29 @@ describe('practice-lagoon — stations in ride order', () => {
     expect(pad.position.x).toBeLessThan(t.start.position.x) // before the start line
   })
 
-  it('keeps a calming base zone so only the stations carry big water', () => {
+  it('station zones actually win at their stations — no blanket zone shadowing them', () => {
+    // Regression pin for the launch bug this venue shipped with: a
+    // full-course calming zone listed first shadowed both station zones,
+    // because `sampleZoneFactors` resolves same-weight overlaps
+    // first-in-array (zoneWeight is exactly 1 inside any core OBB, and
+    // the tie-break is a strict `>`). The stations ran at 0.5× amplitude
+    // and the three water-skill beats could only clear by timeout. Pin
+    // the *runtime* factors, not just the JSON: the LAUNCH lane and TUCK
+    // rollers must dominate at their centers, and the drift sweep must
+    // ride the neutral base sea.
     const t = loadTrack()
-    const calming = t.waveZones.filter((z) => z.heightMult < 1)
-    expect(calming.length).toBe(1)
-    // The calming zone must blanket the whole course (all spline points
-    // inside its footprint).
-    const zone = calming[0]!
-    const spline = t.aiSplines.find((s) => s.id === 'main')!
-    for (const p of spline.points) {
-      expect(Math.abs(p.x - zone.position.x)).toBeLessThanOrEqual(zone.halfWidth)
-      expect(Math.abs(p.z - zone.position.z)).toBeLessThanOrEqual(zone.halfDepth)
-    }
+    const field = createWaveField([])
+    setWaveZones(field, t.waveZones)
+    const launch = sampleZoneFactors(field.zones, 150, 0, 0)
+    expect(launch.heightMult).toBeGreaterThan(2)
+    expect(launch.freqMult).toBeLessThan(1)
+    const tuck = sampleZoneFactors(field.zones, -20, 110, 0)
+    expect(tuck.heightMult).toBeGreaterThan(1.4)
+    expect(tuck.freqMult).toBeLessThan(0.6)
+    // Drift sweep (west end) — neutral base water, nothing amplified
+    // or calmed.
+    const sweep = sampleZoneFactors(field.zones, -155, 0, 0)
+    expect(sweep.heightMult).toBeCloseTo(1, 5)
   })
 
   it('closes the loop — last spline point returns near the first', () => {

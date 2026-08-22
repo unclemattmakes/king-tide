@@ -21,8 +21,9 @@
  *
  * Verdicts surface render-side as a two-word chyron
  * (launch-grade-hud.ts) and feed the tutorial's LAUNCH / LAND beats.
- * The landing edge fires the *combined* jump quality — chyron, audio,
- * tutorial, and payout all read the same number.
+ * Each edge fires ITS OWN quality (takeoff at the launch edge, pure
+ * landing at the landing edge) — only the meter payout blends the two
+ * into the jump score.
  *
  * Sim-side + deterministic: pure math over rigid-body pose and
  * HoverState, one-shot edge flags consumed by the render frame (same
@@ -31,7 +32,7 @@
  * replays stay consistent.
  */
 
-import { addComponent, query } from 'bitecs'
+import { query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import {
@@ -42,8 +43,8 @@ import {
   RBHandle,
   RBHandleStore,
 } from '@/game/components'
-import { BoostEffect, BoostEffectStore } from '@/game/components/pickup'
 import { Racer } from '@/game/components/race'
+import { mergeBoostEffect } from './boost-effect'
 import { chargeBoostMeter } from './boost-meter'
 
 // ── Tuning ────────────────────────────────────────────────────────────
@@ -192,26 +193,24 @@ export function launchGradeSystem(sim: SimWorld, phys: PhysicsWorld): void {
       const pitch = pitchAngleFromQuat(rb.rotation())
       const landingQuality = gradeLanding(pitch, hover.forwardSlope)
       // Combined jump score — the takeoff stored at this air's
-      // grounded→airborne edge folds into the payout so a shaped pop
-      // is worth real meter, not just a chyron.
+      // grounded→airborne edge folds into the PAYOUT so a shaped pop
+      // is worth real meter, not just a chyron. The fired edge keeps
+      // the pure landing quality: the chyron says LANDING, the
+      // tutorial's STICK-THE-LANDING beat grades the landing, and the
+      // takeoff already announced its own verdict at the launch edge —
+      // blending here silently re-gated all three (a 0.5-quality
+      // landing after a flat takeoff read "sloppy" and stalled the
+      // First Run's LAND beat).
       const jumpQuality =
         JUMP_LANDING_WEIGHT * landingQuality + JUMP_TAKEOFF_WEIGHT * g.takeoffQuality
       g.firedThisTick = true
       g.firedKind = 'landing'
-      g.firedQuality = jumpQuality
+      g.firedQuality = landingQuality
       chargeBoostMeter(eid, JUMP_REWARD_FLOOR + jumpQuality * JUMP_REWARD_SCALE)
       if (jumpQuality >= VERDICT_CLEAN_MIN) {
-        // Clean jump → immediate felt burst (pad merge semantics:
-        // strongest multiplier wins, durations never stack).
-        if (!BoostEffectStore.has(eid)) addComponent(sim, eid, BoostEffect)
-        const current = BoostEffectStore.get(eid)
-        const useMultiplier =
-          current && current.remaining > 0
-            ? Math.max(current.multiplier, CLEAN_JUMP_BURST_MUL)
-            : CLEAN_JUMP_BURST_MUL
-        const useRemaining =
-          current && current.remaining > CLEAN_JUMP_BURST_S ? current.remaining : CLEAN_JUMP_BURST_S
-        BoostEffectStore.set(eid, { remaining: useRemaining, multiplier: useMultiplier })
+        // Clean jump → immediate felt burst via the shared merge
+        // (strongest multiplier wins, durations never stack).
+        mergeBoostEffect(sim, eid, CLEAN_JUMP_BURST_MUL, CLEAN_JUMP_BURST_S)
       }
       g.airborneSec = 0
     }

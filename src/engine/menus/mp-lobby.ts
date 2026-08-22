@@ -66,13 +66,16 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
 
   let pickBanner: LobbyView['pickBanner'] = null
   let raceArmed = false
-  /** Wall-clock of lobby entry, for the connect time-box: partysocket
-   *  retries silently forever, so with the relay down (or `pnpm
-   *  party:dev` not running in dev) the lobby used to sit on
-   *  "CONNECTING TO THE BROADCAST…" with no explanation and no visible
-   *  way out (evaluation networking #6). After the time-box the banner
-   *  names the problem and the Esc exit; retries continue underneath. */
-  const connectStartedAt = performance.now()
+  /** Wall-clock of the last moment the connection was healthy (or
+   *  lobby entry), for the connect time-box: partysocket retries
+   *  silently forever, so with the relay down (or `pnpm party:dev` not
+   *  running in dev) the lobby used to sit on "CONNECTING TO THE
+   *  BROADCAST…" with no explanation and no visible way out
+   *  (evaluation networking #6). Refreshed while `net.ready`, so a
+   *  mid-lobby blip gets the full grace window before the failure
+   *  banner shows — timing only from lobby entry made any transient
+   *  disconnect after the first 10 s flip the scary banner instantly. */
+  let connectionHealthyAt = performance.now()
   /** Track we'll navigate to when the banner timer fires. Mutable after
    *  arming: a relay `start-race` carrying a different winner (another
    *  peer armed first — its pick is the sticky one the server replays)
@@ -125,12 +128,13 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
         })
       }
       peers.sort((a, b) => a.peerId - b.peerId)
+      if (net.ready) connectionHealthyAt = performance.now()
       return {
         peers,
         localReady: local.ready,
         connecting: !net.ready,
         connectStalled:
-          !net.ready && performance.now() - connectStartedAt >= CONNECT_STALL_TIMEOUT_MS,
+          !net.ready && performance.now() - connectionHealthyAt >= CONNECT_STALL_TIMEOUT_MS,
         localBike: bikeMeta(local.bikeId),
         localTrack: trackMeta(local.trackId),
         bikeOptions: ALL_BIKES,

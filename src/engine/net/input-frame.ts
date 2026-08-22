@@ -8,9 +8,10 @@
  * formatting, no struct padding).
  *
  * Byte 0 carries a 1-byte type tag so this codec can share a WebSocket with
- * other binary message types (see `transform-snapshot.ts` for the second
- * type at `0x02`). The remaining 10 bytes (payload) are the original M10.4
- * layout, shifted by +1.
+ * other binary message types (see `transform-snapshot.ts` — snapshots are
+ * tag `0x03`; `0x02` is the retired int16-position snapshot format,
+ * decode-only). The next free tag is `0x04`. The remaining 10 bytes
+ * (payload) are the original M10.4 layout, shifted by +1.
  *
  *   offset | bytes | field
  *   -------+-------+-----------------------------------------

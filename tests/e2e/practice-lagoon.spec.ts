@@ -17,7 +17,7 @@ const PRACTICE_URL = '/?race=1&track=practice-lagoon&bike=cruiser&tutorial=1&ai=
 test.describe('practice lagoon', () => {
   test('boots solo with the station script armed', async ({ page }) => {
     await page.goto(PRACTICE_URL)
-    await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
+    await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, undefined, {
       timeout: 30_000,
     })
     // Solo water: the standings list is exactly the player.
@@ -32,7 +32,7 @@ test.describe('practice lagoon', () => {
 
   test('throttle input clears the first two station beats', async ({ page }) => {
     await page.goto(PRACTICE_URL)
-    await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, {
+    await page.waitForFunction(() => window.__hover?.player()?.isGrounded === true, undefined, {
       timeout: 30_000,
     })
     // Hold throttle — the coached THROTTLE (>6 m/s) then CRUISE

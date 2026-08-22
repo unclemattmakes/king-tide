@@ -20,7 +20,7 @@ import { query } from 'bitecs'
 import * as THREE from 'three'
 import type { PlayerSnapshot, RaceSnapshot } from '@/debug'
 import { installPerfDebugApi } from '@/debug'
-import { type AudioEngine, spatialCueFor } from '@/engine/audio/audio'
+import { type AudioEngine, RIVAL_ENGINE_VOICES, spatialCueFor } from '@/engine/audio/audio'
 import {
   type CupFinisher,
   type CupProgress,
@@ -348,6 +348,11 @@ export interface GameLoopOpts {
     bestLapThisRace: number | null
     lastLapTime: number | null
     bestLapAllTime: number | null
+    /** True once this run genuinely improved the saved best (set by
+     *  race-boot's lap callback when `recordLapTime` accepts). Lap
+     *  times are sim-step-quantized, so equality alone can't tell a
+     *  record from a tie. */
+    newAllTimeBest: boolean
   }
   /** Read-only callbacks from the pause/auto/determinism controls. */
   control: GameLoopControl
@@ -743,10 +748,29 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // frame from the camera quaternion (fresh after the chase tick; the
   // matrixWorld isn't updated until renderFrame, so don't read that).
   const tmpAudioRight = new THREE.Vector3()
-  // Rival-engine drive pool + last-seen positions (speed = position
-  // delta, so kinematic remote mirrors get a pitch too).
-  const rivalDrives: Array<{ eid: number; gain: number; pan: number; pitch01: number }> = []
-  const rivalPrevPos = new Map<number, { x: number; z: number }>()
+  // Spatial cue for a world position — hoisted so the per-frame audio
+  // blocks don't rebuild the closure 60×/s.
+  const spatialFor = (p: { x: number; y: number; z: number }) =>
+    spatialCueFor(p, camera.position, tmpAudioRight)
+  // Rival-engine voice slots — persistent pool sized to the audio
+  // engine's voice count; each slot keeps its occupant's eid, drive
+  // values, and the previous position its speed delta reads from.
+  // Genuinely allocation-free per frame.
+  const rivalSlots = Array.from({ length: RIVAL_ENGINE_VOICES }, () => ({
+    eid: -1,
+    gain: 0,
+    pan: 0,
+    pitch01: 0,
+    snap: false,
+    prevX: 0,
+    prevZ: 0,
+    hasPrev: false,
+  }))
+  // Scratch for the per-frame nearest-N selection (squared distances).
+  const rivalSelection = Array.from({ length: RIVAL_ENGINE_VOICES }, () => ({
+    eid: -1,
+    distSq: 0,
+  }))
   const tmpQuat = new THREE.Quaternion()
   const tmpTarget = new THREE.Vector3()
   // Scratch for pushing the chase cam's live rest pose into the race-intro
@@ -1815,12 +1839,14 @@ export function startGameLoop(opts: GameLoopOpts): void {
       if (meter && stats) {
         if (nowActive && !prevActive) {
           wavePumpHud.pump(1, true)
-          if (playerSettings.wavePumpIntensity !== 'off') {
-            // Boost has its own ignition voice — the wave-mastery
-            // chord stays reserved for graded launches/landings/tricks
-            // (evaluation audio #4).
-            audio.boostIgnite(meter.charge)
-          }
+          // Boost has its own ignition voice — the wave-mastery chord
+          // stays reserved for graded launches/landings/tricks
+          // (evaluation audio #4). Deliberately NOT behind
+          // `wavePumpIntensity`: that setting is the wave-pump prompt
+          // opt-out, and boost ignition is no longer a wave cue — a
+          // player who turned the pump prompt off shouldn't lose all
+          // boost-activation audio.
+          audio.boostIgnite(meter.charge)
           applyPumpImpulse(phys, playerEid, stats, 1, 'boost')
           triggerPumpBurst(playerEid, 1, true)
           pumpFx.fire(1, true)
@@ -1845,11 +1871,10 @@ export function startGameLoop(opts: GameLoopOpts): void {
         const onPad = padPos ? track.boostPads.some((p) => isOverBoostPad(padPos, p)) : false
         if (onPad && !(state.onBoostPad ?? false)) {
           wavePumpHud.pump(1, true)
-          if (playerSettings.wavePumpIntensity !== 'off') {
-            // Same ignition voice as the meter — a pad is free speed,
-            // not a graded water read.
-            audio.boostIgnite(1)
-          }
+          // Same ignition voice as the meter — a pad is free speed,
+          // not a graded water read — and likewise not behind the
+          // wave-pump prompt setting.
+          audio.boostIgnite(1)
           applyPumpImpulse(phys, playerEid, stats, 1, 'boost')
           triggerPumpBurst(playerEid, 1, true)
           pumpFx.fire(1, true)
@@ -1926,8 +1951,6 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // comes from the quaternion, which the chase tick refreshed this
     // frame (matrixWorld would be one frame stale here).
     tmpAudioRight.set(1, 0, 0).applyQuaternion(camera.quaternion)
-    const spatialFor = (p: { x: number; y: number; z: number }) =>
-      spatialCueFor(p, camera.position, tmpAudioRight)
     const liveMines = query(sim, [MineTag])
     for (const mEid of liveMines) {
       if (audioSeenMineEids.has(mEid)) continue
@@ -2101,46 +2124,92 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // panned engine voice so a bike drafting up behind you exists in
     // the mix (evaluation summary #5: opponents were acoustically
     // invisible). Same transforms the minimap just walked; speed is a
-    // per-eid position delta so it works for dynamic AI and kinematic
-    // remote mirrors alike. Allocation-free once the pools warm.
+    // per-slot position delta so it works for dynamic AI and kinematic
+    // remote mirrors alike. Selection is nearest-N by squared distance
+    // (no allocation); voice slots are STABLE — a rival keeps its slot
+    // while it stays selected, and a slot whose occupant changes hands
+    // is flagged `snap` so the voice re-seats at the newcomer's
+    // pan/pitch instead of audibly gliding one engine tone between two
+    // unrelated bikes. Slot state (incl. the position used for the
+    // speed delta) lives on the persistent pool, so a rival re-entering
+    // after a long absence can't compute a seconds-of-travel delta
+    // over one frame's dt and chirp the voice.
     {
-      rivalDrives.length = 0
-      let worst = -1
+      // Pass 1 — pick the nearest RIVAL_ENGINE_VOICES rivals by
+      // squared camera distance into the scratch selection.
+      for (let i = 0; i < rivalSelection.length; i++) rivalSelection[i]!.eid = -1
       for (const s of standings) {
         if (s.eid === playerEid) continue
         const t = TransformStore.get(s.eid)
         if (!t) continue
-        const cue = spatialCueFor(t, camera.position, tmpAudioRight)
-        // Track the nearest RIVAL_ENGINE_DRIVES by gain (monotone in
-        // distance). Tiny field (≤7) — simple replace-the-worst scan.
-        if (rivalDrives.length < 2) {
-          rivalDrives.push({ eid: s.eid, gain: cue.gain, pan: cue.pan, pitch01: 0 })
-        } else {
-          worst = rivalDrives[0]!.gain <= rivalDrives[1]!.gain ? 0 : 1
-          if (cue.gain > rivalDrives[worst]!.gain) {
-            const d = rivalDrives[worst]!
-            d.eid = s.eid
-            d.gain = cue.gain
-            d.pan = cue.pan
+        const dx = t.x - camera.position.x
+        const dy = t.y - camera.position.y
+        const dz = t.z - camera.position.z
+        const distSq = dx * dx + dy * dy + dz * dz
+        let worst = 0
+        for (let i = 1; i < rivalSelection.length; i++) {
+          const a = rivalSelection[i]!
+          const b = rivalSelection[worst]!
+          if (a.eid === -1 || (b.eid !== -1 && a.distSq > b.distSq)) worst = i
+        }
+        const w = rivalSelection[worst]!
+        if (w.eid === -1 || distSq < w.distSq) {
+          w.eid = s.eid
+          w.distSq = distSq
+        }
+      }
+      // Pass 2 — assign selected rivals to voice slots, preserving an
+      // occupant's slot when still selected; newcomers take freed
+      // slots with `snap`.
+      for (const slot of rivalSlots) {
+        let stillSelected = false
+        for (const sel of rivalSelection) {
+          if (sel.eid !== -1 && sel.eid === slot.eid) {
+            stillSelected = true
+            sel.eid = -1 // consumed — don't double-assign
+            break
+          }
+        }
+        if (!stillSelected) slot.eid = -1
+      }
+      for (const sel of rivalSelection) {
+        if (sel.eid === -1) continue
+        for (const slot of rivalSlots) {
+          if (slot.eid === -1) {
+            slot.eid = sel.eid
+            slot.snap = true
+            slot.hasPrev = false
+            slot.pitch01 = 0
+            break
           }
         }
       }
-      for (const d of rivalDrives) {
-        const t = TransformStore.get(d.eid)
-        if (!t) continue
-        const prev = rivalPrevPos.get(d.eid)
-        if (prev && dt > 0) {
-          const speed = Math.hypot(t.x - prev.x, t.z - prev.z) / dt
-          d.pitch01 = Math.min(1, speed / 28)
+      // Pass 3 — drive each occupied slot: spatial cue + speed from
+      // the slot's own previous position.
+      for (const slot of rivalSlots) {
+        if (slot.eid === -1) {
+          slot.gain = 0
+          continue
         }
-        if (prev) {
-          prev.x = t.x
-          prev.z = t.z
-        } else {
-          rivalPrevPos.set(d.eid, { x: t.x, z: t.z })
+        const t = TransformStore.get(slot.eid)
+        if (!t) {
+          slot.eid = -1
+          slot.gain = 0
+          continue
         }
+        const cue = spatialCueFor(t, camera.position, tmpAudioRight)
+        slot.gain = cue.gain
+        slot.pan = cue.pan
+        if (slot.hasPrev && dt > 0) {
+          const speed = Math.hypot(t.x - slot.prevX, t.z - slot.prevZ) / dt
+          slot.pitch01 = Math.min(1, speed / 28)
+        }
+        slot.prevX = t.x
+        slot.prevZ = t.z
+        slot.hasPrev = true
       }
-      audio.tickRivalEngines(rivalDrives)
+      audio.tickRivalEngines(rivalSlots)
+      for (const slot of rivalSlots) slot.snap = false
     }
 
     // Direction arrow points the player to the next checkpoint.
@@ -2226,6 +2295,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
             recorder,
             bestLapThisRace: lapState.bestLapThisRace,
             bestLapAllTime: lapState.bestLapAllTime,
+            newAllTimeBest: lapState.newAllTimeBest,
             timeTrialMode: timeTrialMode === true,
             forfeited: RacerStore.get(playerEid)?.forfeited ?? false,
             audio,
@@ -2264,6 +2334,10 @@ interface FinishOpts {
   recorder: ReplayRecorder | null
   bestLapThisRace: number | null
   bestLapAllTime: number | null
+  /** This run genuinely improved the saved (track, bike) best —
+   *  explicit, because sim-step-quantized lap times make exact ties
+   *  with the old best reachable and `<=` can't tell them apart. */
+  newAllTimeBest: boolean
   timeTrialMode: boolean
   /** Player left the course (crossed the OOB soft wall). Records a DNF and
    *  skips ghost / leaderboard saves — the run no longer counts. */
@@ -2275,13 +2349,22 @@ interface FinishOpts {
 
 /** Drop seen-set entries whose entity no longer exists. When sizes
  *  match, live ⊆ seen and |seen| = |live| ⇒ equal sets — skip.
- *  Accepts bitecs' Uint32Array query results directly. */
+ *  Accepts bitecs' Uint32Array query results directly. Deleting during
+ *  Set iteration is spec-safe, so no copy is made.
+ *
+ *  Known residual edge: bitecs recycles entity ids immediately, so a
+ *  despawn + same-category respawn that reuses the id inside one
+ *  render-frame window keeps the id in both `seen` and `live` — the
+ *  new spawn's one-shot is swallowed. Rare (needs the recycled id to
+ *  land back in the same category the same frame), and the count-diff
+ *  this replaced had the mirror-image flaw (same-frame multi-spawns
+ *  collapsed to one sound). */
 function pruneSeen(
   seen: Set<number>,
   live: { readonly length: number; includes(searchElement: number): boolean },
 ): void {
   if (seen.size === live.length) return
-  for (const id of Array.from(seen)) {
+  for (const id of seen) {
     if (!live.includes(id)) seen.delete(id)
   }
 }
@@ -2302,6 +2385,7 @@ function showFinishScreen(opts: FinishOpts): void {
     recorder,
     bestLapThisRace,
     bestLapAllTime,
+    newAllTimeBest,
     timeTrialMode,
     forfeited,
     audio,
@@ -2311,14 +2395,13 @@ function showFinishScreen(opts: FinishOpts): void {
 
   // Score the finish. Position-aware: the win fanfare, a bright podium
   // triad, a modest mid-pack resolve, or the low DNF figure. Time Trial
-  // celebrates beating the all-time best; a plain completed run gets
-  // the finish resolve.
+  // celebrates a genuine new record (explicit flag — quantized lap
+  // times make ties reachable); a plain completed run gets the finish
+  // resolve.
   if (forfeited) {
     audio.finishStinger('dnf')
   } else if (timeTrialMode) {
-    const newBest =
-      bestLapThisRace !== null && (bestLapAllTime === null || bestLapThisRace <= bestLapAllTime)
-    audio.finishStinger(newBest ? 'win' : 'finish')
+    audio.finishStinger(newAllTimeBest ? 'win' : 'finish')
   } else if (creditedPosition === 1) {
     audio.finishStinger('win')
   } else if (creditedPosition !== null && creditedPosition <= 3) {

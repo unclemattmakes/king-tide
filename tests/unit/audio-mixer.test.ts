@@ -116,6 +116,7 @@ describe('setAudioBusVolume', () => {
 function stubAudioEngine(over: Partial<AudioEngine> = {}): AudioEngine {
   return {
     resume: async () => {},
+    isUnlocked: () => false,
     setMuted: () => {},
     isMuted: () => false,
     setBusVolume: () => {},

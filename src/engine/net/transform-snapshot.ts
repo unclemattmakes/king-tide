@@ -52,10 +52,13 @@
  *    extrapolate between snapshots without a first-difference compute.
  *
  * Version-skew story: the relay is a format-agnostic passthrough, so no
- * relay change is involved. A pre-0x03 client receiving a 0x03 frame drops
- * it with a one-line warn (room.ts's unknown-tag arm) rather than crashing;
- * a current client still decodes inbound 0x02 from a stale tab. The skew
- * window is one page reload wide — clients ship together in one bundle.
+ * relay change is involved, and the compat is ONE-directional. A current
+ * client still decodes inbound 0x02, so it sees a stale tab's bikes
+ * normally; the stale tab, running the old build, drops every 0x03 frame
+ * through its unknown-tag arm — the new peer's mirror stays frozen at
+ * spawn on the stale side until that tab reloads. Acceptable because the
+ * skew window is one page reload wide (clients ship together in one
+ * bundle) and the failure is visible + self-describing, not a crash.
  *
  * All multi-byte fields are little-endian. The `reserved` header bytes
  * write 0; decoders skip them without assertion for forwards compat. The
@@ -247,7 +250,12 @@ export function decodeTransformSnapshotFrom(
   const tick = view.getUint32(offset + 4, true)
 
   const recordBytes = legacy ? SNAPSHOT_BIKE_BYTES_V1 : SNAPSHOT_BIKE_BYTES
-  const bikeCount = (byteLength - SNAPSHOT_HEADER_BYTES) / recordBytes
+  // Floor: a truncated/garbled frame whose payload isn't a whole
+  // number of records must decode the complete records and drop the
+  // tail — a fractional count would run one extra iteration and read
+  // past `byteLength`, throwing a RangeError inside the socket's
+  // message handler.
+  const bikeCount = Math.floor((byteLength - SNAPSHOT_HEADER_BYTES) / recordBytes)
   const bikes: BikeSnapshotRecord[] = []
 
   let p = offset + SNAPSHOT_HEADER_BYTES

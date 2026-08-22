@@ -142,16 +142,38 @@ export async function bootPodiumMode(parent: HTMLElement): Promise<void> {
   let gamepad: MenuGamepad | null = null
   let disposeOverlayKeys: (() => void) | null = null
 
+  // Cup fanfare — once, when the reveal happens AND the context is
+  // genuinely running. The podium is a fresh navigation, so on the
+  // no-gesture auto-reveal path the context is still autoplay-
+  // suspended (or absent): firing then would either drop the cue or
+  // pile it up at a frozen clock and blast a garbled cluster on the
+  // next keypress. If the reveal beats the unlock, one-shot gesture
+  // listeners resume the context and play it at the first interaction
+  // with the standings card.
+  let fanfarePlayed = false
+  const tryFanfare = (): void => {
+    if (fanfarePlayed) return
+    const engine = getAudioEngine()
+    if (!engine?.isUnlocked()) return
+    fanfarePlayed = true
+    engine.cupFanfare()
+  }
+  const fanfareOnGesture = (): void => {
+    if (fanfarePlayed || !standingsShown) return
+    const engine = getAudioEngine()
+    if (!engine) return
+    void engine.resume().then(tryFanfare)
+  }
+  window.addEventListener('pointerdown', fanfareOnGesture)
+  window.addEventListener('keydown', fanfareOnGesture)
+
   const revealStandings = (): void => {
     if (standingsShown) return
     standingsShown = true
     window.removeEventListener('keydown', onSkipKey)
     canvas.removeEventListener('pointerdown', revealStandings)
     document.body.classList.add('podium-active')
-    // Cup fanfare under the card reveal — plays once the context is
-    // unlocked (the radio install on the podium path arms the unlock
-    // listeners; a skip click/keypress is itself the gesture).
-    getAudioEngine()?.cupFanfare()
+    tryFanfare()
     disposeOverlayKeys = showCupResultsOverlay({ progress, onBackToMenu: backToMenu })
     gamepad = installMenuGamepad({
       container: () => document.getElementById('cup-results'),

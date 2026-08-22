@@ -10,7 +10,12 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { DRIFT_BOOST_DURATION_T2, DRIFT_BOOST_MUL_T2 } from '../../src/game/systems/drift-tiers'
+import {
+  DRIFT_BOOST_DURATION_T2,
+  DRIFT_BOOST_DURATION_T3,
+  DRIFT_BOOST_MUL_T2,
+  DRIFT_BOOST_MUL_T3,
+} from '../../src/game/systems/drift-tiers'
 import {
   CLEAN_JUMP_BURST_MUL,
   CLEAN_JUMP_BURST_S,
@@ -152,11 +157,12 @@ describe('jump economy', () => {
 
   it('a perfect jump still costs a button press worth less than UMT — drift keeps corners', () => {
     // Anti-goal guard: the rebalance must not delete drift's identity.
-    // A single perfect jump stays below the free UMT slingshot
-    // (1.95×/2.3 s); wave tracks out-earn via repetition, not one hit.
-    const umtGain = (1.95 - 1) * 2.3
-    const DEFAULT_BOOST_MUL = 1.6
-    const METER_DRAIN_PER_SEC = 1 / 3
+    // A single perfect jump stays below the free UMT slingshot; wave
+    // tracks out-earn via repetition, not one hit. Imported constants,
+    // not literals — a UMT retune must keep this guard honest.
+    const umtGain = (DRIFT_BOOST_MUL_T3 - 1) * DRIFT_BOOST_DURATION_T3
+    const DEFAULT_BOOST_MUL = 1.6 // bikes/variants.ts default stats.boostMul
+    const METER_DRAIN_PER_SEC = 1 / 3 // boost-meter.ts DRAIN_PER_SEC
     const perfectCharge = JUMP_REWARD_FLOOR + JUMP_REWARD_SCALE
     const meterGain = (perfectCharge / METER_DRAIN_PER_SEC) * (DEFAULT_BOOST_MUL - 1)
     expect(meterGain).toBeLessThan(umtGain)

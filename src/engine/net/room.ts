@@ -205,6 +205,8 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
   // onDisconnected for a teardown the caller initiated).
   let explicitClose = false
   let snapshotsReceived = 0
+  // Tags we've already warned about on the unknown-binary-tag arm.
+  const warnedUnknownTags = new Set<number>()
   const remotePeers = new Set<number>()
   // Tenure protocol — relay-stamped join sequences (see protocol.ts).
   // Empty / undefined against an old relay; election falls back to slot
@@ -467,9 +469,18 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
         }
         return
       }
-      // Unknown tag — log once at console level and drop. Don't crash the
-      // socket on a forwards-compat message we don't recognise.
-      console.warn(`[net] unknown binary tag 0x${tag.toString(16)} (${data.byteLength}B), dropping`)
+      // Unknown tag — warn once PER TAG and drop. Don't crash the
+      // socket on a forwards-compat message we don't recognise, and
+      // don't let a newer peer's 20 Hz stream turn the console into a
+      // firehose (the pre-latch version warned on every frame).
+      if (!warnedUnknownTags.has(tag)) {
+        warnedUnknownTags.add(tag)
+        console.warn(
+          `[net] unknown binary tag 0x${tag.toString(16)} (${data.byteLength}B), dropping ` +
+            `(further frames with this tag are dropped silently — a newer client version ` +
+            `in the room? reload to update)`,
+        )
+      }
     }
   })
 

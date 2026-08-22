@@ -16,6 +16,7 @@ import {
   RBHandleStore,
 } from '@/game/components'
 import { AIController, AIControllerStore, AITag } from '@/game/components/ai'
+import { StunStore } from '@/game/components/combat'
 import { pitchAngleFromQuat, TAKEOFF_IDEAL_PITCH_RAD } from '@/game/systems/launch-grade'
 import {
   curvatureAheadLooped,
@@ -102,6 +103,13 @@ export const AI_LANDING_DAMP_RATIO = 0.35
  *  0.45) and leaves the first ticks of a pop to the takeoff burst. */
 export const AI_LANDING_PREP_MIN_AIR_S = 0.25
 
+/** How often (s of airtime) the landing controller resamples the
+ *  surface tangent under the bike. The target attitude drifts far
+ *  slower than 60 Hz, and `sampleSurface` is the sim's most expensive
+ *  sample — the PD itself still runs every tick against the cached
+ *  target. */
+export const AI_LANDING_TARGET_REFRESH_S = 0.25
+
 /**
  * Airborne pitch-to-tangent landing controller — the AI half of
  * "pitch the landing". Returns the `intent.pitch` command in [-1, 1].
@@ -111,19 +119,24 @@ export const AI_LANDING_PREP_MIN_AIR_S = 0.25
  * (drives the angle DOWN). So the corrective input is positive —
  * nose-up — while the nose sits below the target attitude
  * (`pitchAngle - targetPitch > 0`), and the rate term damps toward it.
+ *
+ * Positional scalars on purpose — this runs per airborne AI per 60 Hz
+ * tick, and a named-args object would be a per-call allocation in the
+ * sim loop.
+ *
+ * @param pitchAngle Current pitch (rad), `asin(-fwd.y)` — positive = nose down.
+ * @param pitchRate d(pitchAngle)/dt ≈ angvel · rightAxis (rad/s).
+ * @param targetPitch `-atan(landingForwardSlope)` — the exact pitch
+ *   `gradeLanding` scores as a perfect slope-match.
+ * @param gain Proportional gain (`AIController.landingPitchGain`).
  */
-export function decideAILandingPitch(i: {
-  /** Current pitch angle (rad), `asin(-fwd.y)` — positive = nose down. */
-  pitchAngle: number
-  /** d(pitchAngle)/dt ≈ angvel · rightAxis (rad/s). */
-  pitchRate: number
-  /** Target attitude: `-atan(landingForwardSlope)` — the exact pitch
-   *  `gradeLanding` scores as a perfect slope-match. */
-  targetPitch: number
-  /** Proportional gain (`AIController.landingPitchGain`). */
-  gain: number
-}): number {
-  const u = i.gain * (i.pitchAngle - i.targetPitch) + i.gain * AI_LANDING_DAMP_RATIO * i.pitchRate
+export function decideAILandingPitch(
+  pitchAngle: number,
+  pitchRate: number,
+  targetPitch: number,
+  gain: number,
+): number {
+  const u = gain * (pitchAngle - targetPitch) + gain * AI_LANDING_DAMP_RATIO * pitchRate
   return Math.max(-1, Math.min(1, u))
 }
 
@@ -136,6 +149,12 @@ export type AIVentSignals = {
   grounded: boolean
   /** AI drift state machine currently holding a drift. */
   drifting: boolean
+  /** Bike currently in a stun spinout (combat hit). The shared
+   *  stun override zeroes throttle/steer but deliberately leaves the
+   *  boost button alone (a player choice); the AI has no such choice
+   *  to respect, and holding the vent through a spinout would drain
+   *  the earned meter at zero speed. */
+  stunned: boolean
   /** Averaged curvature (1/m) over the lookahead scan. */
   curvatureAhead: number
 }
@@ -156,7 +175,7 @@ export function decideAIVent(
   s: AIVentSignals,
 ): boolean {
   if (tuning.ventChargeMin === Number.POSITIVE_INFINITY) return false
-  if (!s.grounded || s.drifting) return false
+  if (!s.grounded || s.drifting || s.stunned) return false
   if (s.curvatureAhead >= tuning.driftCurvatureThreshold) return false
   if (s.meterActive) return s.charge > 0
   return s.charge >= tuning.ventChargeMin
@@ -444,32 +463,46 @@ export function aiControlSystem(
     // drive `intent.pitch` toward the local surface tangent, the exact
     // attitude `gradeLanding` scores — Standard/Hard rivals visibly
     // stomp landings and earn the same jump payout the player does.
-    // The one sampleSurface call also yields the normal, so the slope
-    // under the bike costs nothing extra.
+    //
+    // Cost control: `sampleSurface` is the heaviest sim sample in the
+    // game (full Gerstner stack), so the TARGET attitude is resampled
+    // on a coarse cadence (`AI_LANDING_TARGET_REFRESH_S` buckets of
+    // airtime — deterministic, since airborneSec accumulates fixed dt)
+    // and cached on the controller; the cheap PD against the cached
+    // target still runs every tick. The one sample also yields the
+    // normal, so the slope costs nothing extra when it does run.
     const hover = HoverStateStore.get(eid)
     const airborne = hover ? !hover.isGrounded : false
+    let nextLandingTargetPitch = ai.landingTargetPitch
+    let nextLandingTargetBucket = airborne ? ai.landingTargetBucket : -1
     if (airborne && ai.landingPitchGain > 0) {
       const airborneSec = LaunchGradeStore.get(eid)?.airborneSec ?? 0
       if (airborneSec >= AI_LANDING_PREP_MIN_AIR_S) {
-        const fwdLen = Math.hypot(fwd.x, fwd.z)
-        let targetPitch = 0
-        if (fwdLen > 0.01) {
-          const hx = fwd.x / fwdLen
-          const hz = fwd.z / fwdLen
-          // Height gradient from the surface normal: ∂y/∂x = -nx/ny,
-          // ∂y/∂z = -nz/ny; forward slope = gradient · heading.
-          const s = sampleSurface(waveField, t.x, t.z)
-          if (s.ny > 0.2) {
-            const slope = -(s.nx * hx + s.nz * hz) / s.ny
-            targetPitch = -Math.atan(slope)
+        const bucket = Math.floor(
+          (airborneSec - AI_LANDING_PREP_MIN_AIR_S) / AI_LANDING_TARGET_REFRESH_S,
+        )
+        if (bucket !== ai.landingTargetBucket) {
+          nextLandingTargetBucket = bucket
+          nextLandingTargetPitch = 0
+          const fwdLen = Math.hypot(fwd.x, fwd.z)
+          if (fwdLen > 0.01) {
+            const hx = fwd.x / fwdLen
+            const hz = fwd.z / fwdLen
+            // Height gradient from the surface normal: ∂y/∂x = -nx/ny,
+            // ∂y/∂z = -nz/ny; forward slope = gradient · heading.
+            const s = sampleSurface(waveField, t.x, t.z)
+            if (s.ny > 0.2) {
+              const slope = -(s.nx * hx + s.nz * hz) / s.ny
+              nextLandingTargetPitch = -Math.atan(slope)
+            }
           }
         }
-        pumpPitch = decideAILandingPitch({
-          pitchAngle: pitchAngleFromQuat(q),
-          pitchRate: angvel.x * right.x + angvel.y * right.y + angvel.z * right.z,
-          targetPitch,
-          gain: ai.landingPitchGain,
-        })
+        pumpPitch = decideAILandingPitch(
+          pitchAngleFromQuat(q),
+          angvel.x * right.x + angvel.y * right.y + angvel.z * right.z,
+          nextLandingTargetPitch,
+          ai.landingPitchGain,
+        )
       }
     }
 
@@ -481,22 +514,32 @@ export function aiControlSystem(
     // on straights via the pure `decideAIVent` helper. Rising edge on
     // the meter comes free: holding `boost` across ticks presents one
     // fresh press to boostMeterSystem's edge detector when this flips.
-    const meter = BoostMeterStore.get(eid)
-    const vent = meter
-      ? decideAIVent(ai, {
+    // The Infinity short-circuit runs BEFORE the store reads + signal
+    // object so Casual pays ~one branch per tick (the same pattern as
+    // `pumpVyThreshold`), and a stunned AI banks its charge instead of
+    // venting into a forced-zero throttle.
+    let vent = false
+    if (ai.ventChargeMin !== Number.POSITIVE_INFINITY) {
+      const meter = BoostMeterStore.get(eid)
+      if (meter) {
+        vent = decideAIVent(ai, {
           charge: meter.charge,
           meterActive: meter.active,
           grounded: !airborne,
           drifting: drift.driftDir !== 0,
+          stunned: StunStore.get(eid) !== undefined,
           curvatureAhead: curvature,
         })
-      : false
+      }
+    }
 
     AIControllerStore.set(eid, {
       ...ai,
       lastClosestIndex: bestIdx,
       pumpHoldS: nextPumpHoldS,
       pumpCooldownS: nextPumpCooldownS,
+      landingTargetPitch: nextLandingTargetPitch,
+      landingTargetBucket: nextLandingTargetBucket,
       driftDir: drift.driftDir,
       driftHoldS: drift.driftHoldS,
       driftCooldownS: drift.driftCooldownS,

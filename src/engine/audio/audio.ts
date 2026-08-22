@@ -51,9 +51,16 @@ export type AudioBus = 'master' | 'music' | 'sfx' | 'ambient'
  *  listener, full volume, centered (the pre-spatial behavior). */
 export type SpatialCue = { gain: number; pan: number }
 
-/** Reference distance (m) at which a spatial one-shot has dropped to
- *  half volume: gain = 1 / (1 + d/REF). At 300 m an AI mine is a
- *  distant ~12% thump instead of a full-volume bang. */
+/** Within this distance (m) of the listener a one-shot plays at full
+ *  volume. The listener is the CHASE CAMERA, which trails the player's
+ *  bike by ~4-12 m — without the plateau, the player's own ordnance
+ *  (and a mine at their wheel) would be quietly attenuated by their
+ *  own camera rig. */
+export const SPATIAL_NEAR_FULL_M = 12
+
+/** Falloff scale (m) past the near-field: gain halves REF meters
+ *  beyond `SPATIAL_NEAR_FULL_M`. At 300 m an AI mine is a distant
+ *  ~12% thump instead of a full-volume bang. */
 export const SPATIAL_REF_DISTANCE_M = 40
 
 /** Pan authority — full hard-pan sounds broken on headphones, so the
@@ -76,7 +83,7 @@ export function spatialCueFor(
   const dy = emitter.y - listener.y
   const dz = emitter.z - listener.z
   const dist = Math.hypot(dx, dy, dz)
-  const gain = 1 / (1 + dist / refDistance)
+  const gain = 1 / (1 + Math.max(0, dist - SPATIAL_NEAR_FULL_M) / refDistance)
   if (dist < 0.001) return { gain: 1, pan: 0 }
   const lateral = (dx * listenerRight.x + dy * listenerRight.y + dz * listenerRight.z) / dist
   const pan = Math.max(-1, Math.min(1, lateral)) * SPATIAL_PAN_MAX
@@ -84,13 +91,22 @@ export function spatialCueFor(
 }
 
 /** One rival engine voice's per-frame drive values. `pitch01` is the
- *  rival's speed as a fraction of top speed. */
-export type RivalEngineDrive = { gain: number; pan: number; pitch01: number }
+ *  rival's speed as a fraction of top speed. `snap` marks a slot whose
+ *  occupant changed this frame: the voice re-seats at the new values
+ *  (quick fade-in from silence) instead of gliding one engine tone
+ *  between two unrelated bikes' pan/pitch. */
+export type RivalEngineDrive = { gain: number; pan: number; pitch01: number; snap?: boolean }
 
 export interface AudioEngine {
   /** Resume the AudioContext, creating it on first call. Call from a
    *  user-gesture listener. Safe to call repeatedly. */
   resume(): Promise<void>
+  /** True once the AudioContext exists AND is actually running —
+   *  autoplay policy can leave a freshly-created context `suspended`
+   *  until a gesture, and one-shots scheduled against a suspended
+   *  context pile up at a frozen clock and play as a garbled cluster
+   *  whenever it later resumes. Gate ceremony cues on this. */
+  isUnlocked(): boolean
   setMuted(muted: boolean): void
   isMuted(): boolean
   /** Set a per-bus linear volume ∈ [0,1]. The bus stays at this value
@@ -200,10 +216,19 @@ const BUS_HEADROOM: Readonly<Record<AudioBus, number>> = Object.freeze({
 
 const TOP_SPEED_FOR_AUDIO = 28 // matches BikeStats.topSpeed roughly
 
-/** Rival engine voices in the pool (nearest-N opponents get one each). */
-const RIVAL_ENGINE_VOICES = 2
+/** Rival engine voices in the pool (nearest-N opponents get one each).
+ *  Exported so the game-loop's slot pool sizes itself from the same
+ *  number — bumping the pool here grows both sides together. */
+export const RIVAL_ENGINE_VOICES = 2
 
-type RivalVoice = { osc: OscillatorNode; panner: StereoPannerNode; gain: GainNode }
+type RivalVoice = {
+  osc: OscillatorNode
+  panner: StereoPannerNode
+  gain: GainNode
+  /** True once silence has been commanded — skips re-scheduling zero
+   *  every frame in rival-less modes. */
+  silenced: boolean
+}
 
 export function createAudioEngine(): AudioEngine {
   let ctx: AudioContext | null = null
@@ -214,6 +239,10 @@ export function createAudioEngine(): AudioEngine {
   let muted = false
   let musicEnabled = true
   const rivalVoices: RivalVoice[] = []
+  // Active music-duck bookkeeping for the keep-the-deeper rule in
+  // duckMusicInternal.
+  let activeDuckAmount = 0
+  let activeDuckUntil = 0
 
   // Music bed nodes — held so setMusicEnabled can stop/restart them and
   // so a future licensed-music swap can disconnect just these.
@@ -354,7 +383,7 @@ export function createAudioEngine(): AudioEngine {
       panner.connect(gain)
       gain.connect(sfxBus)
       osc.start()
-      rivalVoices.push({ osc, panner, gain })
+      rivalVoices.push({ osc, panner, gain, silenced: true })
     }
 
     // Wind: looping white-noise buffer through a bandpass — opens up
@@ -451,12 +480,23 @@ export function createAudioEngine(): AudioEngine {
   function duckMusicInternal(amount: number, recoverSeconds: number): void {
     if (!ctx || !musicBus) return
     const now = ctx.currentTime
+    // Keep-the-deeper rule: this used to be last-caller-wins
+    // (cancel + ramp to the new target), which let a DISTANT
+    // explosion's shallow spatial duck cancel a near one's deep duck
+    // and audibly pop the music back up while the player's own boom
+    // was still ringing. A shallower duck arriving while a deeper one
+    // is still active is ignored; a deeper (or later-recovering-equal)
+    // one takes over.
+    const clamped = Math.max(0, Math.min(1, amount))
+    if (now < activeDuckUntil && clamped < activeDuckAmount) return
+    activeDuckAmount = clamped
+    activeDuckUntil = now + 0.04 + Math.max(0.05, recoverSeconds)
     const base = busLevel('music')
-    const ducked = base * Math.max(0, 1 - Math.max(0, Math.min(1, amount)))
+    const ducked = base * (1 - clamped)
     musicBus.gain.cancelScheduledValues(now)
     musicBus.gain.setValueAtTime(musicBus.gain.value, now)
     musicBus.gain.linearRampToValueAtTime(ducked, now + 0.04)
-    musicBus.gain.linearRampToValueAtTime(base, now + 0.04 + Math.max(0.05, recoverSeconds))
+    musicBus.gain.linearRampToValueAtTime(base, activeDuckUntil)
   }
 
   /** Resolve the per-track pump-duck multiplier. Defaults to 1.0
@@ -609,6 +649,10 @@ export function createAudioEngine(): AudioEngine {
   }
 
   return {
+    isUnlocked() {
+      return ctx !== null && ctx.state === 'running'
+    },
+
     async resume() {
       const c = ensureContext()
       if (c && c.state === 'suspended') {
@@ -825,14 +869,34 @@ export function createAudioEngine(): AudioEngine {
       for (let i = 0; i < rivalVoices.length; i++) {
         const voice = rivalVoices[i]!
         const drive = rivals[i]
-        if (drive) {
-          const level = Math.max(0, Math.min(1, drive.gain)) * 0.045
+        const level = drive ? Math.max(0, Math.min(1, drive.gain)) * 0.045 : 0
+        if (level <= 0) {
+          // Command silence once, then stop scheduling — solo modes
+          // shouldn't insert automation events every frame forever.
+          if (!voice.silenced) {
+            voice.gain.gain.setTargetAtTime(0, now, 0.08)
+            voice.silenced = true
+          }
+          continue
+        }
+        voice.silenced = false
+        const pan = Math.max(-1, Math.min(1, drive!.pan))
+        const freq = 55 + 150 * Math.max(0, Math.min(1, drive!.pitch01))
+        if (drive!.snap) {
+          // Slot changed hands: re-seat pan/pitch instantly and fade
+          // the level in from silence — never glide one engine tone
+          // between two different bikes.
+          voice.panner.pan.cancelScheduledValues(now)
+          voice.panner.pan.setValueAtTime(pan, now)
+          voice.osc.frequency.cancelScheduledValues(now)
+          voice.osc.frequency.setValueAtTime(freq, now)
+          voice.gain.gain.cancelScheduledValues(now)
+          voice.gain.gain.setValueAtTime(0, now)
           voice.gain.gain.setTargetAtTime(level, now, 0.08)
-          voice.panner.pan.setTargetAtTime(Math.max(-1, Math.min(1, drive.pan)), now, 0.08)
-          const pitch01 = Math.max(0, Math.min(1, drive.pitch01))
-          voice.osc.frequency.setTargetAtTime(55 + 150 * pitch01, now, 0.08)
         } else {
-          voice.gain.gain.setTargetAtTime(0, now, 0.08)
+          voice.gain.gain.setTargetAtTime(level, now, 0.08)
+          voice.panner.pan.setTargetAtTime(pan, now, 0.08)
+          voice.osc.frequency.setTargetAtTime(freq, now, 0.08)
         }
       }
     },
@@ -917,6 +981,11 @@ export function createAudioEngine(): AudioEngine {
       const c = ctx
       const dest = sfxBus
       if (!c || !dest) return
+      // The podium is a fresh navigation, so this can be called with a
+      // context that exists but is still autoplay-suspended — cues
+      // scheduled then would pile up at the frozen clock and blast as
+      // a cluster on the next gesture. The caller retries on unlock.
+      if (c.state !== 'running') return
       const now = c.currentTime
       // Podium ceremony — the biggest structure cue in the game: full
       // ascending run into a held C-major triad with a sparkle top.
@@ -957,7 +1026,11 @@ export function createAudioEngine(): AudioEngine {
       filt.connect(g)
       g.connect(dest)
       startNoise(noise, now, 0.28)
-      duckMusicInternal(0.3, 0.4)
+      // Honor the same per-track duck knob the wavePump chord used at
+      // these call sites — `music3dEffects.duckOnPump` opted a track's
+      // music out of pump-channel ducking, and boost vents/pads were
+      // half of that channel.
+      duckMusicInternal(0.3 * trackDuckMultiplier(), 0.4)
     },
 
     wavePump(strength, perfect = false) {

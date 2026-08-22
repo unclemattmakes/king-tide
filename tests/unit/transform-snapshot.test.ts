@@ -224,6 +224,42 @@ describe('TransformSnapshot codec', () => {
     expect(norm).toBeCloseTo(1, 5)
   })
 
+  it('decodes only the complete records of a truncated frame', () => {
+    // A tag-valid frame whose payload isn't a whole number of records
+    // (truncation, garbling) must not run a fractional extra loop
+    // iteration and read past the buffer — that RangeError would land
+    // inside the socket's message handler.
+    const snap: TransformSnapshot = {
+      senderPeerId: 1,
+      tick: 5,
+      bikes: [
+        {
+          ownerPeerId: 1,
+          bikeKind: 0,
+          bikeIndex: 0,
+          flags: 0,
+          position: { x: 5, y: 1, z: -5 },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+          velocity: { x: 0, y: 0, z: 0 },
+        },
+        {
+          ownerPeerId: 1,
+          bikeKind: 1,
+          bikeIndex: 0,
+          flags: 0,
+          position: { x: 9, y: 1, z: -9 },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+          velocity: { x: 0, y: 0, z: 0 },
+        },
+      ],
+    }
+    const full = encodeTransformSnapshot(snap)
+    const truncated = full.subarray(0, full.byteLength - 7) // cut into record 2
+    const decoded = decodeTransformSnapshot(truncated)
+    expect(decoded.bikes).toHaveLength(1)
+    expect(decoded.bikes[0]!.position.x).toBeCloseTo(5, 2)
+  })
+
   it('throws a clear error when the tag byte is wrong', () => {
     const snap: TransformSnapshot = {
       senderPeerId: 0,

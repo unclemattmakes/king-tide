@@ -64,6 +64,13 @@ export type AIControllerData = {
    *  difficulty tuning at spawn. `0` = disabled (Casual). See
    *  `DifficultyTuning.landingPitchGain`. */
   landingPitchGain: number
+  /** Cached landing-target attitude (rad) for the current airtime —
+   *  `sampleSurface` is resampled on a coarse deterministic cadence
+   *  (see `AI_LANDING_TARGET_REFRESH_S`), not per tick. */
+  landingTargetPitch: number
+  /** Which refresh bucket `landingTargetPitch` was sampled in; `-1`
+   *  while grounded so every fresh jump resamples immediately. */
+  landingTargetBucket: number
   /** Meter charge at which the AI vents boost on a straight, baked
    *  from difficulty tuning at spawn. `Infinity` = never (Casual).
    *  See `DifficultyTuning.ventChargeMin`. */
@@ -122,6 +129,8 @@ export function defaultAIController(
     pumpCooldownS: 0,
     pumpHoldS: 0,
     landingPitchGain: tuning.landingPitchGain,
+    landingTargetPitch: 0,
+    landingTargetBucket: -1,
     ventChargeMin: tuning.ventChargeMin,
     driftCurvatureThreshold: tuning.driftCurvatureThreshold,
     driftMinSpeed: tuning.driftMinSpeed,

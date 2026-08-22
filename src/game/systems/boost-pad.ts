@@ -1,9 +1,9 @@
-import { addComponent, query } from 'bitecs'
+import { query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import { quatRotate, type Vec3 } from '@/engine/sim/physics/vec'
 import { BikeTag, RBHandle, RBHandleStore } from '@/game/components'
-import { BoostEffect, BoostEffectStore } from '@/game/components/pickup'
+import { mergeBoostEffect } from '@/game/systems/boost-effect'
 import type { BoostPad, Track } from '@/game/tracks/types'
 
 /**
@@ -56,13 +56,7 @@ export function boostPadSystem(sim: SimWorld, phys: PhysicsWorld, track: Track):
 
     for (const pad of track.boostPads) {
       if (!isOverBoostPad(t, pad)) continue
-      if (!BoostEffectStore.has(bEid)) addComponent(sim, bEid, BoostEffect)
-      const current = BoostEffectStore.get(bEid)
-      const useMultiplier =
-        current && current.remaining > 0 ? Math.max(current.multiplier, pad.strength) : pad.strength
-      const useRemaining =
-        current && current.remaining > PAD_BOOST_REFRESH ? current.remaining : PAD_BOOST_REFRESH
-      BoostEffectStore.set(bEid, { remaining: useRemaining, multiplier: useMultiplier })
+      mergeBoostEffect(sim, bEid, pad.strength, PAD_BOOST_REFRESH)
       break
     }
   }

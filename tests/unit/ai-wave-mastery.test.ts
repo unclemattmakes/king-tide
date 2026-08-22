@@ -23,35 +23,28 @@ import {
 import { MIN_AIRTIME_SEC } from '../../src/game/systems/launch-grade'
 
 describe('decideAILandingPitch', () => {
+  // Args: (pitchAngle, pitchRate, targetPitch, gain) — positional
+  // scalars because this runs per airborne AI per sim tick.
   it('commands nose-up when the nose hangs below the target attitude', () => {
     // Nose-down 0.3 rad over flat water (target 0): positive error →
     // positive (nose-up) input.
-    const u = decideAILandingPitch({ pitchAngle: 0.3, pitchRate: 0, targetPitch: 0, gain: 3 })
-    expect(u).toBeGreaterThan(0)
+    expect(decideAILandingPitch(0.3, 0, 0, 3)).toBeGreaterThan(0)
   })
 
   it('commands nose-down when over-rotated past the target', () => {
-    const u = decideAILandingPitch({ pitchAngle: -0.4, pitchRate: 0, targetPitch: 0, gain: 3 })
-    expect(u).toBeLessThan(0)
+    expect(decideAILandingPitch(-0.4, 0, 0, 3)).toBeLessThan(0)
   })
 
   it('is quiet at the target with no rotation — a matched landing needs no input', () => {
-    expect(
-      decideAILandingPitch({ pitchAngle: -0.2, pitchRate: 0, targetPitch: -0.2, gain: 3 }),
-    ).toBe(0)
+    expect(decideAILandingPitch(-0.2, 0, -0.2, 3)).toBe(0)
   })
 
   it('damps an approach: rotation toward the target reduces the command', () => {
     // Same error, but the nose is already rotating up (rate < 0 in the
     // angle convention): the D term must shrink the nose-up command so
     // the controller settles instead of oscillating.
-    const still = decideAILandingPitch({ pitchAngle: 0.3, pitchRate: 0, targetPitch: 0, gain: 3 })
-    const rotating = decideAILandingPitch({
-      pitchAngle: 0.3,
-      pitchRate: -1.5,
-      targetPitch: 0,
-      gain: 3,
-    })
+    const still = decideAILandingPitch(0.3, 0, 0, 3)
+    const rotating = decideAILandingPitch(0.3, -1.5, 0, 3)
     expect(rotating).toBeLessThan(still)
   })
 
@@ -60,17 +53,12 @@ describe('decideAILandingPitch', () => {
     // (nose down, matching the water). Level bike must be pushed
     // nose-DOWN toward it.
     const target = -Math.atan(-0.35)
-    const u = decideAILandingPitch({ pitchAngle: 0, pitchRate: 0, targetPitch: target, gain: 3 })
-    expect(u).toBeLessThan(0)
+    expect(decideAILandingPitch(0, 0, target, 3)).toBeLessThan(0)
   })
 
   it('clamps to the intent range', () => {
-    expect(
-      decideAILandingPitch({ pitchAngle: 1.2, pitchRate: 0, targetPitch: -0.3, gain: 10 }),
-    ).toBe(1)
-    expect(
-      decideAILandingPitch({ pitchAngle: -1.2, pitchRate: 0, targetPitch: 0.3, gain: 10 }),
-    ).toBe(-1)
+    expect(decideAILandingPitch(1.2, 0, -0.3, 10)).toBe(1)
+    expect(decideAILandingPitch(-1.2, 0, 0.3, 10)).toBe(-1)
   })
 
   it('damp ratio keeps a single tuning knob per difficulty', () => {
@@ -92,6 +80,7 @@ describe('decideAIVent', () => {
     meterActive: false,
     grounded: true,
     drifting: false,
+    stunned: false,
     curvatureAhead: 0,
   }
 
@@ -113,9 +102,14 @@ describe('decideAIVent', () => {
     expect(decideAIVent(standard, { ...base, charge: 0, meterActive: true })).toBe(false)
   })
 
-  it('suppresses venting airborne, mid-drift, and into a drift-worthy corner', () => {
+  it('suppresses venting airborne, mid-drift, stunned, and into a drift-worthy corner', () => {
     expect(decideAIVent(standard, { ...base, grounded: false })).toBe(false)
     expect(decideAIVent(standard, { ...base, drifting: true })).toBe(false)
+    // Stunned: the shared stun override zeroes throttle but leaves the
+    // boost button alone, so without this gate a stunned AI would
+    // drain its earned meter into a spinout at zero speed.
+    expect(decideAIVent(standard, { ...base, stunned: true })).toBe(false)
+    expect(decideAIVent(standard, { ...base, stunned: true, meterActive: true })).toBe(false)
     expect(
       decideAIVent(standard, { ...base, curvatureAhead: standard.driftCurvatureThreshold }),
     ).toBe(false)

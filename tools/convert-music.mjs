@@ -251,8 +251,17 @@ for (const file of mp3s) {
   const outPath = join(outDir, outName)
   srcTotal += statSync(inPath).size
 
+  // Freshness includes THIS SCRIPT's mtime: an output older than the
+  // pipeline that produces it is stale even when it post-dates its
+  // source mp3. Without this, a clone that converted before a pipeline
+  // change (e.g. the loudnorm addition) reports every track "(up to
+  // date)" forever, and a later partial run ships a mixed-processing
+  // set while the logs claim uniformity.
+  const pipelineMtime = statSync(fileURLToPath(import.meta.url)).mtimeMs
   const fresh =
-    !force && existsSync(outPath) && statSync(outPath).mtimeMs >= statSync(inPath).mtimeMs
+    !force &&
+    existsSync(outPath) &&
+    statSync(outPath).mtimeMs >= Math.max(statSync(inPath).mtimeMs, pipelineMtime)
   if (fresh) {
     outTotal += statSync(outPath).size
     console.log(`  • ${outName}  (up to date)`)
@@ -270,14 +279,34 @@ for (const file of mp3s) {
       { stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' },
     )
     let loudnormFilter = LOUDNORM_TARGET
+    let loudnormMode = 'single-pass dynamic'
     const measured = parseLoudnormJson(measure.stderr ?? '')
-    if (measure.status === 0 && measured) {
+    // Guard the measured values: silent/near-silent sources measure
+    // "-inf", which ffmpeg rejects as a measured_I (range −99..0) and
+    // would hard-fail pass 2 on input the plain transcode handled fine.
+    // Non-finite (or missing) measurements fall back to single-pass
+    // dynamic mode — still normalized, different algorithm, and the
+    // log says so instead of claiming two-pass uniformity.
+    const finite =
+      measured &&
+      [
+        measured.input_i,
+        measured.input_tp,
+        measured.input_lra,
+        measured.input_thresh,
+        measured.target_offset,
+      ].every((v) => Number.isFinite(Number.parseFloat(v)))
+    if (measure.status === 0 && measured && finite) {
       loudnormFilter =
         `${LOUDNORM_TARGET}:measured_I=${measured.input_i}:measured_TP=${measured.input_tp}:` +
         `measured_LRA=${measured.input_lra}:measured_thresh=${measured.input_thresh}:` +
         `offset=${measured.target_offset}:linear=true`
+      loudnormMode = 'two-pass linear'
     } else {
-      console.warn(`  ! loudnorm measure pass failed for "${file}" — using single-pass mode`)
+      console.warn(
+        `  ! loudnorm measure pass ${measure.status === 0 ? 'returned unusable values' : 'failed'} ` +
+          `for "${file}" — using single-pass dynamic mode`,
+      )
     }
     const r = spawnSync(
       ffmpeg,
@@ -310,7 +339,7 @@ for (const file of mp3s) {
     }
     const outSize = statSync(outPath).size
     outTotal += outSize
-    console.log(`  ✓ ${outName}  (${fmtBytes(outSize)}, normalized to -14 LUFS)`)
+    console.log(`  ✓ ${outName}  (${fmtBytes(outSize)}, -14 LUFS ${loudnormMode})`)
   }
 
   const meta = credits[file]
