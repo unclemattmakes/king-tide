@@ -11,8 +11,18 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  DRIFT_BOOST_DURATION_T2,
+  DRIFT_BOOST_MUL_T2,
+} from '../../src/game/systems/drift-tiers'
+import {
+  CLEAN_JUMP_BURST_MUL,
+  CLEAN_JUMP_BURST_S,
   gradeLanding,
   gradeTakeoff,
+  JUMP_LANDING_WEIGHT,
+  JUMP_REWARD_FLOOR,
+  JUMP_REWARD_SCALE,
+  JUMP_TAKEOFF_WEIGHT,
   LANDING_ERR_MAX_RAD,
   pitchAngleFromQuat,
   TAKEOFF_IDEAL_PITCH_RAD,
@@ -42,7 +52,7 @@ describe('pitchAngleFromQuat', () => {
     expect(pitchAngleFromQuat({ x: 0, y: 0, z: 0, w: 1 })).toBeCloseTo(0, 10)
   })
 
-  it('recovers a pure pitch rotation (positive = nose up)', () => {
+  it('recovers a pure pitch rotation (positive = nose down: asin(-fwd.y))', () => {
     expect(pitchAngleFromQuat(pitchQuat(0.3))).toBeCloseTo(0.3, 6)
     expect(pitchAngleFromQuat(pitchQuat(-0.25))).toBeCloseTo(-0.25, 6)
   })
@@ -72,6 +82,22 @@ describe('gradeTakeoff', () => {
     expect(gradeTakeoff(0)).toBeLessThan(VERDICT_CLEAN_MIN)
     expect(gradeTakeoff(0)).toBeGreaterThan(0)
   })
+
+  it('rewards a nose-UP pop, not a dive — pinned through the quat path', () => {
+    // Physical anchor for the sign convention: the ideal pop is the
+    // nose pointing ABOVE the horizon at the lip. Build the ideal-pop
+    // quat, confirm its forward axis genuinely climbs (fwd.y > 0),
+    // and confirm it grades 1 while the same-magnitude dive grades 0.
+    // (The ideal shipped as +0.24 for a while, which graded a 14° dive
+    // as the perfect pop — this is the regression pin.)
+    const idealQuat = pitchQuat(TAKEOFF_IDEAL_PITCH_RAD)
+    // quatRotate(q, +Z), reduced for a pure-pitch quat: fwd.y = -sin(angle).
+    const fwdY = -Math.sin(TAKEOFF_IDEAL_PITCH_RAD)
+    expect(fwdY).toBeGreaterThan(0) // nose up = climbing forward axis
+    expect(gradeTakeoff(pitchAngleFromQuat(idealQuat))).toBeCloseTo(1, 10)
+    // Mirror-image dive (nose 14° below horizon) is fully outside the band.
+    expect(gradeTakeoff(pitchAngleFromQuat(pitchQuat(-TAKEOFF_IDEAL_PITCH_RAD)))).toBe(0)
+  })
 })
 
 describe('gradeLanding', () => {
@@ -97,5 +123,45 @@ describe('verdictFor', () => {
     expect(verdictFor(VERDICT_OK_MIN)).toBe('ok')
     expect(verdictFor(VERDICT_OK_MIN - 0.01)).toBe('sloppy')
     expect(verdictFor(0)).toBe('sloppy')
+  })
+})
+
+describe('jump economy', () => {
+  it('blend weights are a landing-dominant convex combination', () => {
+    expect(JUMP_TAKEOFF_WEIGHT + JUMP_LANDING_WEIGHT).toBeCloseTo(1, 10)
+    expect(JUMP_LANDING_WEIGHT).toBeGreaterThan(JUMP_TAKEOFF_WEIGHT)
+    expect(JUMP_TAKEOFF_WEIGHT).toBeGreaterThan(0) // takeoff converts to reward
+  })
+
+  it('a perfect jump out-earns one SMT drift in gained speed-time', () => {
+    // The hero skill has to pay better than the sidekick
+    // (design-targets §2 / evaluation game-design #4). Compare in
+    // "multiplier-seconds above 1×":
+    //   SMT release: (1.75 - 1) × 1.6 s, automatic.
+    //   Perfect jump: full meter slice held at the default 1.6×
+    //   boostMul (drains at 1/3 charge per second — boost-meter.ts),
+    //   PLUS the clean-jump auto-vent burst.
+    const smtGain = (DRIFT_BOOST_MUL_T2 - 1) * DRIFT_BOOST_DURATION_T2
+    const DEFAULT_BOOST_MUL = 1.6 // bikes/variants.ts default stats.boostMul
+    const METER_DRAIN_PER_SEC = 1 / 3 // boost-meter.ts DRAIN_PER_SEC
+    const perfectCharge = JUMP_REWARD_FLOOR + JUMP_REWARD_SCALE
+    const meterGain = (perfectCharge / METER_DRAIN_PER_SEC) * (DEFAULT_BOOST_MUL - 1)
+    const burstGain = (CLEAN_JUMP_BURST_MUL - 1) * CLEAN_JUMP_BURST_S
+    expect(meterGain + burstGain).toBeGreaterThan(smtGain)
+    // ...and the meter slice alone clears SMT, so the ranking holds
+    // even if the player banks the charge instead of venting it fresh.
+    expect(meterGain).toBeGreaterThan(smtGain)
+  })
+
+  it('a perfect jump still costs a button press worth less than UMT — drift keeps corners', () => {
+    // Anti-goal guard: the rebalance must not delete drift's identity.
+    // A single perfect jump stays below the free UMT slingshot
+    // (1.95×/2.3 s); wave tracks out-earn via repetition, not one hit.
+    const umtGain = (1.95 - 1) * 2.3
+    const DEFAULT_BOOST_MUL = 1.6
+    const METER_DRAIN_PER_SEC = 1 / 3
+    const perfectCharge = JUMP_REWARD_FLOOR + JUMP_REWARD_SCALE
+    const meterGain = (perfectCharge / METER_DRAIN_PER_SEC) * (DEFAULT_BOOST_MUL - 1)
+    expect(meterGain).toBeLessThan(umtGain)
   })
 })

@@ -14,21 +14,24 @@
  *     "pitch the takeoff")
  *   - airborne → grounded edge (after a credible airtime): grade the
  *     LANDING — does the bike's pitch match the surface tangent it
- *     lands on? (motocross "match the slope") — and pay a boost-meter
- *     reward scaled by landing quality.
+ *     lands on? (motocross "match the slope") — then fold the stored
+ *     takeoff grade into a combined JUMP score that pays the
+ *     boost-meter, and auto-vent a short `BoostEffect` burst on a
+ *     clean jump so the reward lands without an extra button press.
  *
  * Verdicts surface render-side as a two-word chyron
  * (launch-grade-hud.ts) and feed the tutorial's LAUNCH / LAND beats.
+ * The landing edge fires the *combined* jump quality — chyron, audio,
+ * tutorial, and payout all read the same number.
  *
  * Sim-side + deterministic: pure math over rigid-body pose and
  * HoverState, one-shot edge flags consumed by the render frame (same
  * pattern as TrickState.trickFiredThisTick / DriftState.releasedThisTick).
  * Applies to every racer (player + AI) so lockstep multiplayer and
- * replays stay consistent; magnitudes are small enough not to reshape
- * AI balance (a clean landing ≈ one trick's worth of meter).
+ * replays stay consistent.
  */
 
-import { query } from 'bitecs'
+import { addComponent, query } from 'bitecs'
 import type { SimWorld } from '@/engine/sim/ecs/world'
 import type { PhysicsWorld } from '@/engine/sim/physics/rapier'
 import {
@@ -39,6 +42,7 @@ import {
   RBHandle,
   RBHandleStore,
 } from '@/game/components'
+import { BoostEffect, BoostEffectStore } from '@/game/components/pickup'
 import { Racer } from '@/game/components/race'
 import { chargeBoostMeter } from './boost-meter'
 
@@ -56,9 +60,15 @@ export const MIN_AIRTIME_SEC = 0.45
  *  those); this only stops takeoff chyron spam over chop. */
 export const MIN_TAKEOFF_VY = 2.0
 
-/** Ideal nose-up pitch (rad) at the takeoff edge — the middle of the
- *  motocross pop band (~14°). */
-export const TAKEOFF_IDEAL_PITCH_RAD = 0.24
+/** Ideal takeoff pitch (rad) at the grounded→airborne edge — the middle
+ *  of the motocross pop band, 14° NOSE UP. In this codebase's pitch
+ *  convention (`pitchAngle = asin(-fwd.y)`, see `pitchAngleFromQuat`)
+ *  nose-up is NEGATIVE, hence the sign: a bike whose forward axis
+ *  points above the horizon has `fwd.y > 0` and therefore a negative
+ *  pitch angle. (This constant shipped as +0.24 for a while, which
+ *  graded a 14° *dive* off the lip as the ideal pop — masked because
+ *  the takeoff verdict was cosmetic-only at the time.) */
+export const TAKEOFF_IDEAL_PITCH_RAD = -0.24
 /** Tolerance (rad) around the ideal before takeoff quality hits 0. */
 export const TAKEOFF_PITCH_TOL_RAD = 0.3
 
@@ -66,12 +76,31 @@ export const TAKEOFF_PITCH_TOL_RAD = 0.3
  *  a few degrees of the surface tangent grades near 1. */
 export const LANDING_ERR_MAX_RAD = 0.4
 
-/** Boost-meter reward for a landing: floor + quality-scaled slice.
- *  A clean landing (~q=1) pays 0.5 — the same as one credible trick
- *  (game-loop charges 0.5 per trick) — so the two skill loops stay in
- *  the same economy. A cased landing still pays a taste. */
-export const LANDING_REWARD_FLOOR = 0.12
-export const LANDING_REWARD_SCALE = 0.38
+/** Combined jump score = landing-dominant blend of the two graded
+ *  edges, motocross-style: the landing is most of the jump, but a
+ *  shaped takeoff is a real slice of it — so the CLEAN LAUNCH verdict
+ *  finally converts to reward instead of being cosmetic. */
+export const JUMP_TAKEOFF_WEIGHT = 0.35
+export const JUMP_LANDING_WEIGHT = 1 - JUMP_TAKEOFF_WEIGHT
+
+/** Boost-meter reward for a jump: floor + jump-quality-scaled slice.
+ *  A perfect jump (shaped takeoff + stomped landing) pays 0.75 —
+ *  ~2.25 s of held boost at the default 1.6× `boostMul`, i.e. more
+ *  gained speed-time than one SMT drift release (1.75×/1.6 s). The
+ *  signature skill has to out-earn the sidekick (design-targets §2;
+ *  evaluation game-design #4) — before this, a *perfect* jump paid
+ *  0.5 meter vs. the free 1.95×/2.3 s UMT. A cased landing still pays
+ *  a taste. */
+export const JUMP_REWARD_FLOOR = 0.12
+export const JUMP_REWARD_SCALE = 0.63
+
+/** Clean jumps also auto-vent a short burst via the pad/pickup
+ *  `BoostEffect` channel, so the reward is *felt* at the landing
+ *  without spending the meter or needing the separate boost press.
+ *  Same merge semantics as a boost pad: never downgrades a stronger
+ *  active effect, never stacks durations. */
+export const CLEAN_JUMP_BURST_MUL = 1.5
+export const CLEAN_JUMP_BURST_S = 1.2
 
 /** Quality breakpoints for the 3-tier verdict. */
 export const VERDICT_CLEAN_MIN = 0.72
@@ -79,10 +108,11 @@ export const VERDICT_OK_MIN = 0.4
 
 // ── Pure helpers (unit-tested; shared with any HUD readout) ──────────
 
-/** Bike pitch angle (rad, positive = nose up) from a rigid-body
- *  quaternion. Same extraction as hover-attitude's grounded PD
- *  (applyGroundedPitchPD) so "level with the surface" means one thing
- *  everywhere: pitch = asin(-2*(qy*qz - qx*qw)). */
+/** Bike pitch angle (rad, positive = nose DOWN, negative = nose up:
+ *  pitch = asin(-fwd.y)) from a rigid-body quaternion. Same extraction
+ *  as hover-attitude's grounded PD (applyGroundedPitchPD) so "level
+ *  with the surface" means one thing everywhere:
+ *  pitch = asin(-2*(qy*qz - qx*qw)). */
 export function pitchAngleFromQuat(q: { x: number; y: number; z: number; w: number }): number {
   const r12 = 2 * (q.y * q.z - q.x * q.w)
   return Math.asin(Math.max(-1, Math.min(1, -r12)))
@@ -160,11 +190,29 @@ export function launchGradeSystem(sim: SimWorld, phys: PhysicsWorld): void {
       // HoverState.forwardSlope is the fresh landing-surface tangent
       // (it is zeroed while airborne — writeHoverState).
       const pitch = pitchAngleFromQuat(rb.rotation())
-      const quality = gradeLanding(pitch, hover.forwardSlope)
+      const landingQuality = gradeLanding(pitch, hover.forwardSlope)
+      // Combined jump score — the takeoff stored at this air's
+      // grounded→airborne edge folds into the payout so a shaped pop
+      // is worth real meter, not just a chyron.
+      const jumpQuality =
+        JUMP_LANDING_WEIGHT * landingQuality + JUMP_TAKEOFF_WEIGHT * g.takeoffQuality
       g.firedThisTick = true
       g.firedKind = 'landing'
-      g.firedQuality = quality
-      chargeBoostMeter(eid, LANDING_REWARD_FLOOR + quality * LANDING_REWARD_SCALE)
+      g.firedQuality = jumpQuality
+      chargeBoostMeter(eid, JUMP_REWARD_FLOOR + jumpQuality * JUMP_REWARD_SCALE)
+      if (jumpQuality >= VERDICT_CLEAN_MIN) {
+        // Clean jump → immediate felt burst (pad merge semantics:
+        // strongest multiplier wins, durations never stack).
+        if (!BoostEffectStore.has(eid)) addComponent(sim, eid, BoostEffect)
+        const current = BoostEffectStore.get(eid)
+        const useMultiplier =
+          current && current.remaining > 0
+            ? Math.max(current.multiplier, CLEAN_JUMP_BURST_MUL)
+            : CLEAN_JUMP_BURST_MUL
+        const useRemaining =
+          current && current.remaining > CLEAN_JUMP_BURST_S ? current.remaining : CLEAN_JUMP_BURST_S
+        BoostEffectStore.set(eid, { remaining: useRemaining, multiplier: useMultiplier })
+      }
       g.airborneSec = 0
     }
 
