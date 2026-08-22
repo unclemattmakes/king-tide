@@ -11,10 +11,14 @@
  *   - src/engine/leaderboard/protocol.ts   (min-lap sanity floors)
  */
 
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { MIN_LAP_SECONDS_BY_TRACK } from '../../src/engine/leaderboard/protocol'
 import { V1_TRACKS } from '../../src/engine/menus/tracks-catalog'
 import { getTrackTheme } from '../../src/game/tracks/theme-catalog'
+
+const TRACKS_DIR = path.resolve(__dirname, '../../public/tracks')
 
 const CUP_DISPLAY: Record<string, string> = {
   reef: 'Reef',
@@ -46,6 +50,33 @@ describe('catalog consistency', () => {
         MIN_LAP_SECONDS_BY_TRACK[t.id],
         `MIN_LAP_SECONDS_BY_TRACK missing ${t.id}`,
       ).toBeGreaterThan(0)
+    }
+  })
+
+  it('the venue card promises the lap count the track JSON actually runs', () => {
+    // Race completion checks `track.lapsToFinish` (race.ts) — a card
+    // that says 1 lap over a 3-lap JSON understates the commitment 3×.
+    // Sandbar shipped exactly that drift for a while (evaluation
+    // game-design #9); this pins every catalog entry with a JSON twin.
+    for (const t of V1_TRACKS) {
+      const jsonPath = path.join(TRACKS_DIR, `${t.id}.json`)
+      if (!fs.existsSync(jsonPath)) continue // procedural / not-yet-authored venues
+      const spec = JSON.parse(fs.readFileSync(jsonPath, 'utf8')) as { lapsToFinish?: number }
+      if (typeof spec.lapsToFinish !== 'number') continue
+      expect(t.laps, `venue card laps drift on ${t.id}`).toBe(spec.lapsToFinish)
+    }
+  })
+
+  it('no live catalog copy still sells the cut anti-grav mechanic', () => {
+    // Anti-grav is cut (parked for a possible DLC — CLAUDE.md "Current
+    // direction"). Liberty's card shipped "anti-grav showcase" copy long
+    // after the cut, hidden only by the Drowned Cup being off the card —
+    // a landmine for the day that cup unlocks.
+    for (const t of V1_TRACKS) {
+      expect(
+        `${t.setPiece} ${t.location}`.toLowerCase(),
+        `v1-historical anti-grav copy on ${t.id}`,
+      ).not.toContain('anti-grav')
     }
   })
 
