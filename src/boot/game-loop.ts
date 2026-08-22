@@ -93,8 +93,8 @@ import { vecHorizontalLength } from '@/engine/sim/physics/vec'
 import { advanceTide, createTide, type TideConfig, tideActive } from '@/engine/sim/water/tide'
 import { sampleHeight, type WaveFieldState } from '@/engine/sim/water/wave-field'
 import { detectSteamDeck, getDeckProfile } from '@/engine/steam-deck'
+import { tutorialScriptForTrack } from '@/engine/tutorial/script-catalog'
 import { createTutorialDirector } from '@/engine/tutorial/tutorial-director'
-import { DEFAULT_TUTORIAL_SCRIPT } from '@/engine/tutorial/tutorial-script'
 import {
   createWavePumpObserver,
   MIN_SPEED_FRAC,
@@ -700,11 +700,14 @@ export function startGameLoop(opts: GameLoopOpts): void {
   // block below; we also notify the director from the wave-pump fire
   // path so beat 4 ("WAVE PUMP") clears on a real pump event.
   const tutorialHud = tutorialMode ? createTutorialHud() : null
+  // Script resolves per track (script-catalog): the practice lagoon
+  // gets its station script, everywhere else keeps the intro script.
+  const tutorialScript = tutorialScriptForTrack(trackId)
   const tutorialDirector = tutorialMode
-    ? createTutorialDirector(DEFAULT_TUTORIAL_SCRIPT, {
+    ? createTutorialDirector(tutorialScript, {
         onBeatArmed: (beat) => {
           const idx = tutorialDirector?.currentBeatIndex() ?? 0
-          const total = DEFAULT_TUTORIAL_SCRIPT.beats.length
+          const total = tutorialScript.beats.length
           tutorialHud?.setBeat({
             title: beat.title,
             ...(beat.hint ? { hint: beat.hint } : {}),
@@ -718,7 +721,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
           tutorialHud?.flashCleared(how === 'performed' ? (beat.clearMessage ?? 'OK') : 'MOVING ON')
         },
         onCompleted: () => {
-          tutorialHud?.finish(DEFAULT_TUTORIAL_SCRIPT.finishMessage)
+          tutorialHud?.finish(tutorialScript.finishMessage)
           markTutorialCompleted()
         },
       })
@@ -1848,25 +1851,34 @@ export function startGameLoop(opts: GameLoopOpts): void {
     // the player can tell a missed sweet spot from a mechanic that isn't
     // firing. Reads the same signals the tuck physics does: nose-down
     // lean (`max(-pitch, 0)`) + the grounded gate. Player-only; hidden
-    // during auto-play and when the settings toggle is off.
-    if (!playerSettings.tuckMeter || control.isAutoPlay()) {
-      tuckHud.hide()
-    } else {
+    // during auto-play and when the settings toggle is off. The factor
+    // is computed before the HUD gate because the practice TUCK beat
+    // consumes it too — a beat must clear regardless of HUD toggles
+    // (same rule the drift beat follows for driftIntensity).
+    {
       const tuckIntent = ControlIntentStore.get(playerEid)
       const tuckStats = BikeStatsStore.get(playerEid)
       const tuckHover = HoverStateStore.get(playerEid)
       const grounded = tuckHover?.isGrounded === true
+      let lean = 0
+      let sweet = 0
+      let factor = 0
       if (tuckIntent && tuckStats) {
-        const lean = Math.max(0, -tuckIntent.pitch)
+        lean = Math.max(0, -tuckIntent.pitch)
         // Sweet spot slides with the slope under / ahead of the bike — the
         // same signed forward slope the physics grades tuck off. 0 while
         // airborne, so the notch rests at the flat-ground sweet spot.
-        const sweet = slopeAwareSweetSpot(-Math.atan(tuckHover?.forwardSlope ?? 0))
-        const factor = grounded ? tuckFactor(lean, sweet) : 0
+        sweet = slopeAwareSweetSpot(-Math.atan(tuckHover?.forwardSlope ?? 0))
+        factor = grounded ? tuckFactor(lean, sweet) : 0
+      }
+      if (tutorialDirector && !control.isAutoPlay() && factor > 0) {
+        tutorialDirector.notifyTuck(factor)
+      }
+      if (!playerSettings.tuckMeter || control.isAutoPlay() || !tuckIntent || !tuckStats) {
+        tuckHud.hide()
+      } else {
         const capBonusPct = (tuckStats.tuckSpeedBoost - 1) * factor * 100
         tuckHud.update(lean, factor, capBonusPct, grounded && lean > 0.05, sweet)
-      } else {
-        tuckHud.hide()
       }
     }
 

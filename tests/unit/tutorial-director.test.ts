@@ -272,4 +272,65 @@ describe('createTutorialDirector', () => {
     expect(hows).toEqual(['act:performed', 'wait:timeout', 'skipme:timeout'])
     expect(dir.isCompleted()).toBe(true)
   })
+
+  it('keeps the best tuck factor per beat and resets it on arm (notifyTuck)', () => {
+    const cleared: string[] = []
+    const script = makeScript([
+      { id: 'tuck', title: 'TUCK', clearWhen: (ctx) => ctx.bestTuckFactorThisBeat >= 0.7 },
+      { id: 'tuck2', title: 'TUCK2', clearWhen: (ctx) => ctx.bestTuckFactorThisBeat >= 0.7 },
+    ])
+    const dir = createTutorialDirector(script, {
+      onBeatCleared: (b) => cleared.push(b.id),
+    })
+    dir.tick(0.016, defaultSample)
+    dir.notifyTuck(0.4) // a shallow feather — not enough
+    dir.notifyTuck(0.2) // worse — must not lower the best
+    dir.tick(0.016, defaultSample)
+    expect(cleared).toEqual([])
+    dir.notifyTuck(0.85)
+    dir.tick(0.016, defaultSample)
+    expect(cleared).toEqual(['tuck'])
+    // Counter reset on arm: the second tuck beat must not inherit 0.85.
+    dir.tick(0.016, defaultSample)
+    expect(cleared).toEqual(['tuck'])
+  })
+
+  it('clamps notifyTuck into 0..1 (belly-scrape negatives never regress the best)', () => {
+    let best = 0
+    const script = makeScript([
+      {
+        id: 't',
+        title: 'T',
+        clearWhen: (ctx) => {
+          best = ctx.bestTuckFactorThisBeat
+          return false
+        },
+      },
+    ])
+    const dir = createTutorialDirector(script, {})
+    dir.tick(0.016, defaultSample)
+    dir.notifyTuck(-0.5) // past-the-notch penalty values are not "best" anything
+    dir.tick(0.016, defaultSample)
+    expect(best).toBe(0)
+    dir.notifyTuck(1.7)
+    dir.tick(0.016, defaultSample)
+    expect(best).toBe(1)
+  })
+
+  it('keeps the best launch quality per beat (notifyLaunch quality gate)', () => {
+    const cleared: string[] = []
+    const script = makeScript([
+      { id: 'pop', title: 'POP', clearWhen: (ctx) => ctx.bestLaunchQualityThisBeat >= 0.4 },
+    ])
+    const dir = createTutorialDirector(script, {
+      onBeatCleared: (b) => cleared.push(b.id),
+    })
+    dir.tick(0.016, defaultSample)
+    dir.notifyLaunch(0.2) // an unshaped hop — counts as a launch, fails the gate
+    dir.tick(0.016, defaultSample)
+    expect(cleared).toEqual([])
+    dir.notifyLaunch(0.8)
+    dir.tick(0.016, defaultSample)
+    expect(cleared).toEqual(['pop'])
+  })
 })

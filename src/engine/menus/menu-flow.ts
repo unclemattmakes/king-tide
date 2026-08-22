@@ -13,6 +13,7 @@ import {
 } from '@/engine/leaderboard/local'
 import { fetchBoard } from '@/engine/leaderboard/remote'
 import { playerSettings } from '@/engine/player-settings'
+import { PRACTICE_LAGOON_TRACK_ID } from '@/engine/tutorial/script-catalog'
 import { DEFAULT_TUTORIAL_TRACK } from '@/engine/tutorial/tutorial-launch'
 import type { TrackManifestEntry } from '@/game/assets/manifest'
 import { type BikeVariantId, DEFAULT_BIKE_VARIANT } from '@/game/bikes/variants'
@@ -110,10 +111,10 @@ const STEPS_SP_CUP_BROWSE: { id: Step; label: string }[] = [
   { id: 'sp-bike', label: 'BIKE' },
 ]
 
-const STEPS_TUTORIAL: { id: Step; label: string }[] = [
+const STEPS_PRACTICE: { id: Step; label: string }[] = [
   { id: 'title', label: 'START' },
   { id: 'mode', label: 'MODE' },
-  { id: 'tutorial-intro', label: 'TUTORIAL' },
+  { id: 'tutorial-intro', label: 'PRACTICE' },
 ]
 
 const STEPS_TT: { id: Step; label: string }[] = [
@@ -135,7 +136,7 @@ const STEPS_MP: { id: Step; label: string }[] = [
  *  enabled set today is Race + Cup (the latter is the routing path to
  *  the Dev Cup) + Multiplayer (works end-to-end via the existing room
  *  protocol). */
-type ModeId = 'race' | 'time-trial' | 'cup' | 'multiplayer' | 'tutorial'
+type ModeId = 'race' | 'time-trial' | 'cup' | 'multiplayer' | 'tutorial' | 'practice'
 type ModeTile = {
   id: ModeId
   badge: string
@@ -157,12 +158,11 @@ const BIKE_COMING_SOON_SLOTS: ComingSoonBike[] = []
  * screen is only ever reached down the solo branch and a MULTIPLAYER
  * tile inside it would be a second door to the same room.
  *
- * The TUTORIAL tile was removed too. Its screen (`buildTutorialIntro`)
- * and mode routing are deliberately left in place, unreachable, so
- * restoring the tile is a one-entry edit here — and because that screen
- * still holds the roadmap copy for the gated Training Cove drills. The
- * tutorial itself is unaffected and still reachable two ways: Settings →
- * "Replay tutorial", and `?tutorial=1` on the URL.
+ * PRACTICE is the discoverable door to skill teaching (evaluation
+ * summary #1; maintainer decision 2026-08-22): its screen
+ * (`buildTutorialIntro`) offers the coached First Run and the practice
+ * lagoon's station course. The legacy 'tutorial' mode id + routing stay
+ * in place for the Settings → "Replay tutorial" path and `?tutorial=1`.
  */
 const MODE_TILES: ModeTile[] = [
   {
@@ -184,6 +184,13 @@ const MODE_TILES: ModeTile[] = [
     badge: 'CIRCUIT',
     headline: 'CUP',
     desc: 'Race a cup back-to-back with points on the line every heat — the Reef Cup headlines today’s card. More cups join as the season unfolds.',
+    enabled: true,
+  },
+  {
+    id: 'practice',
+    badge: 'SKILLS',
+    headline: 'PRACTICE',
+    desc: 'Learn the ride: a coached first run, or the practice lagoon — a station for every skill, from wave launches to drift.',
     enabled: true,
   },
 ]
@@ -351,7 +358,8 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         // the Dev Cup browse path swaps in once that tile is clicked.
         return (pickedCup?.races.length ?? 1) > 0 ? STEPS_SP_CUP_CHAMPIONSHIP : STEPS_SP_CUP_BROWSE
       case 'tutorial':
-        return STEPS_TUTORIAL
+      case 'practice':
+        return STEPS_PRACTICE
       case 'time-trial':
         return STEPS_TT
       default:
@@ -400,7 +408,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         setChyron('', 'Host a new room or punch in a friend’s code.')
         break
       case 'tutorial-intro':
-        setChyron('', 'Learn the ropes — six quick beats, then you are race-ready.')
+        setChyron('', 'Learn the ride — a coached first run, or drills station by station.')
         break
       case 'leaderboard':
         setChyron('', 'Fastest laps — the global top 25 per track, next to your local bests.')
@@ -969,9 +977,17 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
     function buildMode(): HTMLElement {
       const el = document.createElement('section')
       el.className = 'bc-screen'
+      // First-boot nudge: until the teaching flow has been completed
+      // once, the PRACTICE tile is the pre-focused card (`.selected` is
+      // what `focusFirst` prefers) and wears a NEW HERE? badge — a
+      // brand-new player's cursor starts on the door that teaches the
+      // game, without gating anything (evaluation summary #1).
+      const firstBoot = !playerSettings.tutorialCompleted
       const tilesHtml = MODE_TILES.map((m) => {
         const disabled = !m.enabled
-        const cls = `bc-mode-card${disabled ? ' bc-disabled' : ''}`
+        const nudge = firstBoot && m.id === 'practice'
+        const cls = `bc-mode-card${disabled ? ' bc-disabled' : ''}${nudge ? ' selected' : ''}`
+        const badge = nudge ? 'NEW HERE?' : m.badge
         const gateBlock =
           disabled && m.gate ? `<div class="bc-gate">${escapeHtml(m.gate)}</div>` : ''
         // `data-mode` lets the global click handler route by id, and
@@ -981,7 +997,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
           <button class="${cls}" data-mode="${m.id}" type="button"${disabled ? ' disabled' : ''}${
             disabled ? ` data-gate="${escapeHtml(m.gate ?? '')}"` : ''
           }>
-            <span class="badge">${escapeHtml(m.badge)}</span>
+            <span class="badge">${escapeHtml(badge)}</span>
             <div class="hd">${m.headline}</div>
             <div class="desc">${escapeHtml(m.desc)}</div>
             ${gateBlock}
@@ -1030,6 +1046,7 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
               showStep('mp-entry')
               break
             case 'tutorial':
+            case 'practice':
               showStep('tutorial-intro')
               break
             case 'time-trial':
@@ -1183,29 +1200,29 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
       const el = document.createElement('section')
       el.className = 'bc-screen'
       const completed = playerSettings.tutorialCompleted
-      const ctaLabel = completed ? 'REPLAY TUTORIAL' : 'START TUTORIAL'
+      const ctaLabel = completed ? 'REPLAY FIRST RUN' : 'START FIRST RUN'
       el.innerHTML = `
         <div class="bc-section-head">
           <div class="num">02</div>
           <div>
-            <div class="title">TUTORIAL</div>
-            <div class="sub">SCRIPTED PROMPTS &middot; MAYDAY BAY &middot; NO PRESSURE</div>
+            <div class="title">PRACTICE</div>
+            <div class="sub">COACHED PROMPTS &middot; NO PRESSURE &middot; NOTHING GATED</div>
           </div>
         </div>
         <div class="bc-cards cols-2">
-          <div class="bc-card" id="tut-start" role="button" tabindex="0" style="--accent:#ffd27a; cursor: pointer;">
-            <div class="label">FRAMEWORK</div>
+          <div class="bc-card${completed ? '' : ' selected'}" id="tut-start" role="button" tabindex="0" style="--accent:#ffd27a; cursor: pointer;">
+            <div class="label">GUIDED INTRO</div>
             <div class="name">FIRST RUN</div>
-            <div class="tag">Seven beats — throttle, cruise, look, launch, land, drift, finish. Runs on the Mayday Bay lagoon.</div>
+            <div class="tag">Seven beats — throttle, cruise, look, launch, land, drift, finish. Runs on the Mayday Bay lagoon with a gentle escort.</div>
             <div class="record">~90s &middot; INTRO DIFFICULTY</div>
             <div class="record" style="color: var(--bc-yellow); margin-top: 6px;">${escapeHtml(ctaLabel)} &rarr;</div>
           </div>
-          <div class="bc-card bc-disabled" data-gate="In production — track drills join later this season" style="--accent:#9bdcf2;">
-            <div class="label">TRAINING COVE</div>
-            <div class="name">SANDBAR</div>
-            <div class="tag">Track-specific scripted scenarios — drift around a buoy, pickup gate, ramp run.</div>
-            <div class="record">~60s &middot; 1 LAP &middot; SANDBAR-ONLY</div>
-            <div class="bc-gate">In production &middot; joins later this season</div>
+          <div class="bc-card${completed ? ' selected' : ''}" id="practice-lagoon-start" role="button" tabindex="0" style="--accent:#9bdcf2; cursor: pointer;">
+            <div class="label">SKILL STATIONS</div>
+            <div class="name">PRACTICE LAGOON</div>
+            <div class="tag">A station for every skill, in ride order — swell launches, landings, the trick table, tuck rollers, one long drift sweep.</div>
+            <div class="record">2 LAPS &middot; SOLO WATER &middot; RE-RUN ANY STATION</div>
+            <div class="record" style="color: var(--bc-yellow); margin-top: 6px;">RIDE THE STATIONS &rarr;</div>
           </div>
         </div>
         <div class="bc-actions">
@@ -1228,14 +1245,32 @@ export function runMenuFlow(opts: MenuFlowOpts): Promise<MenuFlowResult> {
         url.searchParams.set('tutorial', '1')
         finish(url.toString())
       }
-      const startCard = el.querySelector<HTMLElement>('#tut-start')
-      startCard?.addEventListener('click', launchTutorial)
-      startCard?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          launchTutorial()
-        }
-      })
+      const launchPracticeLagoon = (): void => {
+        // The station course: the practice lagoon venue with its own
+        // beat script (script-catalog resolves it by track id), solo
+        // water — `ai=0` wins the tutorial escort min() in race-boot —
+        // and the same tutorial plumbing (no position board, no OOB).
+        const url = new URL(window.location.href)
+        url.search = ''
+        url.searchParams.set('race', '1')
+        url.searchParams.set('track', PRACTICE_LAGOON_TRACK_ID)
+        url.searchParams.set('bike', picks.bikeId)
+        url.searchParams.set('tutorial', '1')
+        url.searchParams.set('ai', '0')
+        finish(url.toString())
+      }
+      const wireCard = (id: string, launch: () => void): void => {
+        const card = el.querySelector<HTMLElement>(`#${id}`)
+        card?.addEventListener('click', launch)
+        card?.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            launch()
+          }
+        })
+      }
+      wireCard('tut-start', launchTutorial)
+      wireCard('practice-lagoon-start', launchPracticeLagoon)
       return el
     }
 

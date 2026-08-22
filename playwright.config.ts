@@ -28,6 +28,14 @@ const headless = process.env.E2E_HEADLESS === '1'
 const e2eHost = process.env.E2E_HOST ?? 'localhost'
 const e2ePort = process.env.E2E_PORT ?? 5391
 
+// Browser channel escape hatch. Playwright's bundled Chrome-for-Testing
+// build can fail to start on some Windows machines with a SideBySide
+// "Dependent Assembly could not be found" activation error (observed
+// with CfT 151 / playwright chromium-1234 — clean re-downloads included).
+// `E2E_CHANNEL=chrome` runs the chromium project through the installed
+// system Chrome instead: same engine, real GPU, still headed.
+const chromiumChannel = process.env.E2E_CHANNEL
+
 // Cross-browser projects are opt-in via `E2E_BROWSERS`:
 //   unset / 'chromium'  → Chromium only (default, fastest)
 //   'all'               → Chromium + Firefox + WebKit
@@ -56,7 +64,16 @@ const enabled = parseBrowsers()
 // carry a `test.skip(browserName === 'webkit' && platform === 'linux')` guard.
 // Run those suites on macOS WebKit for real coverage.
 const allProjects: Array<{ key: string; project: PlaywrightTestProject }> = [
-  { key: 'chromium', project: { name: 'chromium', use: { ...devices['Desktop Chrome'] } } },
+  {
+    key: 'chromium',
+    project: {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        ...(chromiumChannel ? { channel: chromiumChannel } : {}),
+      },
+    },
+  },
   { key: 'firefox', project: { name: 'firefox', use: { ...devices['Desktop Firefox'] } } },
   { key: 'webkit', project: { name: 'webkit', use: { ...devices['Desktop Safari'] } } },
 ]
