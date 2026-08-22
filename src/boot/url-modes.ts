@@ -210,6 +210,12 @@ export async function runEarlyModeDispatch(appEl: HTMLElement): Promise<EarlyDis
   // screen's "PODIUM →" button. No race subsystems.
   if (earlyParams.get('podium') !== null) {
     setLoadingMessage('Loading podium ceremony…')
+    // The podium is reached by a full page navigation, so the race's
+    // audio engine died with its document. Install the radio here —
+    // menu-scene music for the ceremony, and a live engine for the
+    // cup fanfare (this path used to have no audio at all).
+    const { installSoundtrackRadio } = await import('@/engine/audio/soundtrack-radio')
+    installSoundtrackRadio({ scene: { kind: 'menu' } })
     const { bootPodiumMode } = await import('./podium-mode')
     await bootPodiumMode(appEl)
     return 'handled'

@@ -1010,9 +1010,10 @@ export async function bootRace(appEl: HTMLElement) {
     // Tutorial: no placement board — the coached run is not a contest.
     hidePositionBoard: tutorialMode,
     onCountdownTick: (n) => {
-      // Light audio cue: re-use the gate "ding" for each tick, lap fanfare for GO.
-      if (n === 0) audio.lapCompleted()
-      else audio.gateCleared()
+      // Dedicated countdown ladder (C-major race-structure family) —
+      // the gate ding / lap arpeggio stay reserved for their own
+      // events (evaluation audio #3).
+      audio.countdownTick(n)
       // Drive the F1 lights from the same tick stream so the visual
       // tracks the audio exactly (no double timing source).
       startLights?.setCountdown(n)

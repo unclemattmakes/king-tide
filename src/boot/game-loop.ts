@@ -20,7 +20,7 @@ import { query } from 'bitecs'
 import * as THREE from 'three'
 import type { PlayerSnapshot, RaceSnapshot } from '@/debug'
 import { installPerfDebugApi } from '@/debug'
-import type { AudioEngine } from '@/engine/audio/audio'
+import { type AudioEngine, spatialCueFor } from '@/engine/audio/audio'
 import {
   type CupFinisher,
   type CupProgress,
@@ -119,6 +119,7 @@ import {
   ExplosionState,
   ExplosionStateStore,
   ExplosionTag,
+  MineStateStore,
   MineTag,
   MissileState,
   MissileStateStore,
@@ -667,11 +668,14 @@ export function startGameLoop(opts: GameLoopOpts): void {
 
   // Per-frame audio dispatch needs to remember "what was true last tick" so
   // it can fire one-shots on transitions. Player slot for collect/fire
-  // events; sim entity counts for any-bike weapon spawns.
+  // events; per-entity seen-sets for any-bike weapon spawns (eid-diffed
+  // so each spawn gets its own positioned one-shot — a count diff
+  // collapsed same-frame multi-spawns into one sound and knew no
+  // positions). Pruned against the live query each frame.
   let prevPlayerHeld: PickupType | null = null
-  let prevMineCount = 0
-  let prevMissileCount = 0
-  let prevExplosionCount = 0
+  const audioSeenMineEids = new Set<number>()
+  const audioSeenMissileEids = new Set<number>()
+  const audioSeenExplosionEids = new Set<number>()
 
   // Pump-trick signal — detects clean crest launches on the player
   // bike each render frame (wave crest, ramp lip, terrain bump) and
@@ -735,6 +739,14 @@ export function startGameLoop(opts: GameLoopOpts): void {
   updateWind({ x: 1, z: 0.2 }, 0.18, 1.4)
 
   const tmpPos = new THREE.Vector3()
+  // Listener right-vector for spatial one-shots — recomputed once per
+  // frame from the camera quaternion (fresh after the chase tick; the
+  // matrixWorld isn't updated until renderFrame, so don't read that).
+  const tmpAudioRight = new THREE.Vector3()
+  // Rival-engine drive pool + last-seen positions (speed = position
+  // delta, so kinematic remote mirrors get a pitch too).
+  const rivalDrives: Array<{ eid: number; gain: number; pan: number; pitch01: number }> = []
+  const rivalPrevPos = new Map<number, { x: number; z: number }>()
   const tmpQuat = new THREE.Quaternion()
   const tmpTarget = new THREE.Vector3()
   // Scratch for pushing the chase cam's live rest pose into the race-intro
@@ -1804,7 +1816,10 @@ export function startGameLoop(opts: GameLoopOpts): void {
         if (nowActive && !prevActive) {
           wavePumpHud.pump(1, true)
           if (playerSettings.wavePumpIntensity !== 'off') {
-            audio.wavePump(1, true)
+            // Boost has its own ignition voice — the wave-mastery
+            // chord stays reserved for graded launches/landings/tricks
+            // (evaluation audio #4).
+            audio.boostIgnite(meter.charge)
           }
           applyPumpImpulse(phys, playerEid, stats, 1, 'boost')
           triggerPumpBurst(playerEid, 1, true)
@@ -1831,7 +1846,9 @@ export function startGameLoop(opts: GameLoopOpts): void {
         if (onPad && !(state.onBoostPad ?? false)) {
           wavePumpHud.pump(1, true)
           if (playerSettings.wavePumpIntensity !== 'off') {
-            audio.wavePump(1, true)
+            // Same ignition voice as the meter — a pad is free speed,
+            // not a graded water read.
+            audio.boostIgnite(1)
           }
           applyPumpImpulse(phys, playerEid, stats, 1, 'boost')
           triggerPumpBurst(playerEid, 1, true)
@@ -1900,16 +1917,41 @@ export function startGameLoop(opts: GameLoopOpts): void {
     prevPlayerHeld = currentPlayerHeld
 
     // Combat entity spawns: any new mine/missile/explosion in the world
-    // gets a sound (so AI weapons are audible too, not just the player's).
-    const mineCount = query(sim, [MineTag]).length
-    if (mineCount > prevMineCount) audio.pickupFire('mine')
-    prevMineCount = mineCount
-    const missileCount = query(sim, [MissileTag]).length
-    if (missileCount > prevMissileCount) audio.pickupFire('missile')
-    prevMissileCount = missileCount
-    const explosionCount = query(sim, [ExplosionTag]).length
-    if (explosionCount > prevExplosionCount) audio.explosion()
-    prevExplosionCount = explosionCount
+    // gets a sound (so AI weapons are audible too, not just the
+    // player's), placed in the stereo field by distance + direction
+    // from the camera — a mine 300 m away is a distant thump with a
+    // side, not a full-volume bang (evaluation summary #5). Eid-diffed
+    // per entity (not count-diffed), so a same-frame double drop fires
+    // two shots instead of collapsing into one; the camera right-vector
+    // comes from the quaternion, which the chase tick refreshed this
+    // frame (matrixWorld would be one frame stale here).
+    tmpAudioRight.set(1, 0, 0).applyQuaternion(camera.quaternion)
+    const spatialFor = (p: { x: number; y: number; z: number }) =>
+      spatialCueFor(p, camera.position, tmpAudioRight)
+    const liveMines = query(sim, [MineTag])
+    for (const mEid of liveMines) {
+      if (audioSeenMineEids.has(mEid)) continue
+      audioSeenMineEids.add(mEid)
+      const pos = MineStateStore.get(mEid)?.position
+      audio.pickupFire('mine', pos ? spatialFor(pos) : undefined)
+    }
+    pruneSeen(audioSeenMineEids, liveMines)
+    const liveMissiles = query(sim, [MissileTag])
+    for (const mEid of liveMissiles) {
+      if (audioSeenMissileEids.has(mEid)) continue
+      audioSeenMissileEids.add(mEid)
+      const pos = MissileStateStore.get(mEid)?.position
+      audio.pickupFire('missile', pos ? spatialFor(pos) : undefined)
+    }
+    pruneSeen(audioSeenMissileEids, liveMissiles)
+    const liveExplosionsForAudio = query(sim, [ExplosionTag])
+    for (const eEid of liveExplosionsForAudio) {
+      if (audioSeenExplosionEids.has(eEid)) continue
+      audioSeenExplosionEids.add(eEid)
+      const pos = ExplosionStateStore.get(eEid)?.position
+      audio.explosion(pos ? spatialFor(pos) : undefined)
+    }
+    pruneSeen(audioSeenExplosionEids, liveExplosionsForAudio)
 
     const racer = RacerStore.get(playerEid)
     if (racer) {
@@ -2055,6 +2097,52 @@ export function startGameLoop(opts: GameLoopOpts): void {
       })
     }
 
+    // Rival engine presence — the nearest opponents get an audible,
+    // panned engine voice so a bike drafting up behind you exists in
+    // the mix (evaluation summary #5: opponents were acoustically
+    // invisible). Same transforms the minimap just walked; speed is a
+    // per-eid position delta so it works for dynamic AI and kinematic
+    // remote mirrors alike. Allocation-free once the pools warm.
+    {
+      rivalDrives.length = 0
+      let worst = -1
+      for (const s of standings) {
+        if (s.eid === playerEid) continue
+        const t = TransformStore.get(s.eid)
+        if (!t) continue
+        const cue = spatialCueFor(t, camera.position, tmpAudioRight)
+        // Track the nearest RIVAL_ENGINE_DRIVES by gain (monotone in
+        // distance). Tiny field (≤7) — simple replace-the-worst scan.
+        if (rivalDrives.length < 2) {
+          rivalDrives.push({ eid: s.eid, gain: cue.gain, pan: cue.pan, pitch01: 0 })
+        } else {
+          worst = rivalDrives[0]!.gain <= rivalDrives[1]!.gain ? 0 : 1
+          if (cue.gain > rivalDrives[worst]!.gain) {
+            const d = rivalDrives[worst]!
+            d.eid = s.eid
+            d.gain = cue.gain
+            d.pan = cue.pan
+          }
+        }
+      }
+      for (const d of rivalDrives) {
+        const t = TransformStore.get(d.eid)
+        if (!t) continue
+        const prev = rivalPrevPos.get(d.eid)
+        if (prev && dt > 0) {
+          const speed = Math.hypot(t.x - prev.x, t.z - prev.z) / dt
+          d.pitch01 = Math.min(1, speed / 28)
+        }
+        if (prev) {
+          prev.x = t.x
+          prev.z = t.z
+        } else {
+          rivalPrevPos.set(d.eid, { x: t.x, z: t.z })
+        }
+      }
+      audio.tickRivalEngines(rivalDrives)
+    }
+
     // Direction arrow points the player to the next checkpoint.
     const racerNow = RacerStore.get(playerEid)
     if (racerNow && !racerNow.finished) {
@@ -2140,6 +2228,7 @@ export function startGameLoop(opts: GameLoopOpts): void {
             bestLapAllTime: lapState.bestLapAllTime,
             timeTrialMode: timeTrialMode === true,
             forfeited: RacerStore.get(playerEid)?.forfeited ?? false,
+            audio,
           })
           onFinish()
         }
@@ -2179,6 +2268,22 @@ interface FinishOpts {
   /** Player left the course (crossed the OOB soft wall). Records a DNF and
    *  skips ghost / leaderboard saves — the run no longer counts. */
   forfeited: boolean
+  /** The live race's audio engine — scores the results reveal (the
+   *  loop's emotional peak was mute before; evaluation summary #10). */
+  audio: AudioEngine
+}
+
+/** Drop seen-set entries whose entity no longer exists. When sizes
+ *  match, live ⊆ seen and |seen| = |live| ⇒ equal sets — skip.
+ *  Accepts bitecs' Uint32Array query results directly. */
+function pruneSeen(
+  seen: Set<number>,
+  live: { readonly length: number; includes(searchElement: number): boolean },
+): void {
+  if (seen.size === live.length) return
+  for (const id of Array.from(seen)) {
+    if (!live.includes(id)) seen.delete(id)
+  }
 }
 
 function showFinishScreen(opts: FinishOpts): void {
@@ -2199,9 +2304,28 @@ function showFinishScreen(opts: FinishOpts): void {
     bestLapAllTime,
     timeTrialMode,
     forfeited,
+    audio,
   } = opts
   // A forfeited run is a DNF: no finish position, no ghost, no leaderboard.
   const creditedPosition = forfeited ? null : meStandingPosition
+
+  // Score the finish. Position-aware: the win fanfare, a bright podium
+  // triad, a modest mid-pack resolve, or the low DNF figure. Time Trial
+  // celebrates beating the all-time best; a plain completed run gets
+  // the finish resolve.
+  if (forfeited) {
+    audio.finishStinger('dnf')
+  } else if (timeTrialMode) {
+    const newBest =
+      bestLapThisRace !== null && (bestLapAllTime === null || bestLapThisRace <= bestLapAllTime)
+    audio.finishStinger(newBest ? 'win' : 'finish')
+  } else if (creditedPosition === 1) {
+    audio.finishStinger('win')
+  } else if (creditedPosition !== null && creditedPosition <= 3) {
+    audio.finishStinger('podium')
+  } else {
+    audio.finishStinger('finish')
+  }
 
   // Map a racer entity back to its grid slot (0 = player, 1.. = AI in
   // spawn order) — the join key between the live standings and the cup's

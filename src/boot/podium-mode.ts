@@ -19,6 +19,7 @@
 
 import * as THREE from 'three'
 import { assetUrl } from '@/engine/asset-url'
+import { getAudioEngine } from '@/engine/audio/audio-service'
 import { clearCupProgress, cupStandings, getCupProgress } from '@/engine/cup-progress'
 import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
 import { showCupResultsOverlay } from '@/engine/render/cup-results-screen'
@@ -147,6 +148,10 @@ export async function bootPodiumMode(parent: HTMLElement): Promise<void> {
     window.removeEventListener('keydown', onSkipKey)
     canvas.removeEventListener('pointerdown', revealStandings)
     document.body.classList.add('podium-active')
+    // Cup fanfare under the card reveal — plays once the context is
+    // unlocked (the radio install on the podium path arms the unlock
+    // listeners; a skip click/keypress is itself the gesture).
+    getAudioEngine()?.cupFanfare()
     disposeOverlayKeys = showCupResultsOverlay({ progress, onBackToMenu: backToMenu })
     gamepad = installMenuGamepad({
       container: () => document.getElementById('cup-results'),
