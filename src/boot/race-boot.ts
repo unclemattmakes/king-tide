@@ -883,9 +883,17 @@ export async function bootRace(appEl: HTMLElement) {
   bootMark('props')
   bootStat('vinylAfterProps', vinylMaterialsBuilt())
 
-  // Pickup spawns from track.
-  for (let i = 0; i < track.pickupSpawns.length; i++) {
-    createPickupSpawn(sim, track.pickupSpawns[i] as (typeof track.pickupSpawns)[number], i)
+  // Pickup spawns from track. Multiplayer rooms get NONE: items and
+  // combat are per-tab fiction until M10.13 puts owner-authoritative
+  // combat events on the wire — a missile "hit" on a remote rider is a
+  // local setLinvel their kinematic mirror ignores, so "I hit him and
+  // nothing happened" would be the first thing two humans with items
+  // experience (evaluation networking #2 — the honest interim is no
+  // items in rooms). Boost pads are static track features and stay.
+  if (!isMultiplayer) {
+    for (let i = 0; i < track.pickupSpawns.length; i++) {
+      createPickupSpawn(sim, track.pickupSpawns[i] as (typeof track.pickupSpawns)[number], i)
+    }
   }
 
   // Load bike GLBs in parallel. Solo Time Trial only ever renders the

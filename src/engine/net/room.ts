@@ -32,6 +32,7 @@ import {
   decodeTransformSnapshotFrom,
   MESSAGE_TAG_INPUT_FRAME,
   MESSAGE_TAG_TRANSFORM_SNAPSHOT,
+  MESSAGE_TAG_TRANSFORM_SNAPSHOT_V1,
   type TransformSnapshot,
 } from './transform-snapshot'
 
@@ -454,7 +455,10 @@ export function createNetRoom(cfg: NetRoomConfig): NetRoom {
         cfg.onRemoteFrame?.(frame)
         return
       }
-      if (tag === MESSAGE_TAG_TRANSFORM_SNAPSHOT) {
+      if (tag === MESSAGE_TAG_TRANSFORM_SNAPSHOT || tag === MESSAGE_TAG_TRANSFORM_SNAPSHOT_V1) {
+        // 0x03 is the current wide-position format; 0x02 is the retired
+        // int16 format, still decoded so a stale pre-widening tab in the
+        // same room keeps its bikes visible (decode branches on the tag).
         const snap = decodeTransformSnapshotFrom(view, 0, data.byteLength)
         // Same defensive guard as for InputFrames: drop self-echoes.
         if (snap.senderPeerId !== myPeerId) {

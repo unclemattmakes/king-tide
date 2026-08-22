@@ -39,6 +39,11 @@ export type LobbyView = {
   localReady: boolean
   /** True while the socket hasn't yet delivered `hello`. */
   connecting: boolean
+  /** True once `connecting` has held past the lobby's time-box: the
+   *  relay is probably unreachable, so the overlay names the problem
+   *  and the Esc exit instead of spinning forever. partysocket keeps
+   *  retrying underneath — a late `hello` clears both flags. */
+  connectStalled?: boolean
   /** Local picks (used to drive the picker side panel). */
   localBike: { id: string; label: string; accent: string }
   localTrack: { id: string; label: string }
@@ -153,6 +158,7 @@ export function installLobbyOverlay(opts: LobbyOverlayOpts): LobbyOverlay {
       <div class="keys">
         <span class="bc-key">ENTER</span><span>ready</span>
         <span class="bc-key">←/→</span><span>cycle picks</span>
+        <span class="bc-key">ESC</span><span>menu</span>
       </div>
     </footer>
   `
@@ -282,7 +288,18 @@ export function installLobbyOverlay(opts: LobbyOverlayOpts): LobbyOverlay {
     }
 
     if (view.connecting) {
-      subEl.textContent = view.pickBanner ? 'ROOM UNAVAILABLE' : 'CONNECTING TO THE BROADCAST…'
+      if (view.connectStalled && !view.pickBanner) {
+        // Time-boxed connect: name the problem and the way out instead
+        // of spinning forever. Dev builds name the likely cause — the
+        // local relay sidecar isn't running.
+        subEl.textContent = "CAN'T REACH THE RELAY — CHECK YOUR CONNECTION · ESC FOR MENU"
+        bannerEl.classList.add('show')
+        bannerEl.textContent = import.meta.env.DEV
+          ? 'Still retrying underneath. Dev tip: is `pnpm party:dev` running?'
+          : 'Still retrying — the room opens the moment the relay answers.'
+      } else {
+        subEl.textContent = view.pickBanner ? 'ROOM UNAVAILABLE' : 'CONNECTING TO THE BROADCAST…'
+      }
       slotsEl.innerHTML = ''
       readyBtn.disabled = true
       readyBtn.textContent = view.pickBanner ? 'UNAVAILABLE' : 'CONNECTING…'

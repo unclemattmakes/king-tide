@@ -44,6 +44,14 @@ const ALL_BIKES = Object.values(BIKE_VARIANTS).map((v) => ({
   accent: `#${v.accentColor.toString(16).padStart(6, '0')}`,
 }))
 
+/** How long the lobby will show a bare "CONNECTING…" before flipping to
+ *  the can't-reach-the-relay explainer. Comfortably above a slow cold
+ *  connect (the race path's start failsafe is 15 s; a healthy relay
+ *  hello lands in well under 2 s) while short enough that a friend
+ *  clicking a shared room link during an outage isn't staring at an
+ *  unexplained spinner. */
+export const CONNECT_STALL_TIMEOUT_MS = 10_000
+
 export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
   const tracks = buildTrackList(opts.manifestTracks)
   const trackOptions = tracks.map((t) => ({ id: t.id, label: t.name }))
@@ -58,6 +66,13 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
 
   let pickBanner: LobbyView['pickBanner'] = null
   let raceArmed = false
+  /** Wall-clock of lobby entry, for the connect time-box: partysocket
+   *  retries silently forever, so with the relay down (or `pnpm
+   *  party:dev` not running in dev) the lobby used to sit on
+   *  "CONNECTING TO THE BROADCAST…" with no explanation and no visible
+   *  way out (evaluation networking #6). After the time-box the banner
+   *  names the problem and the Esc exit; retries continue underneath. */
+  const connectStartedAt = performance.now()
   /** Track we'll navigate to when the banner timer fires. Mutable after
    *  arming: a relay `start-race` carrying a different winner (another
    *  peer armed first — its pick is the sticky one the server replays)
@@ -114,6 +129,8 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
         peers,
         localReady: local.ready,
         connecting: !net.ready,
+        connectStalled:
+          !net.ready && performance.now() - connectStartedAt >= CONNECT_STALL_TIMEOUT_MS,
         localBike: bikeMeta(local.bikeId),
         localTrack: trackMeta(local.trackId),
         bikeOptions: ALL_BIKES,
