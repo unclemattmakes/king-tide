@@ -283,6 +283,18 @@ dropping the tutorial's only discoverable door was the one wrong cut. Minimum
 fix: first boot with `tutorialCompleted === false` routes the SINGLE PLAYER
 commit through First Run, or surfaces a one-time "NEW HERE? → FIRST RUN" card.
 
+> **Maintainer decision (2026-08-22):** the fix ships as **Practice**, not
+> "Tutorial" — a discoverable Practice mode backed by a **practice lagoon**:
+> one venue with a station per skill (throttle/cruise, wave launch + landing,
+> drift tiers, tricks, tuck), generalising the pattern the Drift Practice
+> Range (`?track=drift-test`) already proves with its station-pinning unit
+> test. The track-agnostic beat director makes the existing seven-beat script
+> reusable there. Deliberate side benefit: the same map is a stable,
+> asset-light dev-test venue — exactly the focused verification scene
+> CLAUDE.md hard rule 2 asks for — giving feel changes a fixed place to be
+> exercised per skill (headed Playwright specs per station) so regressions
+> surface before they reach the Reef Cup tracks.
+
 ## 7. Pickups & combat balance
 
 Four items, one registry (`pickup-registry.ts`) co-locating effect + AI
@@ -346,14 +358,20 @@ write down. The 2026-08-19 arrow/WASD spatial menu nav closed the remaining gap.
 
 ## Top 10 fixes & improvements (ranked)
 
-1. **Reopen a discoverable path to the tutorial for new players.** The
-   TUTORIAL tile was removed from mode-select on 2026-08-21 (commit 0f32d1f);
-   the tutorial now hides behind Settings → "Replay tutorial" and `?tutorial=1`,
-   and `tutorialCompleted` gates nothing (menu-flow.ts:154-166, 1185). Route
-   first boot into First Run or add a one-time "NEW HERE?" card on the title/mode
-   screen. Without it, a new player's first minute is an ungraded race with a
-   signature mechanic the code itself calls undiscoverable — the single biggest
-   threat to "a stranger wants a rematch."
+1. **Reopen a discoverable path to skill teaching — ship it as Practice, with
+   a practice lagoon.** The TUTORIAL tile was removed from mode-select on
+   2026-08-21 (commit 0f32d1f); the teaching flow now hides behind Settings →
+   "Replay tutorial" and `?tutorial=1`, and `tutorialCompleted` gates nothing
+   (menu-flow.ts:154-166, 1185). Per the 2026-08-22 maintainer decision (§6):
+   a **Practice** mode tile backed by a practice lagoon with a station per
+   skill (throttle/cruise, wave launch + landing, drift tiers, tricks, tuck),
+   generalising the Drift Practice Range pattern and reusing the
+   track-agnostic beat director; route first boot into it, or surface a
+   one-time "NEW HERE? → PRACTICE" card. The same map doubles as the standing
+   dev-test venue for feel-change regression checks. Without a discoverable
+   door, a new player's first minute is an ungraded race with a signature
+   mechanic the code itself calls undiscoverable — the single biggest threat
+   to "a stranger wants a rematch."
 
 2. **Teach the AI the v2 signature loop it grades them on.** AI still runs the
    cut v1 pump (vy-triggered pitch burst, ai-control.ts:315-356), never pitches

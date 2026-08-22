@@ -75,7 +75,9 @@ funnel; the AI still performs the cut v1 pump and never pitches landings or spen
 boost meter, so rivals never model the signature skill; the reward economy lets a free
 drift out-earn a perfect graded jump; and the proof-of-thesis cup fails its own 8-bike
 completion gate on Container Chaos, whose track data also ships zero pickups, pads, and
-wave zones. **Their #1:** reopen a discoverable path to the tutorial for new players.
+wave zones. **Their #1:** reopen a discoverable path to skill teaching — per the
+2026-08-22 maintainer decision, shipping as a **Practice** mode backed by a practice
+lagoon (a station per skill, doubling as a dev-test map).
 
 ### Art — [art.md](art.md)
 
@@ -166,12 +168,17 @@ Picked from the six perspectives' sixty ranked items, ordered by how much each o
 changes what a player actually experiences (severity × how many players hit it × how
 often). Attribution notes the source perspective and that document's own rank.
 
-1. **Reopen a discoverable path to the tutorial** *(Game Design #1).* Since the
-   2026-08-21 menu rework, a new player's first minute is an ungraded race with a
-   signature mechanic the code itself treats as undiscoverable — the tutorial hides
-   behind Settings → "Replay tutorial" and a URL param, and `tutorialCompleted` gates
-   nothing. Every single new player hits this, in the minute that decides whether they
-   stay. Route first boot into First Run or add a one-time "NEW HERE?" card.
+1. **Ship a discoverable Practice mode with a practice lagoon** *(Game Design #1;
+   direction set by the maintainer 2026-08-22).* Since the 2026-08-21 menu rework, a
+   new player's first minute is an ungraded race with a signature mechanic the code
+   itself treats as undiscoverable — the teaching flow hides behind Settings →
+   "Replay tutorial" and a URL param, and `tutorialCompleted` gates nothing. Every
+   single new player hits this, in the minute that decides whether they stay. The fix:
+   a **Practice** tile backed by a practice lagoon with a station per skill
+   (throttle/cruise, wave launch + landing, drift tiers, tricks, tuck), generalising
+   the existing Drift Practice Range pattern — and deliberately doubling as a stable
+   dev-test map where feel changes get verified per skill station before they can
+   regress the Reef Cup tracks.
 
 2. **Finish Container Chaos end-to-end — un-jam the field, fill the data, land the
    identity** *(Game Design #3 and #7 + Art #1 — one venue, one work package).* The
