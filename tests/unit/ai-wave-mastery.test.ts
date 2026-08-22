@@ -109,9 +109,7 @@ describe('decideAIVent', () => {
 
   it('keeps the button held while the meter is actively venting', () => {
     // Below the start threshold but mid-vent: hold until dry.
-    expect(
-      decideAIVent(standard, { ...base, charge: 0.2, meterActive: true }),
-    ).toBe(true)
+    expect(decideAIVent(standard, { ...base, charge: 0.2, meterActive: true })).toBe(true)
     expect(decideAIVent(standard, { ...base, charge: 0, meterActive: true })).toBe(false)
   })
 

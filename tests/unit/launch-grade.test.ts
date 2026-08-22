@@ -10,10 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import {
-  DRIFT_BOOST_DURATION_T2,
-  DRIFT_BOOST_MUL_T2,
-} from '../../src/game/systems/drift-tiers'
+import { DRIFT_BOOST_DURATION_T2, DRIFT_BOOST_MUL_T2 } from '../../src/game/systems/drift-tiers'
 import {
   CLEAN_JUMP_BURST_MUL,
   CLEAN_JUMP_BURST_S,

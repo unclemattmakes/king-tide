@@ -20,8 +20,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_MIN_HEIGHT_MULT } from '@/game/ai/pump-hints'
-import { buildTrackFromJson } from '@/game/tracks/json-loader'
 import { TIER_2_THRESHOLD_S } from '@/game/systems/drift-tiers'
+import { buildTrackFromJson } from '@/game/tracks/json-loader'
 
 const REPO_ROOT = path.resolve(__dirname, '../..')
 const PRACTICE_JSON = path.join(REPO_ROOT, 'public', 'tracks', 'practice-lagoon.json')
