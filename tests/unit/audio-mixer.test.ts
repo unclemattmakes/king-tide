@@ -111,29 +111,42 @@ describe('setAudioBusVolume', () => {
   })
 })
 
+/** One shared no-op stub — a new `AudioEngine` member only has to be
+ *  added here, not in every test's literal. */
+function stubAudioEngine(over: Partial<AudioEngine> = {}): AudioEngine {
+  return {
+    resume: async () => {},
+    isUnlocked: () => false,
+    setMuted: () => {},
+    isMuted: () => false,
+    setBusVolume: () => {},
+    setMusicEnabled: () => {},
+    duckMusic: () => {},
+    tickEngine: () => {},
+    driftSkid: () => {},
+    driftBoost: () => {},
+    pickupCollect: () => {},
+    pickupFire: () => {},
+    explosion: () => {},
+    tickRivalEngines: () => {},
+    gateCleared: () => {},
+    lapCompleted: () => {},
+    countdownTick: () => {},
+    finishStinger: () => {},
+    cupFanfare: () => {},
+    boostIgnite: () => {},
+    wavePump: () => {},
+    setTrackAudio: () => {},
+    setSoundtrack: () => {},
+    onSongChange: () => {},
+    nextSong: () => {},
+    ...over,
+  }
+}
+
 describe('audio-service', () => {
   it('round-trips the registered engine', () => {
-    const stub: AudioEngine = {
-      resume: async () => {},
-      setMuted: () => {},
-      isMuted: () => false,
-      setBusVolume: () => {},
-      setMusicEnabled: () => {},
-      duckMusic: () => {},
-      tickEngine: () => {},
-      driftSkid: () => {},
-      driftBoost: () => {},
-      pickupCollect: () => {},
-      pickupFire: () => {},
-      explosion: () => {},
-      gateCleared: () => {},
-      lapCompleted: () => {},
-      wavePump: () => {},
-      setTrackAudio: () => {},
-      setSoundtrack: () => {},
-      onSongChange: () => {},
-      nextSong: () => {},
-    }
+    const stub = stubAudioEngine()
     setAudioEngine(stub)
     expect(getAudioEngine()).toBe(stub)
     setAudioEngine(null as unknown as AudioEngine)
@@ -141,27 +154,9 @@ describe('audio-service', () => {
 
   it('applyAudioBusVolume forwards to the registered engine', () => {
     const calls: { bus: AudioBus; vol: number }[] = []
-    const stub: AudioEngine = {
-      resume: async () => {},
-      setMuted: () => {},
-      isMuted: () => false,
+    const stub = stubAudioEngine({
       setBusVolume: (bus, volume) => calls.push({ bus, vol: volume }),
-      setMusicEnabled: () => {},
-      duckMusic: () => {},
-      tickEngine: () => {},
-      driftSkid: () => {},
-      driftBoost: () => {},
-      pickupCollect: () => {},
-      pickupFire: () => {},
-      explosion: () => {},
-      gateCleared: () => {},
-      lapCompleted: () => {},
-      wavePump: () => {},
-      setTrackAudio: () => {},
-      setSoundtrack: () => {},
-      onSongChange: () => {},
-      nextSong: () => {},
-    }
+    })
     setAudioEngine(stub)
     applyAudioBusVolume('master', 0.5)
     applyAudioBusVolume('sfx', 0.25)

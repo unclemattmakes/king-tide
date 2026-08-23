@@ -7,12 +7,17 @@ import { buildPumpHints, hasAnyHints } from '@/game/ai/pump-hints'
 import {
   BikeStats,
   BikeStatsStore,
+  BoostMeterStore,
   ControlIntent,
   ControlIntentStore,
+  HoverStateStore,
+  LaunchGradeStore,
   RBHandle,
   RBHandleStore,
 } from '@/game/components'
 import { AIController, AIControllerStore, AITag } from '@/game/components/ai'
+import { StunStore } from '@/game/components/combat'
+import { pitchAngleFromQuat, TAKEOFF_IDEAL_PITCH_RAD } from '@/game/systems/launch-grade'
 import {
   curvatureAheadLooped,
   findClosestIndexLooped,
@@ -83,6 +88,97 @@ export function decideAIDrift(
   }
 
   return { driftDir: 0, driftHoldS: 0, driftCooldownS: cooldown }
+}
+
+// ── v2 wave-mastery helpers (pure; unit-tested) ──────────────────────
+
+/** Damping-to-gain ratio for the airborne landing PD. One knob
+ *  (`landingPitchGain`) tunes the whole controller per difficulty;
+ *  the D term scales with it so the response stays similarly damped
+ *  across the Casual→Hard gain range. */
+export const AI_LANDING_DAMP_RATIO = 0.35
+
+/** Airtime (s) before the landing controller engages. Skips ordinary
+ *  chop skips (which never grade — launch-grade's MIN_AIRTIME_SEC is
+ *  0.45) and leaves the first ticks of a pop to the takeoff burst. */
+export const AI_LANDING_PREP_MIN_AIR_S = 0.25
+
+/** How often (s of airtime) the landing controller resamples the
+ *  surface tangent under the bike. The target attitude drifts far
+ *  slower than 60 Hz, and `sampleSurface` is the sim's most expensive
+ *  sample — the PD itself still runs every tick against the cached
+ *  target. */
+export const AI_LANDING_TARGET_REFRESH_S = 0.25
+
+/**
+ * Airborne pitch-to-tangent landing controller — the AI half of
+ * "pitch the landing". Returns the `intent.pitch` command in [-1, 1].
+ *
+ * Convention care (same as launch-grade): `pitchAngle = asin(-fwd.y)`,
+ * positive = nose DOWN, and `intent.pitch = +1` pitches the nose UP
+ * (drives the angle DOWN). So the corrective input is positive —
+ * nose-up — while the nose sits below the target attitude
+ * (`pitchAngle - targetPitch > 0`), and the rate term damps toward it.
+ *
+ * Positional scalars on purpose — this runs per airborne AI per 60 Hz
+ * tick, and a named-args object would be a per-call allocation in the
+ * sim loop.
+ *
+ * @param pitchAngle Current pitch (rad), `asin(-fwd.y)` — positive = nose down.
+ * @param pitchRate d(pitchAngle)/dt ≈ angvel · rightAxis (rad/s).
+ * @param targetPitch `-atan(landingForwardSlope)` — the exact pitch
+ *   `gradeLanding` scores as a perfect slope-match.
+ * @param gain Proportional gain (`AIController.landingPitchGain`).
+ */
+export function decideAILandingPitch(
+  pitchAngle: number,
+  pitchRate: number,
+  targetPitch: number,
+  gain: number,
+): number {
+  const u = gain * (pitchAngle - targetPitch) + gain * AI_LANDING_DAMP_RATIO * pitchRate
+  return Math.max(-1, Math.min(1, u))
+}
+
+export type AIVentSignals = {
+  /** Boost-meter charge 0..1. */
+  charge: number
+  /** Meter currently venting (boost-meter `active`). */
+  meterActive: boolean
+  /** HoverState.isGrounded this tick. */
+  grounded: boolean
+  /** AI drift state machine currently holding a drift. */
+  drifting: boolean
+  /** Bike currently in a stun spinout (combat hit). The shared
+   *  stun override zeroes throttle/steer but deliberately leaves the
+   *  boost button alone (a player choice); the AI has no such choice
+   *  to respect, and holding the vent through a spinout would drain
+   *  the earned meter at zero speed. */
+  stunned: boolean
+  /** Averaged curvature (1/m) over the lookahead scan. */
+  curvatureAhead: number
+}
+
+/**
+ * Should the AI hold `intent.boost` this tick? Spends the meter the
+ * launch-grade system pays it (evaluation game-design #2 — the charge
+ * used to be dead state on AI).
+ *
+ * Start venting on a straight once `charge >= ventChargeMin`; keep the
+ * button held until the meter runs dry (boost-meter deactivates itself
+ * at 0) or a drift-worthy corner shows up in the scan — the same
+ * curvature threshold that would trigger a drift also means "stop
+ * boosting into it". `ventChargeMin = Infinity` (Casual) disables.
+ */
+export function decideAIVent(
+  tuning: { ventChargeMin: number; driftCurvatureThreshold: number },
+  s: AIVentSignals,
+): boolean {
+  if (tuning.ventChargeMin === Number.POSITIVE_INFINITY) return false
+  if (!s.grounded || s.drifting || s.stunned) return false
+  if (s.curvatureAhead >= tuning.driftCurvatureThreshold) return false
+  if (s.meterActive) return s.charge > 0
+  return s.charge >= tuning.ventChargeMin
 }
 
 /**
@@ -163,10 +259,12 @@ function pumpHintsFor(track: Track): PumpHintCache {
 
 /** Sim-seconds the AI holds `intent.pitch` once a pump fires. Long
  *  enough that hover.ts's pitch torque (PITCH_TORQUE_ACCEL · m · dt
- *  per tick) integrates into a clear nose-up rotation across the burst
- *  window; short enough that the AI is back on its racing line within
- *  ~5 ticks. Pairs with `PUMP_COOLDOWN_S` below. */
-const PUMP_HOLD_S = 0.1
+ *  per tick) can integrate the nose up INTO the launch-grade pop band
+ *  (~14° takes roughly 0.2 s from level at GROUND_PITCH_COEF against
+ *  the grounded PD); the burst is closed-loop — it stops pitching the
+ *  moment the band is reached — so the ceiling only matters when the
+ *  swell fights the rotation. Pairs with `PUMP_COOLDOWN_S` below. */
+const PUMP_HOLD_S = 0.28
 /** Sim-seconds between pump fires. Matches the player wave-pump
  *  observer's `cooldownMs` (500 ms) so a heavy-swell hint zone doesn't
  *  chain pumps faster than the player ever could. */
@@ -312,15 +410,18 @@ export function aiControlSystem(
         ? Math.min(0.9, (overshoot - BRAKE_TRIGGER_MARGIN) * 0.18)
         : 0
 
-    // Wave-pump action (Phase A gap 7). The intent.pitch is the same
-    // input the player taps with E to launch off a crest. AI semantics:
+    // Wave-launch action (v2 signature loop, grounded half). The
+    // intent.pitch is the same input the player holds with E to shape a
+    // takeoff. AI semantics:
     //
-    //   1. Holding from a prior tick — keep `intent.pitch` lit until the
-    //      burst window expires; decrement both timers.
-    //   2. Cooldown ticking down — no new pump until it hits zero.
+    //   1. Holding from a prior tick — keep pitching until either the
+    //      nose reaches the launch-grade pop band (closed loop: don't
+    //      overshoot into a backflip attitude) or the burst window
+    //      expires; decrement both timers.
+    //   2. Cooldown ticking down — no new launch until it hits zero.
     //   3. Armed + on a hint index + speed high enough + surface rising
-    //      hard enough — fire a fresh pump: hold for PUMP_HOLD_S, then
-    //      lock out for PUMP_COOLDOWN_S.
+    //      hard enough — commit a fresh launch: hold for PUMP_HOLD_S,
+    //      then lock out for PUMP_COOLDOWN_S.
     //
     // Casual AI's `pumpVyThreshold = Infinity` collapses branch 3 to
     // false in the inequality check, so the difficulty acts on per-tick
@@ -330,15 +431,17 @@ export function aiControlSystem(
     let nextPumpCooldownS = Math.max(0, ai.pumpCooldownS - dt)
     const pumpHints = pumpCache.hintsBySplineId.get(ai.splineId)
     if (ai.pumpHoldS > 0) {
-      // Sustaining a pump that fired on a prior tick.
-      pumpPitch = ai.pumpPitchStrength
+      // Sustaining a launch commit from a prior tick — closed loop
+      // against the graded target: nose-up (pitch angle FALLING toward
+      // the negative ideal) only while short of the band.
+      pumpPitch = pitchAngleFromQuat(q) > TAKEOFF_IDEAL_PITCH_RAD ? ai.pumpPitchStrength : 0
     } else if (
       pumpCache.anyHints &&
       nextPumpCooldownS <= 0 &&
       ai.pumpVyThreshold !== Number.POSITIVE_INFINITY &&
       pumpHints?.[bestIdx] === true
     ) {
-      // Pump-eligible — sample the live surface vy under the bike.
+      // Launch-eligible — sample the live surface vy under the bike.
       // sampleSurface is the same call buoyancy uses in hover.ts, so the
       // AI's reading is identical to what the player feels.
       const aiSpeedFrac =
@@ -355,15 +458,88 @@ export function aiControlSystem(
       }
     }
 
+    // v2 signature loop, airborne half: pitch the landing. Past a short
+    // settle window (chop skips never engage — they also never grade),
+    // drive `intent.pitch` toward the local surface tangent, the exact
+    // attitude `gradeLanding` scores — Standard/Hard rivals visibly
+    // stomp landings and earn the same jump payout the player does.
+    //
+    // Cost control: `sampleSurface` is the heaviest sim sample in the
+    // game (full Gerstner stack), so the TARGET attitude is resampled
+    // on a coarse cadence (`AI_LANDING_TARGET_REFRESH_S` buckets of
+    // airtime — deterministic, since airborneSec accumulates fixed dt)
+    // and cached on the controller; the cheap PD against the cached
+    // target still runs every tick. The one sample also yields the
+    // normal, so the slope costs nothing extra when it does run.
+    const hover = HoverStateStore.get(eid)
+    const airborne = hover ? !hover.isGrounded : false
+    let nextLandingTargetPitch = ai.landingTargetPitch
+    let nextLandingTargetBucket = airborne ? ai.landingTargetBucket : -1
+    if (airborne && ai.landingPitchGain > 0) {
+      const airborneSec = LaunchGradeStore.get(eid)?.airborneSec ?? 0
+      if (airborneSec >= AI_LANDING_PREP_MIN_AIR_S) {
+        const bucket = Math.floor(
+          (airborneSec - AI_LANDING_PREP_MIN_AIR_S) / AI_LANDING_TARGET_REFRESH_S,
+        )
+        if (bucket !== ai.landingTargetBucket) {
+          nextLandingTargetBucket = bucket
+          nextLandingTargetPitch = 0
+          const fwdLen = Math.hypot(fwd.x, fwd.z)
+          if (fwdLen > 0.01) {
+            const hx = fwd.x / fwdLen
+            const hz = fwd.z / fwdLen
+            // Height gradient from the surface normal: ∂y/∂x = -nx/ny,
+            // ∂y/∂z = -nz/ny; forward slope = gradient · heading.
+            const s = sampleSurface(waveField, t.x, t.z)
+            if (s.ny > 0.2) {
+              const slope = -(s.nx * hx + s.nz * hz) / s.ny
+              nextLandingTargetPitch = -Math.atan(slope)
+            }
+          }
+        }
+        pumpPitch = decideAILandingPitch(
+          pitchAngleFromQuat(q),
+          angvel.x * right.x + angvel.y * right.y + angvel.z * right.z,
+          nextLandingTargetPitch,
+          ai.landingPitchGain,
+        )
+      }
+    }
+
     // AI drift decision — runs through the pure `decideAIDrift` helper
     // so the state machine can be unit-tested in isolation.
     const drift = decideAIDrift(ai, ai, { curvatureAhead: curvature, speed: speedHoriz, steer, dt })
+
+    // Spend the meter launch-grade pays (v2 loop, reward half) — vent
+    // on straights via the pure `decideAIVent` helper. Rising edge on
+    // the meter comes free: holding `boost` across ticks presents one
+    // fresh press to boostMeterSystem's edge detector when this flips.
+    // The Infinity short-circuit runs BEFORE the store reads + signal
+    // object so Casual pays ~one branch per tick (the same pattern as
+    // `pumpVyThreshold`), and a stunned AI banks its charge instead of
+    // venting into a forced-zero throttle.
+    let vent = false
+    if (ai.ventChargeMin !== Number.POSITIVE_INFINITY) {
+      const meter = BoostMeterStore.get(eid)
+      if (meter) {
+        vent = decideAIVent(ai, {
+          charge: meter.charge,
+          meterActive: meter.active,
+          grounded: !airborne,
+          drifting: drift.driftDir !== 0,
+          stunned: StunStore.get(eid) !== undefined,
+          curvatureAhead: curvature,
+        })
+      }
+    }
 
     AIControllerStore.set(eid, {
       ...ai,
       lastClosestIndex: bestIdx,
       pumpHoldS: nextPumpHoldS,
       pumpCooldownS: nextPumpCooldownS,
+      landingTargetPitch: nextLandingTargetPitch,
+      landingTargetBucket: nextLandingTargetBucket,
       driftDir: drift.driftDir,
       driftHoldS: drift.driftHoldS,
       driftCooldownS: drift.driftCooldownS,
@@ -373,7 +549,7 @@ export function aiControlSystem(
       steer,
       brake,
       fire: false,
-      boost: false,
+      boost: vent,
       pitch: pumpPitch,
       // AI drift — translate the controller's `driftDir` into a held
       // trick-button. driftSystem reads these alongside steer to

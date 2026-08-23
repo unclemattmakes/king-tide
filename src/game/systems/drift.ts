@@ -13,7 +13,7 @@ import {
   type HoverStateData,
   HoverStateStore,
 } from '@/game/components'
-import { BoostEffect, BoostEffectStore } from '@/game/components/pickup'
+import { mergeBoostEffect } from './boost-effect'
 import { driftBoostParams, tierFor } from './drift-tiers'
 
 /**
@@ -219,20 +219,12 @@ export function driftSystem(sim: SimWorld, phys: PhysicsWorld): void {
 
 /**
  * Apply a mini-turbo as a `BoostEffect`. Stacks with existing boosts via
- * `boost-pad.ts`'s "stronger wins, longer duration wins" merge rule, so
- * a drift release into a boost pad cleanly extends the pad's effect
- * without prematurely truncating it.
+ * the shared "stronger wins, longer duration wins" merge rule
+ * (`boost-effect.ts`), so a drift release into a boost pad cleanly
+ * extends the pad's effect without prematurely truncating it.
  */
 function fireMiniTurbo(sim: SimWorld, eid: number, tier: number): void {
   const params = driftBoostParams(tier)
   if (!params) return
-  if (!BoostEffectStore.has(eid)) addComponent(sim, eid, BoostEffect)
-  const current = BoostEffectStore.get(eid)
-  const multiplier =
-    current && current.remaining > 0
-      ? Math.max(current.multiplier, params.multiplier)
-      : params.multiplier
-  const remaining =
-    current && current.remaining > params.durationS ? current.remaining : params.durationS
-  BoostEffectStore.set(eid, { remaining, multiplier })
+  mergeBoostEffect(sim, eid, params.multiplier, params.durationS)
 }

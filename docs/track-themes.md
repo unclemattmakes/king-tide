@@ -32,7 +32,11 @@
 >   hoverbike racing is the post-collapse spectator sport. *Light lore
 >   wrapper, not a story mode.*
 > - Every track is a **recognizable real-world place** seen post-flood —
->   no generic biomes.
+>   no generic biomes. *(Superseded 2026-08-20 by the fictional-city
+>   pivot: tracks are now cities **real or fictional** — Mayday Bay,
+>   Angel Basin, and Container Chaos are fictional — but the ban on
+>   generic biomes stands: every venue is still a specific, named,
+>   flooded place. See CLAUDE.md "Current direction".)*
 > - Every track has **at least one named set-piece moment**.
 > - Signature skill axis = **wave mastery** (per [design-targets.md](./design-targets.md)).
 > - 11 tracks across 4 cups; one tutorial track outside the cup structure.

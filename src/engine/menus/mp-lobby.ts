@@ -44,6 +44,14 @@ const ALL_BIKES = Object.values(BIKE_VARIANTS).map((v) => ({
   accent: `#${v.accentColor.toString(16).padStart(6, '0')}`,
 }))
 
+/** How long the lobby will show a bare "CONNECTING…" before flipping to
+ *  the can't-reach-the-relay explainer. Comfortably above a slow cold
+ *  connect (the race path's start failsafe is 15 s; a healthy relay
+ *  hello lands in well under 2 s) while short enough that a friend
+ *  clicking a shared room link during an outage isn't staring at an
+ *  unexplained spinner. */
+export const CONNECT_STALL_TIMEOUT_MS = 10_000
+
 export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
   const tracks = buildTrackList(opts.manifestTracks)
   const trackOptions = tracks.map((t) => ({ id: t.id, label: t.name }))
@@ -58,6 +66,16 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
 
   let pickBanner: LobbyView['pickBanner'] = null
   let raceArmed = false
+  /** Wall-clock of the last moment the connection was healthy (or
+   *  lobby entry), for the connect time-box: partysocket retries
+   *  silently forever, so with the relay down (or `pnpm party:dev` not
+   *  running in dev) the lobby used to sit on "CONNECTING TO THE
+   *  BROADCAST…" with no explanation and no visible way out
+   *  (evaluation networking #6). Refreshed while `net.ready`, so a
+   *  mid-lobby blip gets the full grace window before the failure
+   *  banner shows — timing only from lobby entry made any transient
+   *  disconnect after the first 10 s flip the scary banner instantly. */
+  let connectionHealthyAt = performance.now()
   /** Track we'll navigate to when the banner timer fires. Mutable after
    *  arming: a relay `start-race` carrying a different winner (another
    *  peer armed first — its pick is the sticky one the server replays)
@@ -110,10 +128,13 @@ export function runMpLobby(opts: MpLobbyOpts): Promise<MpLobbyResult> {
         })
       }
       peers.sort((a, b) => a.peerId - b.peerId)
+      if (net.ready) connectionHealthyAt = performance.now()
       return {
         peers,
         localReady: local.ready,
         connecting: !net.ready,
+        connectStalled:
+          !net.ready && performance.now() - connectionHealthyAt >= CONNECT_STALL_TIMEOUT_MS,
         localBike: bikeMeta(local.bikeId),
         localTrack: trackMeta(local.trackId),
         bikeOptions: ALL_BIKES,

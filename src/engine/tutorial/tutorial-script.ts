@@ -58,9 +58,20 @@ export interface TutorialContext {
   /** Graded takeoffs (launchGradeSystem verdicts) since the beat
    *  armed. Cleared at every beat arm. */
   launchesThisBeat: number
+  /** Best takeoff quality (0..1) graded since the beat armed. Lets a
+   *  practice beat ask for a *shaped* pop (quality gate) where the
+   *  intro script only asks that a launch happened (count gate).
+   *  Cleared at every beat arm. */
+  bestLaunchQualityThisBeat: number
   /** Best landing quality (0..1) graded since the beat armed. 0 when
    *  no credible landing has happened yet. Cleared at every beat arm. */
   bestLandingQualityThisBeat: number
+  /** Best tuck sweet-spot factor (0..1) reached since the beat armed —
+   *  fed by the render-side tuck readout (`notifyTuck`), which already
+   *  computes the slope-aware factor for the HUD. Lets a practice beat
+   *  teach "feather the descent" without a new sim channel. Cleared at
+   *  every beat arm. */
+  bestTuckFactorThisBeat: number
   /** True while the player is engaged with an anti-grav source
    *  (override.active && weight > threshold). Parked with anti-grav
    *  (cut) — no shipped beat reads it, but the field stays so the

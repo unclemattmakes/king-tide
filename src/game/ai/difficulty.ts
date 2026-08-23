@@ -44,8 +44,27 @@ export type DifficultyTuning = Readonly<{
   pumpVyThreshold: number
   /** `intent.pitch` magnitude held during a pump burst. Player flicks E
    *  briefly; the AI matches with a 0.5–0.8 nose-up tilt that hover.ts's
-   *  pitch-torque integrates into a clear launch over the burst window. */
+   *  pitch-torque integrates into a clear launch over the burst window.
+   *  The burst is closed-loop: `ai-control` stops pitching once the nose
+   *  reaches the launch-grade pop band, so the AI shapes its takeoff into
+   *  the same 14° target the player is graded on. */
   pumpPitchStrength: number
+  /** Proportional gain for the airborne pitch-to-tangent landing
+   *  controller (v2 wave mastery: "pitch the landing"). While airborne
+   *  past a small settle window, the AI drives `intent.pitch` toward the
+   *  local surface tangent — the exact target `gradeLanding` scores —
+   *  so Standard/Hard rivals visibly stomp landings and earn the same
+   *  jump payout the player does. `0` disables (Casual cases whatever
+   *  attitude it carried off the lip, same as before). */
+  landingPitchGain: number
+  /** Boost-meter charge at which the AI vents its earned meter on a
+   *  straight (`intent.boost`). `Infinity` disables venting — before
+   *  this the meter that launchGradeSystem paid the AI was dead state
+   *  (`boost: false` every tick). Standard banks until nearly full;
+   *  Hard spends more aggressively. Venting is suppressed while
+   *  drifting, airborne, or when the curvature scan sees a
+   *  drift-worthy corner coming (see `decideAIVent`). */
+  ventChargeMin: number
   /** Curvature (1/m) above which the AI will initiate a drift on the
    *  upcoming corner. `Infinity` disables AI drift entirely (Casual).
    *  Standard triggers on tight 90° corners (~30 m radius → 0.033 1/m);
@@ -92,6 +111,11 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     // branching on difficulty there.
     pumpVyThreshold: Number.POSITIVE_INFINITY,
     pumpPitchStrength: 0,
+    // Casual neither pitches landings nor spends the meter — the whole
+    // wave-mastery loop stays off, same Infinity/zero short-circuit
+    // pattern as pump + drift.
+    landingPitchGain: 0,
+    ventChargeMin: Number.POSITIVE_INFINITY,
     // Same Infinity short-circuit for drift — Casual AI doesn't drift.
     driftCurvatureThreshold: Number.POSITIVE_INFINITY,
     driftMinSpeed: Number.POSITIVE_INFINITY,
@@ -110,6 +134,12 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     rubberBandPenaltyFloor: 0.92,
     pumpVyThreshold: 1.5,
     pumpPitchStrength: 0.5,
+    // Standard demonstrates the loop without perfecting it: a soft
+    // landing controller that usually reads "ok", and a meter vent
+    // only once the bar is nearly full — a competent rider, not a
+    // showman. Starting values — tune with headed playtest.
+    landingPitchGain: 2.2,
+    ventChargeMin: 0.9,
     // Triggers on sharp 90° corners (~30 m radius → 0.033 1/m). Holds
     // long enough to clear the SMT threshold (1.4 s) on the typical
     // corner length, but releases short of UMT so the orange MT is
@@ -131,6 +161,11 @@ export const DIFFICULTY_TUNING: Readonly<Record<AIDifficulty, DifficultyTuning>>
     rubberBandPenaltyFloor: 0.9,
     pumpVyThreshold: 0.6,
     pumpPitchStrength: 0.8,
+    // Hard is the on-screen role model for the signature skill: tight
+    // landing PD (clean stomps on rolling water) and an eager vent so
+    // the earned meter is visibly spent on straights.
+    landingPitchGain: 3.5,
+    ventChargeMin: 0.55,
     // Wider trigger envelope (drifts on medium corners too — radius
     // up to ~50 m). Longer hold ceiling so the AI reaches the purple
     // UMT tier (2.4 s) on long sweeps, matching the design-doc claim

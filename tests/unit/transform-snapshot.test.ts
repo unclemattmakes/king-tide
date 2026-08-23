@@ -2,11 +2,12 @@
  * M10.11 — TransformSnapshot wire format round-trip tests.
  *
  * The codec is the contract between an owner-peer's broadcast hook and every
- * other tab's `applySnapshot`. Quantization is lossy by design (int16 cm /
- * 1/32767 quat / 1/256 m/s), so the tests assert recovery within the
- * documented tolerances rather than bit-exact equality. Clamping, tag-byte
- * mismatch, and post-decode renormalization are pinned because each one is
- * a real failure mode that would corrupt a remote bike's pose silently.
+ * other tab's `applySnapshot`. Quantization is lossy by design (int32 cm
+ * positions / 1/32767 quat / 1/256 m/s), so the tests assert recovery within
+ * the documented tolerances rather than bit-exact equality. Wide-range
+ * positions, legacy 0x02 decode, tag-byte mismatch, and post-decode
+ * renormalization are pinned because each one is a real failure mode that
+ * would corrupt a remote bike's pose silently.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -17,7 +18,9 @@ import {
   encodeTransformSnapshotInto,
   MESSAGE_TAG_INPUT_FRAME,
   MESSAGE_TAG_TRANSFORM_SNAPSHOT,
+  MESSAGE_TAG_TRANSFORM_SNAPSHOT_V1,
   SNAPSHOT_BIKE_BYTES,
+  SNAPSHOT_BIKE_BYTES_V1,
   SNAPSHOT_HEADER_BYTES,
   snapshotByteLength,
   type TransformSnapshot,
@@ -64,14 +67,16 @@ function expectRecordClose(actual: BikeSnapshotRecord, expected: BikeSnapshotRec
 describe('TransformSnapshot codec', () => {
   it('exports the documented message tag constants', () => {
     expect(MESSAGE_TAG_INPUT_FRAME).toBe(0x01)
-    expect(MESSAGE_TAG_TRANSFORM_SNAPSHOT).toBe(0x02)
+    expect(MESSAGE_TAG_TRANSFORM_SNAPSHOT_V1).toBe(0x02)
+    expect(MESSAGE_TAG_TRANSFORM_SNAPSHOT).toBe(0x03)
     expect(SNAPSHOT_HEADER_BYTES).toBe(8)
-    expect(SNAPSHOT_BIKE_BYTES).toBe(24)
+    expect(SNAPSHOT_BIKE_BYTES).toBe(30)
+    expect(SNAPSHOT_BIKE_BYTES_V1).toBe(24)
   })
 
-  it('snapshotByteLength returns 8 + 24*N for N in 0..8', () => {
+  it('snapshotByteLength returns 8 + 30*N for N in 0..8', () => {
     for (let n = 0; n <= 8; n++) {
-      expect(snapshotByteLength(n)).toBe(8 + 24 * n)
+      expect(snapshotByteLength(n)).toBe(8 + 30 * n)
     }
   })
 
@@ -132,7 +137,10 @@ describe('TransformSnapshot codec', () => {
     }
   })
 
-  it('clamps positions outside ±327.67 m to int16 min/max', () => {
+  it('round-trips positions far beyond the retired ±327.67 m int16 range', () => {
+    // The whole point of tag 0x03 (evaluation networking #1): a dressed
+    // Mexico City / Cape Town coordinate must survive the wire instead of
+    // silently pinning to the old world edge.
     const snap: TransformSnapshot = {
       senderPeerId: 0,
       tick: 0,
@@ -142,18 +150,52 @@ describe('TransformSnapshot codec', () => {
           bikeKind: 0,
           bikeIndex: 0,
           flags: 0,
-          // Far beyond the ±327.67 m clamp range in both directions.
-          position: { x: 10_000, y: -10_000, z: 500 },
+          position: { x: 10_000.25, y: -10_000.5, z: 500.75 },
           rotation: { x: 0, y: 0, z: 0, w: 1 },
           velocity: { x: 0, y: 0, z: 0 },
         },
       ],
     }
     const decoded = decodeTransformSnapshot(encodeTransformSnapshot(snap))
-    // int16 max = 32767, decoded as 32767/100 = 327.67; min = -32768 → -327.68
-    expect(decoded.bikes[0]!.position.x).toBeCloseTo(327.67, 2)
-    expect(decoded.bikes[0]!.position.y).toBeCloseTo(-327.67, 2)
-    expect(decoded.bikes[0]!.position.z).toBeCloseTo(327.67, 2) // 500 clamps to +max too
+    expect(decoded.bikes[0]!.position.x).toBeCloseTo(10_000.25, 2)
+    expect(decoded.bikes[0]!.position.y).toBeCloseTo(-10_000.5, 2)
+    expect(decoded.bikes[0]!.position.z).toBeCloseTo(500.75, 2)
+  })
+
+  it('still decodes a legacy 0x02 frame from a stale pre-widening tab', () => {
+    // Hand-build a legacy 24-byte-record frame: header + one bike at
+    // (100.5, 1.5, -200.25), identity rotation, velocity (0, 0, 12).
+    const buf = new Uint8Array(SNAPSHOT_HEADER_BYTES + SNAPSHOT_BIKE_BYTES_V1)
+    const view = new DataView(buf.buffer)
+    view.setUint8(0, MESSAGE_TAG_TRANSFORM_SNAPSHOT_V1)
+    view.setUint8(1, 4) // senderPeerId
+    view.setUint16(2, 0, true)
+    view.setUint32(4, 777, true)
+    view.setUint8(8, 4) // ownerPeerId
+    view.setUint8(9, 0) // bikeKind player
+    view.setUint8(10, 0) // bikeIndex
+    view.setUint8(11, 0) // flags
+    view.setInt16(12, 100.5 * 100, true)
+    view.setInt16(14, 1.5 * 100, true)
+    view.setInt16(16, -200.25 * 100, true)
+    view.setInt16(18, 0, true) // qx
+    view.setInt16(20, 0, true) // qy
+    view.setInt16(22, 0, true) // qz
+    view.setInt16(24, 32767, true) // qw
+    view.setInt16(26, 0, true) // vx
+    view.setInt16(28, 0, true) // vy
+    view.setInt16(30, 12 * 256, true) // vz
+
+    const decoded = decodeTransformSnapshot(buf)
+    expect(decoded.senderPeerId).toBe(4)
+    expect(decoded.tick).toBe(777)
+    expect(decoded.bikes).toHaveLength(1)
+    const bike = decoded.bikes[0]!
+    expect(bike.position.x).toBeCloseTo(100.5, 2)
+    expect(bike.position.y).toBeCloseTo(1.5, 2)
+    expect(bike.position.z).toBeCloseTo(-200.25, 2)
+    expect(bike.rotation.w).toBeCloseTo(1, 4)
+    expect(bike.velocity.z).toBeCloseTo(12, 2)
   })
 
   it('renormalizes a non-unit quaternion on decode', () => {
@@ -182,6 +224,42 @@ describe('TransformSnapshot codec', () => {
     expect(norm).toBeCloseTo(1, 5)
   })
 
+  it('decodes only the complete records of a truncated frame', () => {
+    // A tag-valid frame whose payload isn't a whole number of records
+    // (truncation, garbling) must not run a fractional extra loop
+    // iteration and read past the buffer — that RangeError would land
+    // inside the socket's message handler.
+    const snap: TransformSnapshot = {
+      senderPeerId: 1,
+      tick: 5,
+      bikes: [
+        {
+          ownerPeerId: 1,
+          bikeKind: 0,
+          bikeIndex: 0,
+          flags: 0,
+          position: { x: 5, y: 1, z: -5 },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+          velocity: { x: 0, y: 0, z: 0 },
+        },
+        {
+          ownerPeerId: 1,
+          bikeKind: 1,
+          bikeIndex: 0,
+          flags: 0,
+          position: { x: 9, y: 1, z: -9 },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+          velocity: { x: 0, y: 0, z: 0 },
+        },
+      ],
+    }
+    const full = encodeTransformSnapshot(snap)
+    const truncated = full.subarray(0, full.byteLength - 7) // cut into record 2
+    const decoded = decodeTransformSnapshot(truncated)
+    expect(decoded.bikes).toHaveLength(1)
+    expect(decoded.bikes[0]!.position.x).toBeCloseTo(5, 2)
+  })
+
   it('throws a clear error when the tag byte is wrong', () => {
     const snap: TransformSnapshot = {
       senderPeerId: 0,
@@ -200,7 +278,7 @@ describe('TransformSnapshot codec', () => {
     }
     const buf = encodeTransformSnapshot(snap)
     buf[0] = 0x01 // mimic an InputFrame tag landing in the snapshot decoder
-    expect(() => decodeTransformSnapshot(buf)).toThrow(/bad tag: expected 0x02, got 0x01/)
+    expect(() => decodeTransformSnapshot(buf)).toThrow(/bad tag: expected 0x03 .*got 0x01/)
   })
 
   it('encodes into / decodes from a shared buffer at non-zero offset', () => {

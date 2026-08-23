@@ -106,6 +106,30 @@ test.describe('cold-boot menu', () => {
     expect(url).not.toContain('tt=1')
   })
 
+  test('Practice path commits the practice lagoon with tutorial=1 and no AI', async ({ page }) => {
+    await gotoAndStart(page)
+    await clickModeCard(page, 'practice')
+    // The practice screen offers FIRST RUN + PRACTICE LAGOON. The
+    // lagoon card commits directly — no track/bike pickers on this path.
+    await softClick(page.locator('#practice-lagoon-start'))
+    const url = await waitForCommit(page, /race=1/)
+    expect(url).toContain('track=practice-lagoon')
+    expect(url).toContain('tutorial=1')
+    expect(url).toContain('ai=0')
+    expect(url).toMatch(/bike=/)
+  })
+
+  test('Practice screen still offers the coached First Run on sandbar', async ({ page }) => {
+    await gotoAndStart(page)
+    await clickModeCard(page, 'practice')
+    await softClick(page.locator('#tut-start'))
+    const url = await waitForCommit(page, /race=1/)
+    expect(url).toContain('track=sandbar')
+    expect(url).toContain('tutorial=1')
+    // First Run keeps its casual escort — no ai override.
+    expect(url).not.toContain('ai=')
+  })
+
   test('Time Trial path commits a race URL with tt=1', async ({ page }) => {
     await gotoAndStart(page)
     await clickModeCard(page, 'time-trial')

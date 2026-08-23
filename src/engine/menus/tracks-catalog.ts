@@ -61,7 +61,12 @@ export const V1_TRACKS: V1TrackEntry[] = [
     cup: 'reef',
     accent: '#9bdcf2',
     lapTarget: 60,
-    laps: 1,
+    // Matches sandbar.json's lapsToFinish — race completion checks the
+    // JSON, so the card must promise what actually loads (the card said
+    // 1 for a while, understating the commitment 3×; the class of
+    // stale-promise the 2026-08-19 playtest called the biggest trust
+    // break). Pinned by catalog-consistency.
+    laps: 3,
     gateLabel: '',
     art: 'dressed',
     status: 'ship',
@@ -224,7 +229,9 @@ export const V1_TRACKS: V1TrackEntry[] = [
     id: 'liberty-drowned',
     name: 'Liberty Drowned',
     location: 'Drowned Manhattan — sunset finale',
-    setPiece: 'The Torch Arm anti-grav showcase',
+    // v2 copy — anti-grav is cut; the doc'd set-piece is the ride-up
+    // (docs/tracks/liberty-drowned.md "Set-piece — The Torch Arm").
+    setPiece: 'The Torch Arm ride-up — launch off the fist',
     cup: 'drowned',
     accent: '#5eb89a',
     lapTarget: 70,

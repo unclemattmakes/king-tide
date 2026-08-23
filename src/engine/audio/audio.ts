@@ -46,10 +46,67 @@ import { createJukebox, type Jukebox, type SoundtrackEntry } from './soundtrack'
 export type PickupSoundType = 'boost' | 'shield' | 'missile' | 'mine'
 export type AudioBus = 'master' | 'music' | 'sfx' | 'ambient'
 
+/** Spatial placement for a one-shot: `gain` ∈ [0,1] distance
+ *  attenuation, `pan` ∈ [-1,1] stereo position. Omitted = at the
+ *  listener, full volume, centered (the pre-spatial behavior). */
+export type SpatialCue = { gain: number; pan: number }
+
+/** Within this distance (m) of the listener a one-shot plays at full
+ *  volume. The listener is the CHASE CAMERA, which trails the player's
+ *  bike by ~4-12 m — without the plateau, the player's own ordnance
+ *  (and a mine at their wheel) would be quietly attenuated by their
+ *  own camera rig. */
+export const SPATIAL_NEAR_FULL_M = 12
+
+/** Falloff scale (m) past the near-field: gain halves REF meters
+ *  beyond `SPATIAL_NEAR_FULL_M`. At 300 m an AI mine is a distant
+ *  ~12% thump instead of a full-volume bang. */
+export const SPATIAL_REF_DISTANCE_M = 40
+
+/** Pan authority — full hard-pan sounds broken on headphones, so the
+ *  lateral component maps onto ±0.8. */
+const SPATIAL_PAN_MAX = 0.8
+
+/**
+ * Pure spatializer: distance gain + stereo pan for an emitter heard
+ * from a listener with the given right-vector (camera right, world
+ * space). Kept Three-free (plain vectors) so the render loop can feed
+ * it camera state and unit tests can pin the math.
+ */
+export function spatialCueFor(
+  emitter: { x: number; y: number; z: number },
+  listener: { x: number; y: number; z: number },
+  listenerRight: { x: number; y: number; z: number },
+  refDistance = SPATIAL_REF_DISTANCE_M,
+): SpatialCue {
+  const dx = emitter.x - listener.x
+  const dy = emitter.y - listener.y
+  const dz = emitter.z - listener.z
+  const dist = Math.hypot(dx, dy, dz)
+  const gain = 1 / (1 + Math.max(0, dist - SPATIAL_NEAR_FULL_M) / refDistance)
+  if (dist < 0.001) return { gain: 1, pan: 0 }
+  const lateral = (dx * listenerRight.x + dy * listenerRight.y + dz * listenerRight.z) / dist
+  const pan = Math.max(-1, Math.min(1, lateral)) * SPATIAL_PAN_MAX
+  return { gain, pan }
+}
+
+/** One rival engine voice's per-frame drive values. `pitch01` is the
+ *  rival's speed as a fraction of top speed. `snap` marks a slot whose
+ *  occupant changed this frame: the voice re-seats at the new values
+ *  (quick fade-in from silence) instead of gliding one engine tone
+ *  between two unrelated bikes' pan/pitch. */
+export type RivalEngineDrive = { gain: number; pan: number; pitch01: number; snap?: boolean }
+
 export interface AudioEngine {
   /** Resume the AudioContext, creating it on first call. Call from a
    *  user-gesture listener. Safe to call repeatedly. */
   resume(): Promise<void>
+  /** True once the AudioContext exists AND is actually running —
+   *  autoplay policy can leave a freshly-created context `suspended`
+   *  until a gesture, and one-shots scheduled against a suspended
+   *  context pile up at a frozen clock and play as a garbled cluster
+   *  whenever it later resumes. Gate ceremony cues on this. */
+  isUnlocked(): boolean
   setMuted(muted: boolean): void
   isMuted(): boolean
   /** Set a per-bus linear volume ∈ [0,1]. The bus stays at this value
@@ -80,14 +137,42 @@ export interface AudioEngine {
   driftBoost(tier: number): void
   /** A bike (any bike) just put a pickup into its slot. */
   pickupCollect(): void
-  /** A bike (any bike) just consumed its slot. `type` selects the SFX. */
-  pickupFire(type: PickupSoundType): void
-  /** A new explosion entity just spawned (mine or missile detonation). */
-  explosion(): void
+  /** A bike (any bike) just consumed its slot. `type` selects the SFX.
+   *  `spatial` places the one-shot in the stereo field with distance
+   *  attenuation — pass it for world-emitted ordnance (AI mines,
+   *  missiles) so a spawn 300 m away reads as a distant thump with a
+   *  direction instead of a full-volume bang. */
+  pickupFire(type: PickupSoundType, spatial?: SpatialCue): void
+  /** A new explosion entity just spawned (mine or missile detonation).
+   *  `spatial` attenuates + pans it, and scales the music duck the
+   *  same way — a far-off detonation shouldn't dip the soundtrack. */
+  explosion(spatial?: SpatialCue): void
+  /** Continuous: drives the rival engine voice pool (the nearest 2
+   *  opponents) — per-voice gain/pan/pitch each render frame. Pass an
+   *  empty array (or fewer entries than voices) to fade unused voices
+   *  out. A rival on your tail finally *sounds* like one. */
+  tickRivalEngines(rivals: readonly RivalEngineDrive[]): void
   /** The player just crossed a checkpoint (any but the lap-completion one). */
   gateCleared(): void
   /** The player just completed a lap. */
   lapCompleted(): void
+  /** Pre-race countdown tick (3/2/1) and GO (0) — a dedicated rising
+   *  beep ladder in the race-structure (C-major) family instead of the
+   *  recycled gate ding. */
+  countdownTick(n: number): void
+  /** Score the finish — the emotional peak of the race, previously
+   *  mute. `kind` picks the shape: 'win' full fanfare, 'podium' bright
+   *  triad, 'finish' modest resolve, 'dnf' low neutral. Fired when the
+   *  results screen reveals. */
+  finishStinger(kind: 'win' | 'podium' | 'finish' | 'dnf'): void
+  /** Cup ceremony fanfare — the podium scene's big brass moment. */
+  cupFanfare(): void
+  /** Boost ignition — meter vents and pad hits. Its own voice in the
+   *  drift-whoosh family, so the wave-mastery chord (`wavePump`) stays
+   *  reserved for graded launches/landings/tricks: the signature sound
+   *  means "you read the water", never "you touched a pad". `charge`
+   *  0..1 scales punch (pads pass 1). */
+  boostIgnite(charge: number): void
   /** The player just completed a wave pump. `strength` is 0..1 — the
    *  audio engine scales the cue's gain + adds an upper-octave layer
    *  on strong pumps so a clean crest launch reads louder + brighter
@@ -131,6 +216,20 @@ const BUS_HEADROOM: Readonly<Record<AudioBus, number>> = Object.freeze({
 
 const TOP_SPEED_FOR_AUDIO = 28 // matches BikeStats.topSpeed roughly
 
+/** Rival engine voices in the pool (nearest-N opponents get one each).
+ *  Exported so the game-loop's slot pool sizes itself from the same
+ *  number — bumping the pool here grows both sides together. */
+export const RIVAL_ENGINE_VOICES = 2
+
+type RivalVoice = {
+  osc: OscillatorNode
+  panner: StereoPannerNode
+  gain: GainNode
+  /** True once silence has been commanded — skips re-scheduling zero
+   *  every frame in rival-less modes. */
+  silenced: boolean
+}
+
 export function createAudioEngine(): AudioEngine {
   let ctx: AudioContext | null = null
   let masterGain: GainNode | null = null
@@ -139,6 +238,11 @@ export function createAudioEngine(): AudioEngine {
   let ambientBus: GainNode | null = null
   let muted = false
   let musicEnabled = true
+  const rivalVoices: RivalVoice[] = []
+  // Active music-duck bookkeeping for the keep-the-deeper rule in
+  // duckMusicInternal.
+  let activeDuckAmount = 0
+  let activeDuckUntil = 0
 
   // Music bed nodes — held so setMusicEnabled can stop/restart them and
   // so a future licensed-music swap can disconnect just these.
@@ -207,12 +311,26 @@ export function createAudioEngine(): AudioEngine {
     }
 
     // Bus layout — sources go to one of music/sfx/ambient, which all
-    // feed master, which feeds destination. Each bus is read from
+    // feed master, which feeds a safety limiter, which feeds
+    // destination. Each bus is read from
     // `playerSettings.audio<Bus>Volume` × `BUS_HEADROOM[bus]` so the
     // Settings sliders shape the mix without needing a re-wire.
+    //
+    // The limiter is a two-line insurance policy: SFX headroom is 1.0
+    // and one-shots stack (explosion 0.55 + wave chord ~0.5 + engine +
+    // wind + skid in 8-bike item chaos), so nothing else *guarantees*
+    // the master stays under 0 dB. Gentle brick-wall settings — it
+    // only engages on genuine pile-ups.
+    const limiter = ctx.createDynamicsCompressor()
+    limiter.threshold.value = -3
+    limiter.knee.value = 6
+    limiter.ratio.value = 16
+    limiter.attack.value = 0.002
+    limiter.release.value = 0.25
+    limiter.connect(ctx.destination)
     masterGain = ctx.createGain()
     masterGain.gain.value = muted ? 0 : busLevel('master')
-    masterGain.connect(ctx.destination)
+    masterGain.connect(limiter)
     musicBus = ctx.createGain()
     musicBus.gain.value = busLevel('music')
     musicBus.connect(masterGain)
@@ -244,9 +362,34 @@ export function createAudioEngine(): AudioEngine {
     engineOsc.start()
     engineSubOsc.start()
 
+    // Rival engine voice pool — the nearest opponents get a cheap
+    // LOD'd engine loop each (single saw through a lowpass, panned).
+    // Idle at zero gain; `tickRivalEngines` drives gain/pan/pitch per
+    // frame. Two voices covers "who's on my tail" without turning an
+    // 8-bike grid into a beehive.
+    for (let i = 0; i < RIVAL_ENGINE_VOICES; i++) {
+      const osc = ctx.createOscillator()
+      osc.type = 'sawtooth'
+      osc.frequency.value = 70
+      const filter = ctx.createBiquadFilter()
+      filter.type = 'lowpass'
+      filter.frequency.value = 700
+      filter.Q.value = 1.1
+      const panner = ctx.createStereoPanner()
+      const gain = ctx.createGain()
+      gain.gain.value = 0
+      osc.connect(filter)
+      filter.connect(panner)
+      panner.connect(gain)
+      gain.connect(sfxBus)
+      osc.start()
+      rivalVoices.push({ osc, panner, gain, silenced: true })
+    }
+
     // Wind: looping white-noise buffer through a bandpass — opens up
-    // with speed. Also SFX (bike-coupled).
-    const noiseBuffer = makeNoiseBuffer(ctx, 2)
+    // with speed. Also SFX (bike-coupled). Same shared buffer the
+    // one-shots slice.
+    const noiseBuffer = sharedNoiseBuffer(ctx)
     const windNoise = ctx.createBufferSource()
     windNoise.buffer = noiseBuffer
     windNoise.loop = true
@@ -337,12 +480,23 @@ export function createAudioEngine(): AudioEngine {
   function duckMusicInternal(amount: number, recoverSeconds: number): void {
     if (!ctx || !musicBus) return
     const now = ctx.currentTime
+    // Keep-the-deeper rule: this used to be last-caller-wins
+    // (cancel + ramp to the new target), which let a DISTANT
+    // explosion's shallow spatial duck cancel a near one's deep duck
+    // and audibly pop the music back up while the player's own boom
+    // was still ringing. A shallower duck arriving while a deeper one
+    // is still active is ignored; a deeper (or later-recovering-equal)
+    // one takes over.
+    const clamped = Math.max(0, Math.min(1, amount))
+    if (now < activeDuckUntil && clamped < activeDuckAmount) return
+    activeDuckAmount = clamped
+    activeDuckUntil = now + 0.04 + Math.max(0.05, recoverSeconds)
     const base = busLevel('music')
-    const ducked = base * Math.max(0, 1 - Math.max(0, Math.min(1, amount)))
+    const ducked = base * (1 - clamped)
     musicBus.gain.cancelScheduledValues(now)
     musicBus.gain.setValueAtTime(musicBus.gain.value, now)
     musicBus.gain.linearRampToValueAtTime(ducked, now + 0.04)
-    musicBus.gain.linearRampToValueAtTime(base, now + 0.04 + Math.max(0.05, recoverSeconds))
+    musicBus.gain.linearRampToValueAtTime(base, activeDuckUntil)
   }
 
   /** Resolve the per-track pump-duck multiplier. Defaults to 1.0
@@ -495,6 +649,10 @@ export function createAudioEngine(): AudioEngine {
   }
 
   return {
+    isUnlocked() {
+      return ctx !== null && ctx.state === 'running'
+    },
+
     async resume() {
       const c = ensureContext()
       if (c && c.state === 'suspended') {
@@ -616,7 +774,7 @@ export function createAudioEngine(): AudioEngine {
       // higher so it reads as a quick punch rather than a launch.
       // Sweep range widens with tier.
       const noise = c.createBufferSource()
-      noise.buffer = makeNoiseBuffer(c, 0.25)
+      noise.buffer = sharedNoiseBuffer(c)
       const filt = c.createBiquadFilter()
       filt.type = 'bandpass'
       filt.frequency.setValueAtTime(700, now)
@@ -629,8 +787,7 @@ export function createAudioEngine(): AudioEngine {
       noise.connect(filt)
       filt.connect(g)
       g.connect(dest)
-      noise.start(now)
-      noise.stop(now + 0.26)
+      startNoise(noise, now, 0.26)
     },
 
     pickupCollect() {
@@ -656,10 +813,11 @@ export function createAudioEngine(): AudioEngine {
       }
     },
 
-    pickupFire(type: PickupSoundType) {
+    pickupFire(type: PickupSoundType, spatial?: SpatialCue) {
       const c = ctx
-      const dest = sfxBus
-      if (!c || !dest) return
+      const bus = sfxBus
+      if (!c || !bus) return
+      const dest = spatialTarget(c, bus, spatial)
       const now = c.currentTime
       switch (type) {
         case 'boost':
@@ -677,13 +835,14 @@ export function createAudioEngine(): AudioEngine {
       }
     },
 
-    explosion() {
+    explosion(spatial?: SpatialCue) {
       const c = ctx
-      const dest = sfxBus
-      if (!c || !dest) return
+      const bus = sfxBus
+      if (!c || !bus) return
+      const dest = spatialTarget(c, bus, spatial)
       const now = c.currentTime
       const noise = c.createBufferSource()
-      noise.buffer = makeNoiseBuffer(c, 0.5)
+      noise.buffer = sharedNoiseBuffer(c)
       const filt = c.createBiquadFilter()
       filt.type = 'lowpass'
       filt.frequency.setValueAtTime(7000, now)
@@ -695,11 +854,51 @@ export function createAudioEngine(): AudioEngine {
       noise.connect(filt)
       filt.connect(g)
       g.connect(dest)
-      noise.start(now)
-      noise.stop(now + 0.5)
+      startNoise(noise, now, 0.5)
       // Duck music to let the boom through. Big amount, slow recover —
-      // explosions are infrequent + big-deal events.
-      duckMusicInternal(0.7, 0.6)
+      // explosions are infrequent + big-deal events. Scaled by the
+      // spatial gain: a detonation 300 m away shouldn't dip the
+      // soundtrack like one at your wheel.
+      duckMusicInternal(0.7 * (spatial?.gain ?? 1), 0.6)
+    },
+
+    tickRivalEngines(rivals) {
+      const c = ctx
+      if (!c) return
+      const now = c.currentTime
+      for (let i = 0; i < rivalVoices.length; i++) {
+        const voice = rivalVoices[i]!
+        const drive = rivals[i]
+        const level = drive ? Math.max(0, Math.min(1, drive.gain)) * 0.045 : 0
+        if (level <= 0) {
+          // Command silence once, then stop scheduling — solo modes
+          // shouldn't insert automation events every frame forever.
+          if (!voice.silenced) {
+            voice.gain.gain.setTargetAtTime(0, now, 0.08)
+            voice.silenced = true
+          }
+          continue
+        }
+        voice.silenced = false
+        const pan = Math.max(-1, Math.min(1, drive!.pan))
+        const freq = 55 + 150 * Math.max(0, Math.min(1, drive!.pitch01))
+        if (drive!.snap) {
+          // Slot changed hands: re-seat pan/pitch instantly and fade
+          // the level in from silence — never glide one engine tone
+          // between two different bikes.
+          voice.panner.pan.cancelScheduledValues(now)
+          voice.panner.pan.setValueAtTime(pan, now)
+          voice.osc.frequency.cancelScheduledValues(now)
+          voice.osc.frequency.setValueAtTime(freq, now)
+          voice.gain.gain.cancelScheduledValues(now)
+          voice.gain.gain.setValueAtTime(0, now)
+          voice.gain.gain.setTargetAtTime(level, now, 0.08)
+        } else {
+          voice.gain.gain.setTargetAtTime(level, now, 0.08)
+          voice.panner.pan.setTargetAtTime(pan, now, 0.08)
+          voice.osc.frequency.setTargetAtTime(freq, now, 0.08)
+        }
+      }
     },
 
     gateCleared() {
@@ -723,6 +922,115 @@ export function createAudioEngine(): AudioEngine {
       for (let i = 0; i < notes.length; i++) {
         gatePulse(c, dest, c.currentTime + i * 0.08, notes[i]!, 0.06, 0.2)
       }
+    },
+
+    countdownTick(n) {
+      const c = ctx
+      const dest = sfxBus
+      if (!c || !dest) return
+      const now = c.currentTime
+      // Dedicated rising ladder in the race-structure (C-major) family:
+      // 3 → C5, 2 → E5, 1 → G5, GO → C6 + E6 flourish. The lights
+      // (start-lights.ts) tick from the same callback so audio and
+      // visual can never drift apart.
+      if (n === 3) gatePulse(c, dest, now, 523.25, 0.02, 0.14, 0.24)
+      else if (n === 2) gatePulse(c, dest, now, 659.25, 0.02, 0.14, 0.24)
+      else if (n === 1) gatePulse(c, dest, now, 783.99, 0.02, 0.14, 0.24)
+      else if (n === 0) {
+        gatePulse(c, dest, now, 1046.5, 0.015, 0.34, 0.32)
+        gatePulse(c, dest, now + 0.06, 1318.5, 0.015, 0.3, 0.24)
+      }
+    },
+
+    finishStinger(kind) {
+      const c = ctx
+      const dest = sfxBus
+      if (!c || !dest) return
+      const now = c.currentTime
+      // Score the finish (the loop's emotional peak, previously mute).
+      // Race-structure family, sized to the result: the win fanfare
+      // must out-rank the lap arpeggio the final crossing just played.
+      if (kind === 'win') {
+        const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5] // C5 E5 G5 C6 E6
+        for (let i = 0; i < notes.length; i++) {
+          gatePulse(c, dest, now + i * 0.09, notes[i]!, 0.02, 0.38, 0.28)
+        }
+        // Held top chord — the "champion" tail.
+        gatePulse(c, dest, now + 0.5, 1046.5, 0.03, 0.7, 0.22)
+        gatePulse(c, dest, now + 0.5, 1567.98, 0.03, 0.7, 0.16) // G6
+        duckMusicInternal(0.5, 1.4)
+      } else if (kind === 'podium') {
+        const notes = [523.25, 783.99, 1046.5] // C5 G5 C6
+        for (let i = 0; i < notes.length; i++) {
+          gatePulse(c, dest, now + i * 0.09, notes[i]!, 0.02, 0.32, 0.24)
+        }
+        duckMusicInternal(0.35, 0.9)
+      } else if (kind === 'finish') {
+        gatePulse(c, dest, now, 523.25, 0.02, 0.26, 0.2)
+        gatePulse(c, dest, now + 0.1, 783.99, 0.02, 0.3, 0.2)
+        duckMusicInternal(0.25, 0.7)
+      } else {
+        // DNF — low, neutral resolve. No celebration, no duck; the
+        // race ended, the music keeps its dignity.
+        gatePulse(c, dest, now, 392.0, 0.03, 0.3, 0.14) // G4
+        gatePulse(c, dest, now + 0.12, 329.63, 0.03, 0.34, 0.12) // E4
+      }
+    },
+
+    cupFanfare() {
+      const c = ctx
+      const dest = sfxBus
+      if (!c || !dest) return
+      // The podium is a fresh navigation, so this can be called with a
+      // context that exists but is still autoplay-suspended — cues
+      // scheduled then would pile up at the frozen clock and blast as
+      // a cluster on the next gesture. The caller retries on unlock.
+      if (c.state !== 'running') return
+      const now = c.currentTime
+      // Podium ceremony — the biggest structure cue in the game: full
+      // ascending run into a held C-major triad with a sparkle top.
+      const run = [523.25, 659.25, 783.99, 1046.5] // C5 E5 G5 C6
+      for (let i = 0; i < run.length; i++) {
+        gatePulse(c, dest, now + i * 0.11, run[i]!, 0.02, 0.4, 0.26)
+      }
+      gatePulse(c, dest, now + 0.55, 1046.5, 0.04, 1.0, 0.22) // C6
+      gatePulse(c, dest, now + 0.55, 1318.5, 0.04, 1.0, 0.18) // E6
+      gatePulse(c, dest, now + 0.55, 1567.98, 0.04, 1.0, 0.15) // G6
+      gatePulse(c, dest, now + 0.72, 2093.0, 0.02, 0.6, 0.12) // C7 sparkle
+      duckMusicInternal(0.6, 2.0)
+    },
+
+    boostIgnite(charge) {
+      const c = ctx
+      const dest = sfxBus
+      if (!c || !dest) return
+      const q = Math.max(0, Math.min(1, charge))
+      const now = c.currentTime
+      // Boost gets its own ignition voice in the drift-whoosh family —
+      // a low thump + rising noise sweep, deliberately NOT the
+      // wave-mastery chord (no stacked 5th/octave, no sparkle), so the
+      // signature cue stays reserved for graded water reads.
+      gatePulse(c, dest, now, 220, 0.008, 0.16, 0.16 + 0.08 * q) // A3 thump
+      const noise = c.createBufferSource()
+      noise.buffer = sharedNoiseBuffer(c)
+      const filt = c.createBiquadFilter()
+      filt.type = 'bandpass'
+      filt.frequency.setValueAtTime(500, now)
+      filt.frequency.exponentialRampToValueAtTime(3800, now + 0.22)
+      filt.Q.value = 0.9
+      const g = c.createGain()
+      g.gain.setValueAtTime(0, now)
+      g.gain.linearRampToValueAtTime(0.1 + 0.08 * q, now + 0.015)
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.26)
+      noise.connect(filt)
+      filt.connect(g)
+      g.connect(dest)
+      startNoise(noise, now, 0.28)
+      // Honor the same per-track duck knob the wavePump chord used at
+      // these call sites — `music3dEffects.duckOnPump` opted a track's
+      // music out of pump-channel ducking, and boost vents/pads were
+      // half of that channel.
+      duckMusicInternal(0.3 * trackDuckMultiplier(), 0.4)
     },
 
     wavePump(strength, perfect = false) {
@@ -758,7 +1066,7 @@ export function createAudioEngine(): AudioEngine {
       // sells the surfboard-launch feel under the chime. Perfect
       // tricks sweep wider + brighter for the afterburner read.
       const noise = c.createBufferSource()
-      noise.buffer = makeNoiseBuffer(c, 0.3)
+      noise.buffer = sharedNoiseBuffer(c)
       const filt = c.createBiquadFilter()
       filt.type = 'bandpass'
       filt.frequency.setValueAtTime(perfect ? 520 : 420, now)
@@ -771,8 +1079,7 @@ export function createAudioEngine(): AudioEngine {
       noise.connect(filt)
       filt.connect(g)
       g.connect(dest)
-      noise.start(now)
-      noise.stop(now + 0.3)
+      startNoise(noise, now, 0.3)
       // Sidechain duck — strength scales how hard we dip the music.
       // The per-track `music3dEffects.duckOnPump` multiplier lets
       // tracks with heavier music tune the depth without the engine
@@ -880,9 +1187,51 @@ function makeNoiseBuffer(ctx: AudioContext, durationSec: number): AudioBuffer {
   return buf
 }
 
+/** One cached noise buffer per context, shared by every one-shot.
+ *  The old per-call `makeNoiseBuffer` allocated a fresh AudioBuffer
+ *  (0.5 s ≈ 96 KB) for every explosion/whoosh — steady main-thread
+ *  allocation + GC pressure during exactly the frames an 8-bike item
+ *  battle already spikes. One-shots slice it via `startNoise`'s
+ *  random offset so repeats don't sound identical. */
+const NOISE_BUFFER_SECONDS = 2
+const noiseBufferCache = new WeakMap<AudioContext, AudioBuffer>()
+function sharedNoiseBuffer(c: AudioContext): AudioBuffer {
+  let buf = noiseBufferCache.get(c)
+  if (!buf) {
+    buf = makeNoiseBuffer(c, NOISE_BUFFER_SECONDS)
+    noiseBufferCache.set(c, buf)
+  }
+  return buf
+}
+
+/** Start a one-shot slice of the shared noise buffer: random offset
+ *  (so back-to-back shots decorrelate) and an explicit stop at the
+ *  requested duration — the same start/stop discipline every one-shot
+ *  already followed. */
+function startNoise(noise: AudioBufferSourceNode, when: number, durationSec: number): void {
+  const maxOffset = Math.max(0, NOISE_BUFFER_SECONDS - durationSec)
+  noise.start(when, Math.random() * maxOffset)
+  noise.stop(when + durationSec)
+}
+
+/** Route a one-shot toward the bus, optionally through a per-shot
+ *  distance-gain + stereo-pan pair. Fire-and-forget like every other
+ *  node chain here — once the source stops, the subgraph is
+ *  collectable. */
+function spatialTarget(c: AudioContext, bus: GainNode, spatial: SpatialCue | undefined): GainNode {
+  if (!spatial) return bus
+  const g = c.createGain()
+  g.gain.value = Math.max(0, Math.min(1, spatial.gain))
+  const p = c.createStereoPanner()
+  p.pan.value = Math.max(-1, Math.min(1, spatial.pan))
+  g.connect(p)
+  p.connect(bus)
+  return g
+}
+
 function firePickupBoost(c: AudioContext, dest: GainNode, now: number): void {
   const noise = c.createBufferSource()
-  noise.buffer = makeNoiseBuffer(c, 0.55)
+  noise.buffer = sharedNoiseBuffer(c)
   const filt = c.createBiquadFilter()
   filt.type = 'bandpass'
   filt.frequency.setValueAtTime(360, now)
@@ -895,8 +1244,7 @@ function firePickupBoost(c: AudioContext, dest: GainNode, now: number): void {
   noise.connect(filt)
   filt.connect(g)
   g.connect(dest)
-  noise.start(now)
-  noise.stop(now + 0.55)
+  startNoise(noise, now, 0.55)
 }
 
 function firePickupShield(c: AudioContext, dest: GainNode, now: number): void {
@@ -918,7 +1266,7 @@ function firePickupShield(c: AudioContext, dest: GainNode, now: number): void {
 function firePickupMissile(c: AudioContext, dest: GainNode, now: number): void {
   // Psheww: noise burst with a closing lowpass.
   const noise = c.createBufferSource()
-  noise.buffer = makeNoiseBuffer(c, 0.45)
+  noise.buffer = sharedNoiseBuffer(c)
   const filt = c.createBiquadFilter()
   filt.type = 'lowpass'
   filt.frequency.setValueAtTime(4500, now)
@@ -929,8 +1277,7 @@ function firePickupMissile(c: AudioContext, dest: GainNode, now: number): void {
   noise.connect(filt)
   filt.connect(g)
   g.connect(dest)
-  noise.start(now)
-  noise.stop(now + 0.45)
+  startNoise(noise, now, 0.45)
 }
 
 function firePickupMine(c: AudioContext, dest: GainNode, now: number): void {
@@ -949,7 +1296,7 @@ function firePickupMine(c: AudioContext, dest: GainNode, now: number): void {
   osc.stop(now + 0.35)
 
   const click = c.createBufferSource()
-  click.buffer = makeNoiseBuffer(c, 0.06)
+  click.buffer = sharedNoiseBuffer(c)
   const cf = c.createBiquadFilter()
   cf.type = 'highpass'
   cf.frequency.value = 2000
@@ -959,6 +1306,5 @@ function firePickupMine(c: AudioContext, dest: GainNode, now: number): void {
   click.connect(cf)
   cf.connect(cg)
   cg.connect(dest)
-  click.start(now)
-  click.stop(now + 0.06)
+  startNoise(click, now, 0.06)
 }

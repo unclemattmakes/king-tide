@@ -60,6 +60,37 @@ const srcDir =
 const outDir = join(repoRoot, 'public', 'audio', 'music')
 const manifestPath = join(repoRoot, 'src', 'engine', 'audio', 'soundtrack.generated.ts')
 
+/** EBU R128 target for the two-pass loudness normalization: -14 LUFS
+ *  integrated (the streaming-platform standard), -1.5 dBTP ceiling,
+ *  LRA 11. Every track lands at the same perceived level, so the
+ *  runtime's music-bus headroom + duck depths finally mean one thing. */
+const LOUDNORM_TARGET = 'loudnorm=I=-14:TP=-1.5:LRA=11'
+
+/** Pull the measured-values JSON block out of ffmpeg's loudnorm
+ *  stderr (pass 1 prints it as the last {...} in the stream). Returns
+ *  null when the block can't be found/parsed — caller falls back to
+ *  single-pass (dynamic) mode with a warning. */
+function parseLoudnormJson(stderr) {
+  const start = stderr.lastIndexOf('{')
+  const end = stderr.lastIndexOf('}')
+  if (start === -1 || end === -1 || end < start) return null
+  try {
+    const parsed = JSON.parse(stderr.slice(start, end + 1))
+    if (
+      typeof parsed.input_i === 'string' &&
+      typeof parsed.input_tp === 'string' &&
+      typeof parsed.input_lra === 'string' &&
+      typeof parsed.input_thresh === 'string' &&
+      typeof parsed.target_offset === 'string'
+    ) {
+      return parsed
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 /** Locate an ffmpeg binary: explicit env → PATH → winget install glob. */
 function resolveFfmpeg() {
   const candidates = []
@@ -220,12 +251,63 @@ for (const file of mp3s) {
   const outPath = join(outDir, outName)
   srcTotal += statSync(inPath).size
 
+  // Freshness includes THIS SCRIPT's mtime: an output older than the
+  // pipeline that produces it is stale even when it post-dates its
+  // source mp3. Without this, a clone that converted before a pipeline
+  // change (e.g. the loudnorm addition) reports every track "(up to
+  // date)" forever, and a later partial run ships a mixed-processing
+  // set while the logs claim uniformity.
+  const pipelineMtime = statSync(fileURLToPath(import.meta.url)).mtimeMs
   const fresh =
-    !force && existsSync(outPath) && statSync(outPath).mtimeMs >= statSync(inPath).mtimeMs
+    !force &&
+    existsSync(outPath) &&
+    statSync(outPath).mtimeMs >= Math.max(statSync(inPath).mtimeMs, pipelineMtime)
   if (fresh) {
     outTotal += statSync(outPath).size
     console.log(`  • ${outName}  (up to date)`)
   } else {
+    // Two-pass EBU R128 loudness normalization (evaluation audio #1):
+    // fourteen tracks from ten FMA artists arrive at wildly different
+    // masters, so without this players ride the volume slider between
+    // songs and the engine's fixed music-bus headroom + duck depths
+    // mean something different under every track. Pass 1 measures;
+    // pass 2 applies the measured values (linear mode) targeting
+    // -14 LUFS integrated / -1.5 dBTP — the streaming-standard level.
+    const measure = spawnSync(
+      ffmpeg,
+      ['-i', inPath, '-vn', '-af', `${LOUDNORM_TARGET}:print_format=json`, '-f', 'null', '-'],
+      { stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' },
+    )
+    let loudnormFilter = LOUDNORM_TARGET
+    let loudnormMode = 'single-pass dynamic'
+    const measured = parseLoudnormJson(measure.stderr ?? '')
+    // Guard the measured values: silent/near-silent sources measure
+    // "-inf", which ffmpeg rejects as a measured_I (range −99..0) and
+    // would hard-fail pass 2 on input the plain transcode handled fine.
+    // Non-finite (or missing) measurements fall back to single-pass
+    // dynamic mode — still normalized, different algorithm, and the
+    // log says so instead of claiming two-pass uniformity.
+    const finite =
+      measured &&
+      [
+        measured.input_i,
+        measured.input_tp,
+        measured.input_lra,
+        measured.input_thresh,
+        measured.target_offset,
+      ].every((v) => Number.isFinite(Number.parseFloat(v)))
+    if (measure.status === 0 && measured && finite) {
+      loudnormFilter =
+        `${LOUDNORM_TARGET}:measured_I=${measured.input_i}:measured_TP=${measured.input_tp}:` +
+        `measured_LRA=${measured.input_lra}:measured_thresh=${measured.input_thresh}:` +
+        `offset=${measured.target_offset}:linear=true`
+      loudnormMode = 'two-pass linear'
+    } else {
+      console.warn(
+        `  ! loudnorm measure pass ${measure.status === 0 ? 'returned unusable values' : 'failed'} ` +
+          `for "${file}" — using single-pass dynamic mode`,
+      )
+    }
     const r = spawnSync(
       ffmpeg,
       [
@@ -235,6 +317,8 @@ for (const file of mp3s) {
         '-vn', // drop embedded cover art
         '-map_metadata',
         '-1', // strip ID3 — manifest owns the credits
+        '-af',
+        loudnormFilter,
         '-c:a',
         'libopus',
         '-b:a',
@@ -244,7 +328,7 @@ for (const file of mp3s) {
         '-application',
         'audio',
         '-ar',
-        '48000', // Opus' native rate
+        '48000', // Opus' native rate (loudnorm upsamples to 192k internally; -ar wins on output)
         outPath,
       ],
       { stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' },
@@ -255,7 +339,7 @@ for (const file of mp3s) {
     }
     const outSize = statSync(outPath).size
     outTotal += outSize
-    console.log(`  ✓ ${outName}  (${fmtBytes(outSize)})`)
+    console.log(`  ✓ ${outName}  (${fmtBytes(outSize)}, -14 LUFS ${loudnormMode})`)
   }
 
   const meta = credits[file]

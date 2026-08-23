@@ -60,6 +60,21 @@ export type AIControllerData = {
    *  needs sustained `intent.pitch` to integrate a meaningful nose-up
    *  torque; a single-tick spike would barely move the chassis. */
   pumpHoldS: number
+  /** Airborne pitch-to-tangent landing-controller gain, baked from
+   *  difficulty tuning at spawn. `0` = disabled (Casual). See
+   *  `DifficultyTuning.landingPitchGain`. */
+  landingPitchGain: number
+  /** Cached landing-target attitude (rad) for the current airtime —
+   *  `sampleSurface` is resampled on a coarse deterministic cadence
+   *  (see `AI_LANDING_TARGET_REFRESH_S`), not per tick. */
+  landingTargetPitch: number
+  /** Which refresh bucket `landingTargetPitch` was sampled in; `-1`
+   *  while grounded so every fresh jump resamples immediately. */
+  landingTargetBucket: number
+  /** Meter charge at which the AI vents boost on a straight, baked
+   *  from difficulty tuning at spawn. `Infinity` = never (Casual).
+   *  See `DifficultyTuning.ventChargeMin`. */
+  ventChargeMin: number
   /** Curvature (1/m) at which the AI will initiate drift on an
    *  upcoming corner. Baked from difficulty tuning at spawn. */
   driftCurvatureThreshold: number
@@ -113,6 +128,10 @@ export function defaultAIController(
     pumpPitchStrength: tuning.pumpPitchStrength,
     pumpCooldownS: 0,
     pumpHoldS: 0,
+    landingPitchGain: tuning.landingPitchGain,
+    landingTargetPitch: 0,
+    landingTargetBucket: -1,
+    ventChargeMin: tuning.ventChargeMin,
     driftCurvatureThreshold: tuning.driftCurvatureThreshold,
     driftMinSpeed: tuning.driftMinSpeed,
     driftMaxHoldS: tuning.driftMaxHoldS,

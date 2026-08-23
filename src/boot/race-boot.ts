@@ -450,6 +450,9 @@ export async function bootRace(appEl: HTMLElement) {
     bestLapThisRace: null as number | null,
     lastLapTime: null as number | null,
     bestLapAllTime: getBestLap({ trackId, bikeId: playerVariant.id }),
+    // True once this run genuinely improved the saved (track, bike)
+    // best — the finish stinger's "celebrate a record" signal.
+    newAllTimeBest: false,
   }
 
   // Track terrain + data. See `src/boot/track-loader.ts` — handles
@@ -883,9 +886,17 @@ export async function bootRace(appEl: HTMLElement) {
   bootMark('props')
   bootStat('vinylAfterProps', vinylMaterialsBuilt())
 
-  // Pickup spawns from track.
-  for (let i = 0; i < track.pickupSpawns.length; i++) {
-    createPickupSpawn(sim, track.pickupSpawns[i] as (typeof track.pickupSpawns)[number], i)
+  // Pickup spawns from track. Multiplayer rooms get NONE: items and
+  // combat are per-tab fiction until M10.13 puts owner-authoritative
+  // combat events on the wire — a missile "hit" on a remote rider is a
+  // local setLinvel their kinematic mirror ignores, so "I hit him and
+  // nothing happened" would be the first thing two humans with items
+  // experience (evaluation networking #2 — the honest interim is no
+  // items in rooms). Boost pads are static track features and stay.
+  if (!isMultiplayer) {
+    for (let i = 0; i < track.pickupSpawns.length; i++) {
+      createPickupSpawn(sim, track.pickupSpawns[i] as (typeof track.pickupSpawns)[number], i)
+    }
   }
 
   // Load bike GLBs in parallel. Solo Time Trial only ever renders the
@@ -1002,9 +1013,10 @@ export async function bootRace(appEl: HTMLElement) {
     // Tutorial: no placement board — the coached run is not a contest.
     hidePositionBoard: tutorialMode,
     onCountdownTick: (n) => {
-      // Light audio cue: re-use the gate "ding" for each tick, lap fanfare for GO.
-      if (n === 0) audio.lapCompleted()
-      else audio.gateCleared()
+      // Dedicated countdown ladder (C-major race-structure family) —
+      // the gate ding / lap arpeggio stay reserved for their own
+      // events (evaluation audio #3).
+      audio.countdownTick(n)
       // Drive the F1 lights from the same tick stream so the visual
       // tracks the audio exactly (no double timing source).
       startLights?.setCountdown(n)
@@ -1191,6 +1203,11 @@ export async function bootRace(appEl: HTMLElement) {
         }
         if (recordLapTime({ trackId, bikeId: playerVariant.id }, lapTime)) {
           lapState.bestLapAllTime = lapTime
+          // Explicit record flag for the finish stinger: lap times are
+          // quantized to the fixed sim step, so "this-race <= all-time"
+          // at the finish screen can't distinguish a genuine new record
+          // from an exact tie with the old one.
+          lapState.newAllTimeBest = true
         }
         // Record the lap boundary into the replay event stream so the
         // best-lap slicer (Time Trial ghost persistence) can find this
@@ -1644,11 +1661,13 @@ export async function bootRace(appEl: HTMLElement) {
       }
       // Always reset AI state on toggle — fresh closest-point search, no carry
       // over from previous auto-play sessions on the same page. Player-driven
-      // auto-play uses the same difficulty bake-in as the real opponents.
-      AIControllerStore.set(
-        playerEid,
-        defaultAIController('main', { difficulty: playerSettings.aiDifficulty }),
-      )
+      // auto-play uses the same difficulty bake-in as the real opponents —
+      // EXCEPT the boost vent: the meter is the player's banked reward, and
+      // the OOB-autopilot rescue (which rides this same tag) must never
+      // spend it on their behalf.
+      const pilot = defaultAIController('main', { difficulty: playerSettings.aiDifficulty })
+      pilot.ventChargeMin = Number.POSITIVE_INFINITY
+      AIControllerStore.set(playerEid, pilot)
     } else if (hasComponent(sim, playerEid, AITag)) {
       removeComponent(sim, playerEid, AITag)
     }

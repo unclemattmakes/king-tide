@@ -46,7 +46,54 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-08-21** — **Menu backdrop: Mayday Bay at low tide,
+> **Last updated: 2026-08-22** — **Evaluation top-10 implementation pass.**
+> The six-perspective evaluation (PR #32,
+> [evaluation/summary.md](evaluation/summary.md)) landed a player-impact
+> top 10; this pass implements the code-tractable items:
+> **(1) Practice mode** — a 4th PRACTICE tile (pre-focused with a NEW HERE?
+> badge until `tutorialCompleted`), the reworked practice screen offering
+> First Run + the new **practice lagoon** (`practice-lagoon`, JSON+primitive
+> asset-light venue: stations in ride order — throttle/cruise straight, heavy
+> swell LAUNCH lane, TRICK table, TUCK rollers, 345 m SMT drift sweep), an
+> 8-beat station script via the new `script-catalog` (per-track scripts;
+> sandbar First Run unchanged), new `notifyTuck`/best-launch-quality director
+> channels. Doubles as the standing hard-rule-2 dev-test venue
+> (`tests/e2e/practice-lagoon.spec.ts` runs unhydrated).
+> **(2) Jump economy + takeoff sign fix** — the takeoff grader's ideal was
+> `+0.24` rad, which in the `asin(-fwd.y)` convention is 14° **nose-down**;
+> it now grades the true nose-up pop, and the landing edge pays a combined
+> landing-dominant jump score (perfect jump 0.75 meter, out-earning one SMT)
+> plus a clean-jump auto-vent burst — the hero skill finally out-pays drift
+> per event. **Needs a headed feel pass** (numbers chosen against
+> drift-tiers math, not playtested).
+> **(3) AI wave mastery** — rivals shape takeoffs into the pop band
+> (closed-loop), pitch landings toward the surface tangent
+> (`decideAILandingPitch`), and vent the meter on straights
+> (`decideAIVent`); Casual stays out, Standard demonstrates, Hard is the
+> role model.
+> **(4) Audio pass** — positional one-shots (distance gain + pan; AI
+> ordnance no longer full-volume from anywhere), 2-voice rival engine pool,
+> dedicated countdown ladder, position-aware finish stinger + podium cup
+> fanfare (the `?podium` scene now installs the radio), boost ignition
+> voice (wave-mastery chord reserved for graded reads), master limiter,
+> shared noise buffer, and two-pass −14 LUFS loudnorm in `gen:music`
+> (local opus regenerated; **`pnpm assets:push` after a listen is
+> pending**).
+> **(5) Multiplayer honesty** — snapshot positions widened to int32 behind
+> tag `0x03` (±327.67 m fuse defused; legacy 0x02 still decodes), **no
+> pickups in MP rooms** until M10.13 puts combat on the wire, lobby
+> connect time-boxed at 10 s with a can't-reach-the-relay explainer, README
+> two-tab-probe claim corrected.
+> **(6) Trust + CI** — venue-card laps now pinned to track JSON
+> (sandbar said 1, ran 3), Liberty's anti-grav copy replaced + tested
+> against, track-themes real-world-place lock marked superseded;
+> workflows run least-privilege `GITHUB_TOKEN` and third-party actions
+> are SHA-pinned. Not attempted (not code-tractable from here): Container
+> Chaos terrain/art + track data (needs the Blender re-grade first),
+> rider/bike asset re-author, contrast-budget authoring (needs an eyeball
+> pass).
+
+> **2026-08-21** — **Menu backdrop: Mayday Bay at low tide,
 > and a loading indicator instead of a concept-art plate.** The cold-boot
 > menu / lobby backdrop ran the procedural `lagoon` dev fixture and papered
 > over the attract boot with a painted AI concept-art plate

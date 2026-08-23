@@ -14,6 +14,12 @@ on:
     branches: [main]
   pull_request:
 
+# Least-privilege token: no job here writes to the repo. Without this,
+# every job runs at the repo default while third-party actions execute
+# (evaluation security #2).
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -114,7 +120,9 @@ jobs:
       # hydrate them first.
       - name: Install rclone
         if: ${{ env.HAS_ASSET_SECRET == 'true' }}
-        uses: AnimMouse/setup-rclone@v1
+        # SHA-pinned third-party action (evaluation security #3) —
+        # Dependabot bumps the pin.
+        uses: AnimMouse/setup-rclone@26ef2133e09fd383329a1d4c1fbe6a71db1976c9 # v1 (v1.12.0)
       - name: Hydrate assets from R2
         if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         env:
@@ -181,7 +189,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install rclone
         if: ${{ env.HAS_ASSET_SECRET == 'true' }}
-        uses: AnimMouse/setup-rclone@v1
+        # SHA-pinned third-party action (evaluation security #3) —
+        # Dependabot bumps the pin.
+        uses: AnimMouse/setup-rclone@26ef2133e09fd383329a1d4c1fbe6a71db1976c9 # v1 (v1.12.0)
       - name: Hydrate assets from R2
         if: ${{ env.HAS_ASSET_SECRET == 'true' }}
         env:

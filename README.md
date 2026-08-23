@@ -186,7 +186,7 @@ See [`docs/adr/`](docs/adr/README.md) for the full set of architecture decisions
 ## Known issues
 
 - **AI on vertical/elevated terrain** — AI racers can jam where the race line climbs sharply or hugs raised terrain (gates floating above the surface, crosswise gate facing). Fixes are per-track level-design work; the full 8-bike field is now guarded for the Reef Cup tracks by `tests/e2e/field-completion.spec.ts` (runs by default). Player-only races and human multiplayer are unaffected.
-- **Multiplayer e2e coverage** — M10.11 transform-snapshot sync is covered by unit tests + manual playtest; a two-tab Playwright probe is not yet automated. Bugs that only manifest cross-tab need to be reproduced manually.
+- **Multiplayer e2e coverage** — M10.11 transform-snapshot sync is covered by unit tests plus a two-tab Playwright probe (`tests/e2e/m10-11-state-sync.spec.ts`, which spawns its own `partykit dev` sidecar per worker). The probe never runs in CI (needs a GPU + hydrated assets — see CLAUDE.md hard rule 1), so run it headed for any net change: `E2E_PORT=<N> pnpm e2e m10-11-state-sync`.
 - **Leaderboard submits signed outside JS fail as `bad-signature`** — the HMAC covers a canonical string built with JavaScript's `Number.prototype.toString()`, so `40.0` serialises as `"40"`, not `"40.0"`. A client in another language that formats floats its own way produces a valid-looking signature the server rejects, and the error names the signature rather than the number. Bit us while probing from Python. Full rules + a worked example in [`docs/leaderboard-backend.md`](docs/leaderboard-backend.md#signing-a-submission).
 
 ## License
