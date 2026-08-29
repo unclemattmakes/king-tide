@@ -56,10 +56,15 @@ const STANDARD: GlyphTable = Object.freeze({
 // W3C standard mapping (Steam Input emulates an Xbox 360 pad), but the
 // player sees the Deck's own glyphs printed on the chassis. The labels
 // here match what's etched: A/B/X/Y on the face, L1/L2/R1/R2 on the
-// shoulders + triggers, View/Menu on the small bar buttons. The L4/L5/
-// R4/R5 paddles + L/R trackpads have no W3C index — they're remappable
-// via Steam Input but invisible to navigator.getGamepads. The table
-// stops at index 16 to match.
+// shoulders + triggers, View/Menu on the small bar buttons.
+//
+// Through Steam Input the L4/L5/R4/R5 paddles + trackpads have no W3C
+// index (Steam Input remaps them before the browser sees anything).
+// When the same hardware reaches us *raw* — Deck Desktop-Mode browsers,
+// or a 2026 Steam Controller on Linux — pad-profiles.ts surfaces them
+// at normalized 17+, so the table carries those labels too. This table
+// also serves the 2026 Steam Controller: its face etching matches the
+// Deck's (A/B/X/Y, View/Menu, Steam, grips).
 const DECK: GlyphTable = Object.freeze({
   0: 'A',
   1: 'B',
@@ -78,6 +83,13 @@ const DECK: GlyphTable = Object.freeze({
   14: 'D-pad ←',
   15: 'D-pad →',
   16: 'Steam',
+  17: 'L4',
+  18: 'R4',
+  19: 'L5',
+  20: 'R5',
+  21: 'QA',
+  22: 'L-Pad',
+  23: 'R-Pad',
 })
 
 const PS: GlyphTable = Object.freeze({
@@ -142,6 +154,11 @@ export function glyphFor(buttonIndex: number, source: GlyphSource = 'standard'):
 export function glyphSourceForGamepadId(id: string): GlyphSource {
   const lower = id.toLowerCase()
   if (lower.includes('steam') && (lower.includes('deck') || lower.includes('virtual'))) {
+    return 'deck'
+  }
+  // Physical Steam Controllers ("Steam Controller" wired/BLE, "Wireless
+  // Steam Controller" via the puck) share the Deck's etched labels.
+  if (lower.includes('steam controller')) {
     return 'deck'
   }
   if (lower.includes('dualsense') || lower.includes('dualshock') || lower.includes('playstation')) {

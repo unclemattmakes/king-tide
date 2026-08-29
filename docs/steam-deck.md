@@ -219,6 +219,42 @@ Upload via Big Picture: gear icon → Steam Input → Export → Publish New
 Personal Config → "Set as official". This is a Steamworks operation,
 done once after first Steam release.
 
+## Steam Controller (2026) + raw Valve pads
+
+How Valve's pads reach a *browser* (2026-08-28, verified against the
+`hid-steam` kernel driver + Chromium's mapping tables):
+
+- **Through Steam Input** (game launched via Steam, or desktop layout set
+  to Gamepad): the browser sees the **Steam Virtual Gamepad** (28de:11ff)
+  as XInput with `mapping: "standard"`. Always worked; still the only
+  path on **Windows/macOS**, where the controller without Steam is
+  keyboard+mouse ("lizard mode") and its game inputs sit on a vendor HID
+  page browsers can't read.
+- **Raw on Linux/SteamOS** (wired 28de:1302, BLE :1303, puck :1304/:1305 —
+  and the Deck's built-in pad in Desktop-Mode browsers, :1205): the
+  kernel driver exposes a real gamepad, but Chromium has **no Valve remap
+  table**, so it arrives `mapping: ""` in hardware order — touchpad
+  clicks on buttons 0/1, A/B/X/Y on 3–6, Menu on 12, D-pad on 16–19,
+  analog triggers on **axes** 8/9 (rest −1). The old standard-order reads
+  made the game undriveable (steering worked; throttle + all buttons
+  dead).
+
+[`src/engine/input/pad-profiles.ts`](../src/engine/input/pad-profiles.ts)
+fixes the raw case: per-product remap profiles normalize those pads to
+standard order for every consumer (race intent, menu nav, camera look,
+pause watcher, rebind capture), expose grips + Quick Access as bindable
+extras at indices 17+, and replace the blind `getGamepads()[0]` read with
+most-recently-used pad selection. The module header documents the full
+index derivation; `tests/unit/pad-profiles.test.ts` pins the tables and
+`tests/e2e/steam-controller-raw.spec.ts` drives the real input path with
+an injected raw pad (headed, hard rule 2).
+
+Detection note: a physical Steam Controller id no longer counts as Deck
+evidence in `detectSteamDeck()` — before 2026-08-28 it silently applied
+the Deck profile (60 fps cap + fullscreen preference) to any desktop with
+one plugged in. The Deck's built-in pad still matches via "Steam Deck" /
+"Steam Virtual Gamepad".
+
 ## What's wired today
 
 - **Electron wrapper** (`electron/main.cjs`, `electron-builder.yml`) —

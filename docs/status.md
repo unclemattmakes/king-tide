@@ -46,7 +46,33 @@
 > Verify with **headed Playwright on your own dev server** (focused test scenes as
 > needed), **not** the in-app preview — see CLAUDE.md hard rule 2.
 
-> **Last updated: 2026-08-22** — **Evaluation top-10 implementation pass.**
+> **Last updated: 2026-08-28** — **2026 Steam Controller (+ raw Valve pads)
+> support.** The new Steam Controller reaches browsers with `mapping: ""` in
+> raw `hid-steam` order (Chromium ships no Valve remap): the left-touchpad
+> click sat on button 0 where the game read A, triggers lived on axes 8/9,
+> the D-pad on buttons 16–19 — steering worked, throttle and every menu
+> button were dead. New normalization layer
+> [pad-profiles.ts](../src/engine/input/pad-profiles.ts): every consumer
+> (race intent, menu nav, camera look, pause watcher, rebind capture) now
+> reads a standard-order view through `activeGamepad()`, with vendor/product
+> profiles for the 2026 controller (wired 28de:1302 / BLE :1303 / puck
+> :1304-:1305), the Steam Deck built-in exposed raw in Desktop-Mode browsers
+> (:1205), and the 2015 controller (:1102/:1142); grips + Quick Access
+> surface as bindable extras (17+) with labels/glyphs. Pad selection also
+> stopped hardcoding `getGamepads()[0]` (most-recently-used wins; phantom
+> receiver slots skipped), and a physical Steam Controller no longer trips
+> `isLikelyDeck` (it was silently applying the Deck 60 fps cap + fullscreen
+> preference to gaming rigs). Limits, by design: on Windows/macOS without
+> Steam the pad is keyboard/mouse ("lizard mode") — browsers see no gamepad;
+> Steam Input's virtual pad already worked and still does. Verified headed
+> (hard rule 2): `tests/e2e/steam-controller-raw.spec.ts` injects the raw
+> layout and drives the real input path (bike accelerates from the raw
+> trigger axis; touchpad-click-as-A regression pinned) + unit pins in
+> `tests/unit/pad-profiles.test.ts`. Full derivation of the raw order
+> (kernel driver capability set → browser index math) documented in the
+> module header. See [steam-deck.md](steam-deck.md).
+
+> **2026-08-22** — **Evaluation top-10 implementation pass.**
 > The six-perspective evaluation (PR #32,
 > [evaluation/summary.md](evaluation/summary.md)) landed a player-impact
 > top 10; this pass implements the code-tractable items:

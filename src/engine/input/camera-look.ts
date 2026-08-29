@@ -15,6 +15,7 @@
 
 import { devSettings } from '../dev-settings'
 import { playerSettings } from '../player-settings'
+import { activeGamepad } from './pad-profiles'
 
 const RETURN_RATE = 3 // exponential decay coefficient when no input
 
@@ -67,7 +68,7 @@ export function installCameraLookInput(): void {
 
 /** Per-frame: read inputs, advance camera-look state, return current (yaw, pitch). */
 export function tickCameraLook(dt: number): CameraLookState {
-  const pad = navigator.getGamepads?.()?.[0]
+  const pad = activeGamepad()
   const stickX = pad?.axes[2] ?? 0
   const stickY = pad?.axes[3] ?? 0
   const dz = devSettings.cameraStickDeadzone
