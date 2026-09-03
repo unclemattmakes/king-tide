@@ -1,6 +1,7 @@
 import { devSettings } from '../dev-settings'
 import { playerSettings } from '../player-settings'
 import { emptyIntent, type Intent } from './intent'
+import { activeGamepad, normalizedGamepads, normalizeGamepad, type PadLayout } from './pad-profiles'
 
 /**
  * Modern radial response: subtract the deadzone, rescale the remainder to
@@ -44,6 +45,12 @@ function pitchDeadzone(): number {
 
 export type GamepadSnapshot = {
   id: string
+  /** Browser-reported mapping ('' when the browser has no remap table). */
+  mapping: string
+  /** Which normalization path applies — 'standard' passthrough, a
+   *  'steam-raw*' profile, or unrecognized 'raw'. Shown in the debug
+   *  overlay so a playtester can verify their pad was recognized. */
+  layout: PadLayout
   axes: number[]
   buttons: boolean[]
 }
@@ -55,6 +62,8 @@ export function snapshotGamepads(): GamepadSnapshot[] {
     if (!p) continue
     out.push({
       id: p.id,
+      mapping: p.mapping ?? '',
+      layout: normalizeGamepad(p).layout,
       axes: [...p.axes],
       buttons: p.buttons.map((b) => b.pressed),
     })
@@ -77,10 +86,15 @@ export function snapshotGamepads(): GamepadSnapshot[] {
  *
  * The action buttons read through `playerSettings.gamepadBindings`
  * so the Controls tab rebind modal can move them.
+ *
+ * Reads through `activeGamepad()` (pad-profiles.ts), which picks the
+ * most recently used pad and normalizes non-standard layouts (2026
+ * Steam Controller / Steam Deck raw mode) to the standard indices this
+ * function assumes.
  */
 export function gamepadIntent(): Intent {
   const intent = emptyIntent()
-  const pad = navigator.getGamepads?.()?.[0]
+  const pad = activeGamepad()
   if (!pad) return intent
 
   intent.steer = shapeAxis(pad.axes[0] ?? 0)
@@ -117,15 +131,31 @@ export function gamepadIntent(): Intent {
  *  Returns the index of any button currently pressed, ignoring the
  *  analog triggers (LT/RT = 6/7) because those report as "pressed" any
  *  time the player squeezes them — the rebind flow needs a discrete
- *  press, not a hair-trigger touch. */
+ *  press, not a hair-trigger touch. Indices are in *normalized* space
+ *  (same space `gamepadIntent` reads bindings in), so a capture on a
+ *  raw Steam Controller stores the standard index, and its grips /
+ *  Quick Access surface at 17+ as bindable extras. */
 export function pollGamepadButtonPress(): number | null {
-  const pads = navigator.getGamepads?.() ?? []
-  for (const pad of pads) {
-    if (!pad) continue
+  for (const pad of normalizedGamepads()) {
     for (let i = 0; i < pad.buttons.length; i++) {
       if (i === 6 || i === 7) continue
       if (pad.buttons[i]?.pressed) return i
     }
   }
   return null
+}
+
+/** All normalized button indices currently held, across every connected
+ *  pad — the rebind modal diffs successive calls so a button held while
+ *  entering capture doesn't self-capture. Skips the triggers for the
+ *  same reason `pollGamepadButtonPress` does. */
+export function currentlyPressedGamepadButtons(): Set<number> {
+  const out = new Set<number>()
+  for (const pad of normalizedGamepads()) {
+    for (let i = 0; i < pad.buttons.length; i++) {
+      if (i === 6 || i === 7) continue
+      if (pad.buttons[i]?.pressed) out.add(i)
+    }
+  }
+  return out
 }

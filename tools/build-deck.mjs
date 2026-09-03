@@ -6,14 +6,14 @@
  * 2. Run `electron-builder --linux dir`, producing a self-contained
  *    (Chromium-bundled) game tree at `dist-electron/linux-unpacked/`.
  * 3. Bundle the Steam Linux Runtime survival kit into the tree: the launch
- *    wrapper (hoverbike-launch.sh) + libcups.so.2 (extra-lib/). See
+ *    wrapper (king-tide-launch.sh) + libcups.so.2 (extra-lib/). See
  *    docs/desktop-builds.md "Steam Deck / Linux runtime gotchas".
  *
  * The `dir` target is what the Steam Linux depot ships — Steam copies the
  * tree and launches the wrapper, which strips the crashing Steam overlay and
- * adds the missing libs before exec'ing `hoverbike`. `pnpm steam:upload`
+ * adds the missing libs before exec'ing `king-tide`. `pnpm steam:upload`
  * stages this tree; for a quick local sanity check run the binary directly
- * (`./dist-electron/linux-unpacked/hoverbike`).
+ * (`./dist-electron/linux-unpacked/king-tide`).
  *
  * Pass-through flags reach electron-builder, e.g. `pnpm build:deck -- --publish never`.
  */
@@ -64,18 +64,18 @@ if (existsSync(OUT)) {
   bundleLinuxExtras(OUT)
 }
 
-info('done — game tree in dist-electron/linux-unpacked/ (launch: hoverbike-launch.sh).')
+info('done — game tree in dist-electron/linux-unpacked/ (launch: king-tide-launch.sh).')
 
 /**
  * Drop the launch wrapper + the libraries the Steam Linux Runtime omits into
- * the unpacked tree. Steam should launch `hoverbike-launch.sh`, which adds
+ * the unpacked tree. Steam should launch `king-tide-launch.sh`, which adds
  * extra-lib/ to LD_LIBRARY_PATH and strips the crashing Steam overlay.
  */
 function bundleLinuxExtras(outDir) {
-  const wrapperDst = path.join(outDir, 'hoverbike-launch.sh')
-  copyFileSync(path.join(REPO_ROOT, 'electron', 'hoverbike-launch.sh'), wrapperDst)
+  const wrapperDst = path.join(outDir, 'king-tide-launch.sh')
+  copyFileSync(path.join(REPO_ROOT, 'electron', 'king-tide-launch.sh'), wrapperDst)
   chmodSync(wrapperDst, 0o755)
-  info('bundled launch wrapper → linux-unpacked/hoverbike-launch.sh')
+  info('bundled launch wrapper → linux-unpacked/king-tide-launch.sh')
 
   const libDir = path.join(outDir, 'extra-lib')
   mkdirSync(libDir, { recursive: true })

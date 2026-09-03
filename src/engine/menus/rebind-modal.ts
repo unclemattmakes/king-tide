@@ -11,9 +11,13 @@
  * Persistence flows through `playerSettings`: `setKeyboardBindings` /
  * `setGamepadBindings` write the live table + persist to localStorage.
  *
- * Gamepad capture polls `navigator.getGamepads()` on rAF and ignores
- * LT/RT (analog triggers) — those drive throttle / brake and would
- * otherwise capture every time the player squeezed the trigger.
+ * Gamepad capture polls the *normalized* pad view (gamepad.ts →
+ * pad-profiles.ts) on rAF, so captured indices live in the same
+ * standard-order space `gamepadIntent` reads bindings in — including on
+ * pads the browser exposes raw, like the 2026 Steam Controller, whose
+ * grips / Quick Access surface as bindable extras at 17+. LT/RT (6/7)
+ * are ignored — those drive throttle / brake and would otherwise
+ * capture every time the player squeezed the trigger.
  *
  * Escape closes whichever surface is in front: capture if active, else
  * the modal itself.
@@ -35,7 +39,7 @@ import {
   type KeyboardAction,
   type KeyboardBindings,
 } from '@/engine/input/bindings'
-import { pollGamepadButtonPress } from '@/engine/input/gamepad'
+import { currentlyPressedGamepadButtons, pollGamepadButtonPress } from '@/engine/input/gamepad'
 import { installMenuGamepad, type MenuGamepad } from '@/engine/input/menu-gamepad'
 import {
   playerSettings,
@@ -211,7 +215,7 @@ export function installRebindModal(): RebindModalHandle {
   function beginCapture(c: typeof capturing): void {
     capturing = c
     if (c?.kind === 'gamepad') {
-      previousPressed = currentlyPressedButtons()
+      previousPressed = currentlyPressedGamepadButtons()
       startGamepadPoll()
     }
     renderList()
@@ -265,19 +269,6 @@ export function installRebindModal(): RebindModalHandle {
     }
   }
 
-  function currentlyPressedButtons(): Set<number> {
-    const out = new Set<number>()
-    const pads = navigator.getGamepads?.() ?? []
-    for (const pad of pads) {
-      if (!pad) continue
-      for (let i = 0; i < pad.buttons.length; i++) {
-        if (i === 6 || i === 7) continue // skip analog triggers
-        if (pad.buttons[i]?.pressed) out.add(i)
-      }
-    }
-    return out
-  }
-
   function startGamepadPoll(): void {
     if (gamepadPollHandle !== null) return
     const tick = () => {
@@ -295,7 +286,7 @@ export function installRebindModal(): RebindModalHandle {
       }
       // Re-derive previousPressed every frame so once a button is
       // released it becomes "fresh" again.
-      previousPressed = currentlyPressedButtons()
+      previousPressed = currentlyPressedGamepadButtons()
       gamepadPollHandle = requestAnimationFrame(tick)
     }
     gamepadPollHandle = requestAnimationFrame(tick)

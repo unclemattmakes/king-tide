@@ -1,13 +1,16 @@
-# Hoverbike
+# King Tide
 
 Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics and light Mario Kart combat. Three.js + WebGPU + Rapier WASM, gamepad-first.
 
 **Live:** [kingtide.unclemattmakes.com](https://kingtide.unclemattmakes.com) — every push to `main` auto-deploys.
 
-> **⚠ v2 status (2026-06).** "What's playable" below is the **v1** lineup;
+> **⚠ v2 status (2026-06, corrections through 2026-08).** "What's playable"
+> below is the **v1** lineup;
 > content restarted for **v2** since. Net corrections: `status: 'ship'` means
-> wired/playable, **not** art-complete (only **Sandbar** + **The Maw** are
-> dressed — the rest are greybox route-stubs); **anti-grav is cut** (parked for a
+> wired/playable, **not** art-complete (dressed today: **Mayday Bay** (slug
+> `sandbar`), **Angel Basin** (slug `mexico-city`) and **The Maw** — and The Maw
+> is parked to the B-list as 100% open water, so it is off the venue card by
+> design; the rest are greybox route-stubs); **anti-grav is cut** (parked for a
 > possible DLC — no shipped track places zones, and the tutorial's `ANTI-GRAV`
 > beat is parked with it); **wave mastery** is now a motocross *master-the-jump*
 > model (pitch the takeoff/landing), not the press-forward-on-crest pump; the
@@ -24,6 +27,7 @@ Web-first arcade hover-bike racer. JetMoto homage with Wave Race water physics a
 - [Blender pipeline](docs/blender-pipeline-guide.md) — authoring environment geometry
 - [Dev + modder docs site](docs-site/) — VitePress site (`pnpm docs:dev`), published at [kingtide-docs.unclemattmakes.com](https://kingtide-docs.unclemattmakes.com) — covering build, gameplay, asset pipeline, and reference
 - [Making-of site](making-of/) — illustrated build log with playable 3D demos of the systems (wave field, buoyancy, feel tuning, drift, sim/render split, the Steam port). Ships with the game at `/making-of/`; reachable from the main menu and at [localhost:5191/making-of/](http://localhost:5191/making-of/) under `pnpm dev`
+- [Naming + public-repo framing](docs/naming-and-public-framing.md) — why the repo is called King Tide, where `hoverbike` still legitimately lives, and what must not be renamed
 - [Contributing](CONTRIBUTING.md) — workflow, conventions, testing expectations
 - [Cross-browser support](docs/cross-browser.md) — tier matrix + how to run `E2E_BROWSERS=all pnpm e2e`
 - [Steam Deck tuning](docs/steam-deck.md) — Deck-specific runtime concerns (battery, framerate cap, Gaming Mode, profile detection)

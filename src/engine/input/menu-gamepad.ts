@@ -14,7 +14,14 @@
  *
  * Distinct from `gamepadIntent()` which maps the pad to race controls.
  * This module is only active while a menu is showing.
+ *
+ * Reads through `activeGamepad()` so the indices above hold on pads the
+ * browser exposes with a non-standard layout (2026 Steam Controller /
+ * Steam Deck raw mode) — without it, those pads' D-pad landed on
+ * buttons 16–19 and A on button 3, making every menu unresponsive.
  */
+
+import { activeGamepad } from './pad-profiles'
 
 const NAV_REPEAT_INITIAL_MS = 360
 const NAV_REPEAT_MS = 130
@@ -305,7 +312,7 @@ export function installMenuGamepad(opts: MenuGamepadOpts): MenuGamepad {
       primed = false
       return
     }
-    const pad = navigator.getGamepads?.()?.[0]
+    const pad = activeGamepad()
     if (!pad) return
 
     const lx = pad.axes[0] ?? 0

@@ -48,7 +48,7 @@ export async function createRenderer(parent: HTMLElement): Promise<RendererBundl
   // `?backend=webgl2|webgpu|auto` overrides the adapter probe so the desktop
   // build can be poked at WebGL2 / WebGPU on a single deployed depot — useful
   // when the only iteration loop is "push to Steam, launch on device." The
-  // electron wrapper bridges `HOVERBIKE_BACKEND=…` from Steam launch options
+  // electron wrapper bridges `KINGTIDE_BACKEND=…` from Steam launch options
   // into this same query string. `auto` (the default) takes the probe path.
   const backendOverride = params.get('backend')
   const wantWebGpu = backendOverride !== 'webgl2'

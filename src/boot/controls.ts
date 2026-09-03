@@ -19,6 +19,7 @@ import {
   isAnyOverlayShown,
   type MenuGamepad,
 } from '@/engine/input/menu-gamepad'
+import { activeGamepad } from '@/engine/input/pad-profiles'
 import {
   AUTOPILOT_STATE_EVENT,
   TOUCH_AUTOPILOT_EVENT,
@@ -388,7 +389,7 @@ export function installControls(opts: ControlsOpts): ControlsHandle {
   let prevStart = false
   function watchGamepadStart(): void {
     requestAnimationFrame(watchGamepadStart)
-    const pad = navigator.getGamepads?.()?.[0]
+    const pad = activeGamepad()
     if (!pad) {
       prevStart = false
       return

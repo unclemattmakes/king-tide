@@ -96,6 +96,39 @@ describe('detectSteamDeck', () => {
     expect(d.signals).toEqual(['gamepad'])
   })
 
+  it('detects the Deck built-in pad exposed raw in Desktop-Mode browsers', () => {
+    stubEnv(
+      {
+        userAgent: 'Mozilla/5.0 (X11; Linux x86_64)',
+        getGamepads: () => [{ id: 'Steam Deck (Vendor: 28de Product: 1205)' }],
+      },
+      { innerWidth: 1920, innerHeight: 1080 },
+    )
+    const d = detectSteamDeck()
+    expect(d.isLikelyDeck).toBe(true)
+    expect(d.signals).toEqual(['gamepad'])
+  })
+
+  it('does NOT flag a physical Steam Controller as a Deck (2026 pad on a gaming rig)', () => {
+    // Regression pin: /steam controller/i used to be in the id pattern
+    // list, so plugging a 2026 Steam Controller (or the 2015 one) into a
+    // desktop silently applied the Deck profile — 60 fps cap + fullscreen
+    // preference — to non-Deck hardware.
+    stubEnv(
+      {
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        getGamepads: () => [
+          { id: 'Steam Controller (Vendor: 28de Product: 1302)' },
+          { id: 'Wireless Steam Controller (Vendor: 28de Product: 1304)' },
+        ],
+      },
+      { innerWidth: 1920, innerHeight: 1080 },
+    )
+    const d = detectSteamDeck()
+    expect(d.isLikelyDeck).toBe(false)
+    expect(d.signals).toEqual([])
+  })
+
   it('tolerates a missing getGamepads API without throwing', () => {
     vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0' })
     vi.stubGlobal('window', { innerWidth: 1920, innerHeight: 1080, devicePixelRatio: 1 })

@@ -1,4 +1,11 @@
-# electron-builder config — desktop/Steam packaging for Hoverbike.
+# electron-builder config — desktop/Steam packaging for King Tide.
+#
+# NAMING: this file is the one packaging surface `src/engine/branding.ts`
+# cannot reach (packaging never imports the app), so the product name lives
+# here a second time. Keep it as "King Tide". `appId` is Windows install /
+# upgrade identity — changing it after a public release orphans every
+# installed copy from updates, so it is fixed as of the first release.
+# See docs/naming-and-public-framing.md.
 #
 # Linux ships the `dir` (unpacked) target: Steam wants the installed game
 # tree, not a self-mounting AppImage (AppImages need FUSE, which the Steam
@@ -9,9 +16,9 @@
 # `asar: false` keeps dist/ a real directory tree so the custom-scheme file
 # reads in electron/main.cjs go through the normal filesystem rather than an
 # asar archive (Electron's net.fetch does not read inside asar).
-appId: app.hoverbike
-productName: Hoverbike
-copyright: Hoverbike
+appId: app.kingtide
+productName: King Tide
+copyright: King Tide
 asar: false
 directories:
   output: dist-electron
@@ -22,14 +29,23 @@ files:
 linux:
   target:
     - dir
-  executableName: hoverbike
+  executableName: king-tide
   category: Game
   icon: electron/icons/icon.png
 win:
   target:
     - nsis
   icon: electron/icons/icon.ico
+  # Without this the Windows exe is named from productName, which now contains a
+  # space ("King Tide.exe") — awkward in the Steamworks launch config, in shell
+  # commands and in CI globs. app-builder-lib resolves the exe basename as
+  # `executableName ?? sanitizedProductName` (appInfo.js), so this renames the
+  # binary only; the installer, Start Menu shortcut and Add/Remove Programs
+  # entry all still read "King Tide" from productName.
+  executableName: KingTide
 nsis:
   oneClick: true
   perMachine: false
-  artifactName: ${productName}-${version}-setup.${ext}
+  # Literal rather than ${productName}, for the same no-spaces reason, and kept
+  # matching the exe basename above.
+  artifactName: KingTide-${version}-setup.${ext}

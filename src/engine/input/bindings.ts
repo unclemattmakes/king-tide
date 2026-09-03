@@ -151,6 +151,16 @@ const GAMEPAD_BUTTON_LABEL: Readonly<Record<number, string>> = Object.freeze({
   14: 'D-pad Left',
   15: 'D-pad Right',
   16: 'Home / Guide',
+  // 17+ are the normalized extras pad-profiles.ts exposes on Steam
+  // Controllers / Steam Deck (grips, Quick Access, touchpad clicks) —
+  // only reachable by capturing them on such a pad.
+  17: 'L4 (grip)',
+  18: 'R4 (grip)',
+  19: 'L5 (grip)',
+  20: 'R5 (grip)',
+  21: 'Quick access',
+  22: 'Left pad click',
+  23: 'Right pad click',
 })
 
 export function formatGamepadButton(index: number | null): string {

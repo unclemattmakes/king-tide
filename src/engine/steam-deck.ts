@@ -24,7 +24,16 @@ export const DECK_DEFAULT_FRAMERATE_CAP = 60
 // Steam Input layer reports the virtual controller with one of these
 // id substrings depending on Steam version + Big Picture mode. Match
 // any of them.
-const DECK_GAMEPAD_ID_PATTERNS = [/steam virtual gamepad/i, /steam controller/i, /steam deck/i]
+//
+// Deliberately NOT matched: /steam controller/i. Physical Steam
+// Controllers (2015 "Steam Controller"/"Wireless Steam Controller",
+// and the 2026 models which reuse the same hid-steam device names)
+// plug into any desktop, so their presence is not Deck evidence — with
+// the 2026 pads in the wild, that pattern was silently applying the
+// Deck profile (60 fps cap + fullscreen preference) to gaming rigs.
+// The Deck's built-in pad still matches via "Steam Deck" (Desktop Mode
+// raw) or "Steam Virtual Gamepad" (through Steam Input).
+const DECK_GAMEPAD_ID_PATTERNS = [/steam virtual gamepad/i, /steam deck/i]
 
 /**
  * Check whether the current environment looks like a Steam Deck.
