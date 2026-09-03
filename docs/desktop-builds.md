@@ -86,7 +86,7 @@ electron-builder. Pass-through flags reach electron-builder, e.g.
 Outputs:
 
 ```
-dist-electron/linux-unpacked/            # Linux game tree (binary: hoverbike)
+dist-electron/linux-unpacked/            # Linux game tree (binary: king-tide)
 dist-electron/win-unpacked/              # Windows game tree (King Tide.exe)
 dist-electron/King Tide-<version>-setup.exe   # Windows NSIS installer
 ```
@@ -104,7 +104,7 @@ electron-builder still needs `wine` to stamp the `.exe`, so install
 `.github/workflows/build-desktop.yml` — manual dispatch + tag-
 triggered. Matrix:
 
-- `ubuntu-22.04` → Linux game tree (tarred so the `hoverbike` binary
+- `ubuntu-22.04` → Linux game tree (tarred so the `king-tide` binary
   keeps its `+x` bit through the artifact round-trip)
 - `windows-latest` → Windows NSIS installer + `win-unpacked/` tree
 
@@ -160,15 +160,15 @@ rendering without contacting Steam.
 
 ```sh
 # From your build box — copy the whole tree (scp -r / rsync / USB)
-scp -r dist-electron/linux-unpacked deck@<deck-ip>:/home/deck/Apps/hoverbike
+scp -r dist-electron/linux-unpacked deck@<deck-ip>:/home/deck/Apps/king-tide
 
 # On the Deck (Desktop Mode terminal) — preserve / restore the +x bit
-chmod +x ~/Apps/hoverbike/hoverbike
-~/Apps/hoverbike/hoverbike
+chmod +x ~/Apps/king-tide/king-tide
+~/Apps/king-tide/king-tide
 ```
 
 To exercise the Steam path: Desktop Mode → Steam → Games → "Add a
-Non-Steam Game" → type the path to **`hoverbike-launch.sh`** (the wrapper,
+Non-Steam Game" → type the path to **`king-tide-launch.sh`** (the wrapper,
 not the bare binary) → Add. In its **Properties → Compatibility**, force
 **"Steam Linux Runtime"** (this reproduces the pressure-vessel container a
 real depot launch uses), then launch from Steam. The wrapper handles the
@@ -192,8 +192,8 @@ the `pressure-vessel` container Steam launches games inside) hits a known set
 of issues. These are the ones we hit on-device and how the build handles
 them. The references at the bottom are the canonical write-ups.
 
-### The launch wrapper (`hoverbike-launch.sh`)
-Steam launches **`hoverbike-launch.sh`**, not `hoverbike` directly.
+### The launch wrapper (`king-tide-launch.sh`)
+Steam launches **`king-tide-launch.sh`**, not `king-tide` directly.
 `tools/build-deck.mjs` drops it (plus an `extra-lib/` dir) into the tree
 after electron-builder runs. Before exec'ing the binary it (1) strips the
 crashing Steam overlay from `LD_PRELOAD` and (2) prepends `extra-lib/` to
@@ -202,7 +202,7 @@ crashing Steam overlay from `LD_PRELOAD` and (2) prepends `extra-lib/` to
 ### 1. The Steam overlay segfaults Electron on load
 The overlay is `LD_PRELOAD`-injected as `gameoverlayrenderer.so`. With this
 Electron build its injector **crashes during library init (SIGSEGV) — in
-both Desktop *and* Gaming Mode** (confirmed via `coredumpctl info hoverbike`:
+both Desktop *and* Gaming Mode** (confirmed via `coredumpctl info king-tide`:
 the faulting frames are inside `gameoverlayrenderer.so`, called from
 `ld-linux` while it runs the preloaded lib's constructor). Critically, the
 per-game **"Enable the Steam Overlay" toggle does *not* stop the preload** —
@@ -303,17 +303,17 @@ References: Valve [steam-runtime #579](https://github.com/ValveSoftware/steam-ru
 
 - **Steam says "running" but never shows a window (Linux)** — it's almost
   always a crash that SteamOS is slowly core-dumping, not a true hang. Run
-  `coredumpctl info hoverbike` and read the top frames / the log:
+  `coredumpctl info king-tide` and read the top frames / the log:
   - frames in `gameoverlayrenderer.so` → the Steam overlay; launch via
-    `hoverbike-launch.sh` (strips the overlay preload).
+    `king-tide-launch.sh` (strips the overlay preload).
   - `FATAL ... zygote_host_impl_linux.cc ... Invalid argument (22)` → the
     zygote namespace failure; needs `--no-zygote` (the wrapper + app set it).
   - `chrome-sandbox` errors → `--no-sandbox` missing.
 - **`libcups.so.2: cannot open shared object file`** — the runtime's missing
   libcups; rebuild with `build:deck` (which bundles it into `extra-lib/`) and
   launch via the wrapper.
-- **Tree won't launch after copy / unzip** — the `hoverbike` binary lost its
-  `+x` bit (plain zips strip it). `chmod +x hoverbike`, or transport via
+- **Tree won't launch after copy / unzip** — the `king-tide` binary lost its
+  `+x` bit (plain zips strip it). `chmod +x king-tide`, or transport via
   `tar`/`rsync`, which preserve modes.
 - **`icon not found`** — run `pnpm gen:icons` from a fresh checkout.
 - **Black screen on 3D scenes on the Deck (Windows depot via Proton)** —

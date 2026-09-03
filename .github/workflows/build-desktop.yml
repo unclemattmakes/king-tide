@@ -103,7 +103,7 @@ jobs:
           ASSET_DIR: dist/assets
         run: node tools/check-assets-present.mjs
 
-      # tar preserves the executable bit on the `hoverbike` binary — a plain
+      # tar preserves the executable bit on the `king-tide` binary — a plain
       # artifact upload (zip) would strip it and Steam would ship a tree that
       # won't launch.
       - name: Package Linux tree

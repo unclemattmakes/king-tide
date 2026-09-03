@@ -87,6 +87,18 @@ linked docs — extend those rather than growing this file.
    `tests/unit/asset-kinds.test.ts` fails if they drift. Add a value to **both**
    sides and use the `ExportedKind.*` constants, not string literals.
 
+6. **Never global-rename `hoverbike` → `king-tide`.** The name is settled
+   (King Tide, 2026-08-16) and every *player-facing* surface already says so.
+   But `hoverbike` is still 210 files, and most are **live identifiers, not
+   branding**: the R2 bucket + CDN domain, the PartyKit host, every
+   `localStorage` key (renaming wipes player progress), the `hoverbike_*`
+   Blender custom props **baked into the `.blend` files**, and the private
+   archive repo that this repo was cut from. Read
+   [naming-and-public-framing.md](docs/naming-and-public-framing.md) first — it
+   says which of the four categories each occurrence is in, and which one
+   (`electron-builder.yml`'s `productName`/`appId`) is a real bug with a
+   closing window.
+
 ## Current direction (v2) — orientation only; detail in the docs
 
 Web-first arcade hover-bike racer; near-future post-warming world where every

@@ -4,7 +4,7 @@
 // handles install/uninstall via the depot manifest. tools/steam-upload.mjs
 // stages the electron-builder win-unpacked tree (Chromium bundled) into
 // content/windows/. Set the App's Windows launch executable to
-// `Hoverbike.exe` in the Steamworks backend.
+// `KingTide.exe` in the Steamworks backend.
 "DepotBuildConfig"
 {
 	"DepotID"		"${STEAM_DEPOT_WINDOWS}"

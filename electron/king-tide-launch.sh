@@ -2,7 +2,7 @@
 # Steam / Linux launch wrapper for the Electron build.
 #
 # Point the Steamworks *Linux* launch executable at THIS script, not at
-# `hoverbike` directly. It does two things the Steam Linux Runtime (sniper)
+# `king-tide` directly. It does two things the Steam Linux Runtime (sniper)
 # forces on us — see docs/desktop-builds.md "Steam Deck / Linux runtime
 # gotchas" for the full story:
 #
@@ -46,4 +46,4 @@ fi
 # --no-zygote: the zygote's namespace setup hits EINVAL inside the
 #   pressure-vessel container (FATAL in zygote_host_impl_linux.cc); dropping
 #   the zygote fork model avoids it. Must be paired with --no-sandbox.
-exec "$HERE/hoverbike" --no-sandbox --no-zygote "$@"
+exec "$HERE/king-tide" --no-sandbox --no-zygote "$@"

@@ -204,10 +204,22 @@ and **drop-ins**, not slides-with-fade. One pop per element per event; no
 idle pulsing except the focus glow and the CTA blink. Reduced-motion rules
 flatten everything, as before.
 
-## The name — pitch
+## The name — decided 2026-08-16: **King Tide**
 
-"King Tide" is a placeholder; the prior key-art pass left **TIDE RIDERS** as
-lead. Pitch, with the UI/logo consequences considered:
+> **Settled. Do not re-open.** Matt confirmed **King Tide** on 2026-08-16, and
+> two independent records agree: `src/engine/branding.ts` in this repo, and
+> `CADENCE.md` in the site repo ("King Tide (was Hoverbike), renamed
+> 2026-08-16"). The site card, its slug and its image folder were renamed that
+> day. **Hoverbike** is the working title and the name of the private archive
+> repo ([open-source-plan](open-source-plan.md)) — not an alternative.
+>
+> The pitch below is kept as the record of *how* the decision got made. It is
+> history, not an open question, and the table's runners-up are not live
+> options. Where the old name still appears in this repo — and why most of
+> those occurrences must **not** be renamed — see
+> [naming-and-public-framing](naming-and-public-framing.md).
+
+Pitch as written, with the UI/logo consequences considered:
 
 | Name | Read | Notes |
 |---|---|---|
@@ -220,7 +232,15 @@ lead. Pitch, with the UI/logo consequences considered:
 **Wired in:** `src/engine/branding.ts` exports `GAME_TITLE` (currently
 `KING TIDE`) + tagline — title screen, lobby overlay, loading screen, and the
 HTML `<title>` all read from it (the two static `index.html` strings are
-flagged with comments). Changing the name is a one-file edit.
+flagged with comments, and both already read `KING TIDE`).
+
+Changing the **wordmark** is a one-file edit. Changing the **name** is not:
+`hoverbike` is also the R2 bucket, the PartyKit host, every `localStorage`
+key, the Blender custom-property namespace baked into the `.blend` files, and
+the Electron `productName`. Those are live identifiers with migration costs,
+not branding. Read
+[naming-and-public-framing](naming-and-public-framing.md) before touching any
+of them.
 
 ## Verification
 

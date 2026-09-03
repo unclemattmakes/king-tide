@@ -1,6 +1,6 @@
 # Steam — SteamPipe upload layer
 
-Everything needed to push a Hoverbike build to Steam via Valve's
+Everything needed to push a King Tide build to Steam via Valve's
 SteamPipe content system. See
 [`docs/desktop-builds.md`](../docs/desktop-builds.md) for the full
 desktop pipeline this slots into; this folder just owns the
@@ -187,7 +187,7 @@ STEAM_SET_LIVE=beta pnpm steam:upload
 The script auto-discovers the electron-builder unpacked tree at
 `dist-electron/win-unpacked/`. Override via `WINDOWS_BUNDLE_DIR=path/to/tree/`
 if you've moved it. Set the Windows launch executable in the Steamworks
-backend to `Hoverbike.exe`.
+backend to `KingTide.exe`.
 
 ## CI upload (release-steam.yml)
 
@@ -230,7 +230,7 @@ there a human picks a branch to set live.
 - **`Two-factor code required`** — pre-baked `config.vdf` is missing
   or expired. Re-bake per the "First-time setup" recipe.
 - **`No DRM Wrapping for AppID … on Linux`** — only fires if you
-  asked for DRM via the Steamworks backend. Hoverbike doesn't use
+  asked for DRM via the Steamworks backend. King Tide doesn't use
   it today; ignore.
 - **`No connection to Steam`** — runner can't reach Steam's CDN.
   Usually transient; retry.

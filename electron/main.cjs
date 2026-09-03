@@ -98,18 +98,18 @@ protocol.registerSchemesAsPrivileged([
 const ON_DECK = process.env.SteamDeck === '1'
 
 // Bridge for diagnostic overrides set via Steam launch options:
-//   HOVERBIKE_BACKEND=webgl2  %command%   # force WebGL2 even when WebGPU is available
-//   HOVERBIKE_BACKEND=webgpu  %command%   # force WebGPU adapter probe path
+//   KINGTIDE_BACKEND=webgl2  %command%   # force WebGL2 even when WebGPU is available
+//   KINGTIDE_BACKEND=webgpu  %command%   # force WebGPU adapter probe path
 // The renderer (src/engine/render/renderer.ts) reads `?backend=…` and respects
 // the override. Proton bridges Linux env vars into the Wine process, so this
 // works for the Windows depot launched on the Deck too.
-const BACKEND_OVERRIDE = (process.env.HOVERBIKE_BACKEND || '').toLowerCase()
+const BACKEND_OVERRIDE = (process.env.KINGTIDE_BACKEND || '').toLowerCase()
 const VALID_BACKENDS = new Set(['webgl2', 'webgpu', 'auto'])
 const backendQuery =
   BACKEND_OVERRIDE && VALID_BACKENDS.has(BACKEND_OVERRIDE) ? `?backend=${BACKEND_OVERRIDE}` : ''
 if (BACKEND_OVERRIDE && !backendQuery) {
   console.warn(
-    `[main] ignoring HOVERBIKE_BACKEND='${BACKEND_OVERRIDE}' — expected one of ${[
+    `[main] ignoring KINGTIDE_BACKEND='${BACKEND_OVERRIDE}' — expected one of ${[
       ...VALID_BACKENDS,
     ].join('|')}`,
   )
@@ -117,7 +117,7 @@ if (BACKEND_OVERRIDE && !backendQuery) {
 
 function createWindow() {
   const win = new BrowserWindow({
-    title: 'Hoverbike',
+    title: 'King Tide',
     width: 1280,
     height: 800,
     minWidth: 960,
